@@ -32,11 +32,11 @@ version_info = VSVersionInfo(
                     [
                         StringStruct("CompanyName", "peshk0v"),
                         StringStruct("FileDescription", "Zapret-Zen"),
-                        StringStruct("FileVersion", "2.0.0"),
+                        StringStruct("FileVersion", "2.1.0"),
                         StringStruct("InternalName", "zapret_zen"),
                         StringStruct("OriginalFilename", "zapret_zen.exe"),
                         StringStruct("ProductName", "Zapret-Zen"),
-                        StringStruct("ProductVersion", "2.0.0"),
+                        StringStruct("ProductVersion", "2.1b"),
                         StringStruct("Publisher", "peshk0v"),
                     ],
                 )

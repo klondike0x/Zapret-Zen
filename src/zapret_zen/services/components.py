@@ -28,7 +28,7 @@ from zapret_zen.domain import ComponentDefinition, ComponentState
 from zapret_zen.runtime_env import is_packaged_runtime
 from zapret_zen.services.github_network import GitHubNetworkClient, is_recoverable_github_error
 from zapret_zen.services.logging_service import LoggingManager
-from zapret_zen.services.service_catalog import prioritize_generals_for_services
+from zapret_zen.services.service_catalog import ALWAYS_APPLY_SERVICE_IDS, prioritize_generals_for_services
 from zapret_zen.services.service_rules import SERVICE_RULES
 from zapret_zen.services.settings import SettingsManager
 from zapret_zen.services.storage import StorageManager
@@ -1247,8 +1247,7 @@ Get-NetAdapter -ErrorAction SilentlyContinue | ForEach-Object {
 
     def _apply_selected_service_rules(self, active_root: Path) -> None:
         selected_ids = list(self.settings.get().selected_service_ids or [])
-        if not selected_ids:
-            return
+        selected_ids = list(dict.fromkeys([*ALWAYS_APPLY_SERVICE_IDS, *selected_ids]))
         lists_dir = active_root / "lists"
         lists_dir.mkdir(parents=True, exist_ok=True)
         mapping = {
@@ -1301,6 +1300,7 @@ Get-NetAdapter -ErrorAction SilentlyContinue | ForEach-Object {
 
     def _merge_selected_service_hosts(self, active_root: Path) -> None:
         selected_ids = list(self.settings.get().selected_service_ids or [])
+        selected_ids = list(dict.fromkeys([*ALWAYS_APPLY_SERVICE_IDS, *selected_ids]))
         incoming: list[str] = []
         for service_id in selected_ids:
             rule = SERVICE_RULES.get(str(service_id))
@@ -2093,7 +2093,7 @@ Get-NetAdapter -ErrorAction SilentlyContinue | ForEach-Object {
                 str(target.get("url") or target.get("host") or target.get("name") or ""),
             )
             seen.add(marker)
-        for service_id in self.settings.get().selected_service_ids or []:
+        for service_id in list(dict.fromkeys([*ALWAYS_APPLY_SERVICE_IDS, *list(self.settings.get().selected_service_ids or [])])):
             rule = SERVICE_RULES.get(str(service_id))
             if rule is None:
                 continue
@@ -2140,7 +2140,7 @@ Get-NetAdapter -ErrorAction SilentlyContinue | ForEach-Object {
                     if any(domain.split(".", 1)[0] in name for domain in domains):
                         matched_service = service_id
                         break
-            if matched_service and matched_service not in selected:
+            if matched_service and matched_service not in selected and str(matched_service) not in ALWAYS_APPLY_SERVICE_IDS:
                 continue
             filtered.append(target)
         return filtered

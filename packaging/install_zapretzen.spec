@@ -14,8 +14,8 @@ from PyInstaller.utils.win32.versioninfo import (
 project_root = Path(SPECPATH).resolve().parent
 version_info = VSVersionInfo(
     ffi=FixedFileInfo(
-        filevers=(1, 4, 2, 0),
-        prodvers=(1, 4, 2, 0),
+        filevers=(2, 0, 0, 0),
+        prodvers=(2, 0, 0, 0),
         mask=0x3F,
         flags=0x0,
         OS=0x40004,
@@ -31,11 +31,11 @@ version_info = VSVersionInfo(
                     [
                         StringStruct("CompanyName", "peshk0v"),
                         StringStruct("FileDescription", "Zapret-Zen Installer"),
-                        StringStruct("FileVersion", "1.4.2"),
+                        StringStruct("FileVersion", "2.1.0"),
                         StringStruct("InternalName", "install_zapretzen"),
                         StringStruct("OriginalFilename", "install_zapretzen.exe"),
                         StringStruct("ProductName", "Zapret-Zen"),
-                        StringStruct("ProductVersion", "1.4.2"),
+                        StringStruct("ProductVersion", "2.1b"),
                         StringStruct("Publisher", "peshk0v"),
                     ],
                 )
@@ -52,7 +52,7 @@ datas = [
 
 a = Analysis(
     [str(project_root / "installer" / "install_zapretzen.py")],
-    pathex=[str(project_root / "src")],
+    pathex=[str(project_root), str(project_root / "src")],
     binaries=[],
     datas=datas,
     hiddenimports=[],

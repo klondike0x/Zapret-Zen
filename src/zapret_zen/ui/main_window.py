@@ -16,10 +16,14 @@ from pathlib import Path
 from zapret_zen import __version__
 from zapret_zen.domain import ComponentDefinition, ComponentState, FileRecord, NotificationEntry
 from zapret_zen.services.service_catalog import (
+    ALWAYS_APPLY_SERVICE_IDS,
     FORTNITE_GENERAL_PRIORITY,
+    SERVICE_CATEGORIES,
     SERVICE_PRESETS,
+    ServiceCategory,
     ServicePreset,
     prioritize_generals_for_services,
+    service_ids_in_categories,
 )
 from PySide6.QtCore import QCoreApplication, QEasingCurve, QEvent, QEventLoop, QObject, QPoint, QPointF, QRect, QRectF, QSize, QSizeF, Qt, QTimer, Signal, QPropertyAnimation, QParallelAnimationGroup, Property, QByteArray
 from PySide6.QtGui import QAction, QActionGroup, QColor, QCloseEvent, QFont, QFontDatabase, QFontMetrics, QIcon, QImage, QKeyEvent, QLinearGradient, QMouseEvent, QPainter, QPainterPath, QPen, QPixmap, QRadialGradient, QRegion, QTextCharFormat, QTextCursor, QTextDocument
@@ -913,6 +917,314 @@ class ServiceCardFrame(QFrame):
     def _set_press_progress(self, value: float) -> None:
         self._press_progress = float(value)
         self.update()
+
+    burstProgress = Property(float, _get_burst_progress, _set_burst_progress)
+    pressProgress = Property(float, _get_press_progress, _set_press_progress)
+
+
+class ServiceCategoryCard(QFrame):
+    toggled = Signal(str, bool)
+
+    CATEGORY_ACCENTS: dict[str, str] = {
+        "gaming": "#7c5cff",
+        "socials": "#5865f2",
+        "workplace": "#4f73d9",
+    }
+
+    def __init__(self, category: ServiceCategory, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.category = category
+        self._selected = False
+        self._theme = "dark"
+        self._icon_pixmap = QPixmap()
+        self._check_pixmap = QPixmap()
+        self._visual_scope = "main"
+        self._burst_progress = 0.0
+        self._press_progress = 0.0
+        self._burst_anim: QPropertyAnimation | None = None
+        self._press_anim: QPropertyAnimation | None = None
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setMinimumSize(220, 180)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, False)
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(16, 16, 16, 16)
+        root.setSpacing(6)
+
+        top = QHBoxLayout()
+        top.setContentsMargins(0, 0, 0, 0)
+        top.setSpacing(6)
+        self._icon_label = QLabel()
+        self._icon_label.setFixedSize(28, 28)
+        self._icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        top.addWidget(self._icon_label, 0, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        top.addStretch(1)
+        self._selected_label = QLabel()
+        self._selected_label.setFixedSize(18, 18)
+        self._selected_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        top.addWidget(self._selected_label, 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop)
+        root.addLayout(top)
+
+        self._title_label = QLabel()
+        self._title_label.setWordWrap(True)
+        self._title_label.setProperty("class", "title")
+        root.addWidget(self._title_label)
+
+        self._desc_label = QLabel()
+        self._desc_label.setWordWrap(True)
+        self._desc_label.setProperty("class", "muted")
+        root.addWidget(self._desc_label)
+
+        root.addStretch(1)
+
+        self._members_frame = QFrame()
+        self._members_frame.setObjectName("membersFrame")
+        mf = QVBoxLayout(self._members_frame)
+        mf.setContentsMargins(10, 6, 10, 6)
+        mf.setSpacing(0)
+        self._members_label = QLabel()
+        self._members_label.setWordWrap(True)
+        mf.addWidget(self._members_label)
+        root.addWidget(self._members_frame)
+
+    def set_card_width(self, width: int) -> None:
+        self.setMinimumWidth(max(160, min(width, 320)))
+
+    def set_visual_scope(self, scope: str) -> None:
+        self._visual_scope = "onboarding" if scope == "onboarding" else "main"
+        root = self.layout()
+        if isinstance(root, QVBoxLayout):
+            pad = 20 if self._visual_scope == "onboarding" else 16
+            root.setContentsMargins(pad, pad, pad, pad)
+            root.setSpacing(9 if self._visual_scope == "onboarding" else 8)
+        self._sync_style()
+        self.updateGeometry()
+        self.update()
+
+    def set_theme(self, theme: str) -> None:
+        self._theme = theme
+        self._sync_style()
+        self.update()
+
+    def set_icon_pixmap(self, pixmap: QPixmap) -> None:
+        self._icon_pixmap = pixmap
+        self._icon_label.setPixmap(self._compose_slot_pixmap(pixmap, self._icon_label.size(), 1.0))
+
+    def set_check_pixmap(self, pixmap: QPixmap) -> None:
+        self._check_pixmap = pixmap
+        if self._selected:
+            self._selected_label.setPixmap(self._compose_slot_pixmap(pixmap, self._selected_label.size(), 0.56))
+
+    def set_selected(self, selected: bool) -> None:
+        if self._selected == bool(selected):
+            return
+        self._selected = bool(selected)
+        self._sync_style()
+        self.update()
+
+    def set_texts(self, title: str, description: str, members_text: str) -> None:
+        self._title_label.setText(title)
+        self._desc_label.setText(description)
+        self._members_label.setText(members_text)
+
+    def mouseReleaseEvent(self, event: QMouseEvent) -> None:
+        super().mouseReleaseEvent(event)
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._play_select_feedback()
+            self.toggled.emit(self.category.id, not self._selected)
+
+    def paintEvent(self, event: QEvent) -> None:
+        super().paintEvent(event)
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        shrink = 1.8 * self._press_progress
+        glow_pad = 6.0 if self._visual_scope == "onboarding" else 0.0
+        rect = QRectF(self.rect()).adjusted(0.5 + glow_pad + shrink, 0.5 + glow_pad + shrink, -0.5 - glow_pad - shrink, -0.5 - glow_pad - shrink)
+        card_radius = 12.0
+        accent = self._category_accent()
+        light = self._visual_scope == "onboarding" or is_light_theme(self._theme)
+        base_fill = QColor("#ffffff") if light else QColor("#141922" if self._theme == "night" else "#171b20")
+        if self._theme == "oled" and not self._visual_scope == "onboarding":
+            base_fill = QColor("#111418")
+        fill = QColor(base_fill)
+        border = QColor("#d9e3f1" if light else "#252d38")
+        if self._selected and self._visual_scope == "onboarding":
+            fill = QColor(base_fill.lighter(102 if light else 106))
+            border = QColor(accent)
+            border.setAlpha(112 if light else 96)
+        elif self._selected:
+            fill = QColor(base_fill.lighter(102 if light else 106))
+            border = QColor(accent)
+            border.setAlpha(112 if light else 96)
+        if self._selected and self._visual_scope == "onboarding":
+            painter.save()
+            painter.setPen(Qt.PenStyle.NoPen)
+            glow_spread = 4.0
+            outer_radius = card_radius + glow_spread * 1.35
+            outer_glow_rect = rect.adjusted(-glow_spread, -glow_spread, glow_spread, glow_spread)
+            glow = QRadialGradient(
+                rect.center(),
+                max(outer_glow_rect.width(), outer_glow_rect.height()) * 0.86,
+            )
+            glow_color = QColor(accent)
+            glow_color.setAlpha(36 if light else 48)
+            glow.setColorAt(0.0, QColor(glow_color.red(), glow_color.green(), glow_color.blue(), max(12, glow_color.alpha() // 3)))
+            glow.setColorAt(0.50, glow_color)
+            glow.setColorAt(1.0, QColor(glow_color.red(), glow_color.green(), glow_color.blue(), 0))
+            painter.setBrush(glow)
+            painter.drawRoundedRect(outer_glow_rect, outer_radius, outer_radius)
+            painter.restore()
+        painter.setPen(QPen(border, 1.0))
+        painter.setBrush(fill)
+        painter.drawRoundedRect(rect, card_radius, card_radius)
+
+        glow = QRadialGradient(rect.left() + 40, rect.top() + 30, max(rect.width(), rect.height()) * 0.72)
+        glow_color = QColor(accent)
+        glow_color.setAlpha(18 if self._selected else 0)
+        glow.setColorAt(0.0, glow_color)
+        glow.setColorAt(1.0, QColor(glow_color.red(), glow_color.green(), glow_color.blue(), 0))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(glow)
+        painter.drawRoundedRect(rect, card_radius, card_radius)
+        if self._burst_progress > 0.0:
+            self._paint_burst(painter, accent)
+
+    def _category_accent(self) -> QColor:
+        return QColor(self.CATEGORY_ACCENTS.get(self.category.id, "#4f73d9"))
+
+    def _paint_burst(self, painter: QPainter, accent: QColor) -> None:
+        progress = max(0.0, min(1.0, self._burst_progress))
+        opacity = int(145 * (1.0 - progress))
+        if opacity <= 0:
+            return
+        origin = QPointF(30.0, 28.0)
+        try:
+            icon_center = self._icon_label.mapTo(self, self._icon_label.rect().center())
+            origin = QPointF(float(icon_center.x()), float(icon_center.y()))
+        except Exception:
+            pass
+        painter.save()
+        painter.setPen(Qt.PenStyle.NoPen)
+        for index in range(7):
+            angle = (-140 + index * 46) * math.pi / 180.0
+            distance = 8.0 + 28.0 * progress
+            radius = 2.8 - 1.1 * progress + (0.35 if index % 2 else 0.0)
+            color = QColor(accent)
+            color.setAlpha(max(0, opacity - index * 6))
+            point = QPointF(
+                origin.x() + math.cos(angle) * distance,
+                origin.y() + math.sin(angle) * distance,
+            )
+            painter.setBrush(color)
+            painter.drawEllipse(point, max(1.1, radius), max(1.1, radius))
+        painter.restore()
+
+    def _sync_style(self) -> None:
+        onboarding = self._visual_scope == "onboarding"
+        accent = self._category_accent()
+        selected = bool(self._selected)
+        text_color = "#142033" if (onboarding or is_light_theme(self._theme)) else ("#f2f6ff" if selected else "#d2d9e5")
+        muted_color = "#5f6f86" if (onboarding or is_light_theme(self._theme)) else ("#c0ccdc" if selected else "#8d99aa")
+        desc_color = "#3a4a62" if (onboarding or is_light_theme(self._theme)) else ("#a0b0c8" if selected else "#6f7f95")
+        if self._selected:
+            muted_color = "#334154" if (onboarding or is_light_theme(self._theme)) else "#d5def0"
+        frame_bg = "rgba(255,255,255,0.06)" if not (onboarding or is_light_theme(self._theme)) else "rgba(0,0,0,0.04)"
+        if self._selected and not (onboarding or is_light_theme(self._theme)):
+            frame_bg = "rgba(255,255,255,0.10)"
+        self._title_label.setStyleSheet(f"color: {text_color}; background: transparent; font-size: 17px; font-weight: 700;")
+        self._desc_label.setStyleSheet(f"color: {desc_color}; background: transparent; font-size: 13px; font-weight: 500;")
+        self._members_label.setStyleSheet(f"color: {muted_color}; background: transparent; font-size: 11px;")
+        self._members_frame.setStyleSheet(
+            f"#membersFrame {{ background: {frame_bg}; border-radius: 8px; border: none; }}"
+        )
+        if self._selected:
+            self._selected_label.setText("")
+            if not self._check_pixmap.isNull():
+                self._selected_label.setPixmap(
+                    self._compose_slot_pixmap(self._check_pixmap, self._selected_label.size(), 0.56)
+                )
+            self._selected_label.setStyleSheet(
+                f"background: {accent.name(QColor.NameFormat.HexArgb)};"
+                "border-radius: 9px;"
+                "padding: 0px;"
+                "margin: 0px;"
+            )
+        else:
+            self._selected_label.setText("")
+            self._selected_label.setPixmap(QPixmap())
+            self._selected_label.setStyleSheet("background: transparent;")
+
+    def _play_select_feedback(self) -> None:
+        if self._press_anim is not None:
+            self._press_anim.stop()
+        press = QPropertyAnimation(self, b"pressProgress", self)
+        press.setDuration(170)
+        press.setStartValue(0.0)
+        press.setKeyValueAt(0.45, 1.0)
+        press.setEndValue(0.0)
+        press.setEasingCurve(QEasingCurve.Type.OutCubic)
+        press.start()
+        self._press_anim = press
+
+        if self._burst_anim is not None:
+            self._burst_anim.stop()
+        burst = QPropertyAnimation(self, b"burstProgress", self)
+        burst.setDuration(420)
+        burst.setStartValue(0.0)
+        burst.setEndValue(1.0)
+        burst.setEasingCurve(QEasingCurve.Type.OutCubic)
+        burst.start()
+        self._burst_anim = burst
+
+    def _get_burst_progress(self) -> float:
+        return self._burst_progress
+
+    def _set_burst_progress(self, value: float) -> None:
+        self._burst_progress = float(value)
+        self.update()
+
+    def _get_press_progress(self) -> float:
+        return self._press_progress
+
+    def _set_press_progress(self, value: float) -> None:
+        self._press_progress = float(value)
+        self.update()
+
+    def _compose_slot_pixmap(self, pixmap: QPixmap, slot_size: QSize, fill_ratio: float) -> QPixmap:
+        if pixmap.isNull() or not slot_size.isValid():
+            return pixmap
+        dpr = max(1.0, float(pixmap.devicePixelRatio()))
+        logical_width = float(slot_size.width())
+        logical_height = float(slot_size.height())
+        physical_width = max(1, int(round(logical_width * dpr)))
+        physical_height = max(1, int(round(logical_height * dpr)))
+        canvas = QPixmap(physical_width, physical_height)
+        canvas.fill(Qt.GlobalColor.transparent)
+        canvas.setDevicePixelRatio(dpr)
+        painter = QPainter(canvas)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+        if hasattr(QPainter.RenderHint, "LosslessImageRendering"):
+            painter.setRenderHint(QPainter.RenderHint.LosslessImageRendering, True)
+        source_size = pixmap.deviceIndependentSize() if hasattr(pixmap, "deviceIndependentSize") else QSizeF(
+            float(pixmap.width()) / max(1.0, float(pixmap.devicePixelRatio())),
+            float(pixmap.height()) / max(1.0, float(pixmap.devicePixelRatio())),
+        )
+        target_width = float(source_size.width())
+        target_height = float(source_size.height())
+        max_box = min(logical_width, logical_height) * max(0.1, min(1.0, float(fill_ratio)))
+        if target_width > 0.0 and target_height > 0.0:
+            scale = min(max_box / target_width, max_box / target_height, 1.0)
+            target_width *= scale
+            target_height *= scale
+        painter.drawPixmap(
+            QRectF((logical_width - target_width) / 2.0, (logical_height - target_height) / 2.0, target_width, target_height),
+            pixmap,
+            QRectF(0, 0, pixmap.width(), pixmap.height()),
+        )
+        painter.end()
+        return canvas
 
     burstProgress = Property(float, _get_burst_progress, _set_burst_progress)
     pressProgress = Property(float, _get_press_progress, _set_press_progress)
@@ -3304,7 +3616,7 @@ class MainWindow(QMainWindow):
         self._onboarding_services_grid: ServiceGridPanel | None = None
         self._onboarding_services_scroll: QScrollArea | None = None
         self._onboarding_services_fade: ScrollFadeOverlay | None = None
-        self._onboarding_services_minimum = 3
+        self._onboarding_services_minimum = 1
         self._onboarding_transition_busy = False
         self._onboarding_transition_token = 0
         self._onboarding_manual_restart = False
@@ -3505,6 +3817,8 @@ class MainWindow(QMainWindow):
         self._service_icon_cache: dict[str, QPixmap] = {}
         self._service_check_cache: dict[str, QPixmap] = {}
         self._service_cards_by_id: dict[str, list[ServiceCardFrame]] = {}
+        self._category_cards: list[ServiceCategoryCard] = []
+        self._onboarding_category_cards: list[ServiceCategoryCard] = []
         self._nav_items = [
             NavItem("home", "home.svg", self._t("Главная", "Dashboard")),
             NavItem("services", "services.svg", self._t("Сервисы", "Services")),
@@ -3732,14 +4046,8 @@ class MainWindow(QMainWindow):
     def _schedule_onboarding_services_prewarm(self) -> None:
         if self._onboarding_services_prewarm_done or self._onboarding_services_prewarm_scheduled:
             return
-        queue: list[tuple[str, str, int, bool] | tuple[str, int]] = []
-        for preset in SERVICE_PRESETS:
-            queue.append(("icon", preset.id, 34, False))
-            queue.append(("icon", preset.id, 34, True))
-        queue.append(("check", 10))
-        self._onboarding_services_prewarm_queue = queue
         self._onboarding_services_prewarm_scheduled = True
-        QTimer.singleShot(0, self._run_onboarding_services_prewarm_batch)
+        self._onboarding_services_prewarm_done = True
 
     def _prewarm_quick_onboarding_surface(self) -> None:
         if self._onboarding_quick_prewarm_done or self._launch_hidden or self._startup_show_onboarding:
@@ -3760,52 +4068,22 @@ class MainWindow(QMainWindow):
             self._onboarding_quick_restart = False
             self.setUpdatesEnabled(previous_updates)
 
-    def _run_onboarding_services_prewarm_batch(self) -> None:
-        if not self._onboarding_services_prewarm_queue:
-            self._onboarding_services_prewarm_scheduled = False
-            self._onboarding_services_prewarm_done = True
-            return
-        batch_size = 2
-        processed = 0
-        preset_map = {preset.id: preset for preset in SERVICE_PRESETS}
-        while self._onboarding_services_prewarm_queue and processed < batch_size:
-            item = self._onboarding_services_prewarm_queue.pop(0)
-            kind = item[0]
-            if kind == "icon":
-                _, preset_id, size, selected = item
-                preset = preset_map.get(preset_id)
-                if preset is not None:
-                    self._service_icon_pixmap(preset, int(size), selected=bool(selected))
-            elif kind == "check":
-                _, size = item
-                self._service_check_pixmap(int(size))
-            processed += 1
-        QTimer.singleShot(8, self._run_onboarding_services_prewarm_batch)
-
     def _prepare_onboarding_services_surface(self) -> bool:
-        """Готовит карточки сервисов до показа быстрого онбординга."""
-        if self._onboarding_services_grid is None or self._onboarding_services_panel is None:
+        if self._onboarding_services_panel is None:
             return False
         self._prepare_onboarding_services_stage()
         self.refresh_services()
         self._update_service_selection_summary()
-        for widget in (
-            self._onboarding_services_panel,
-            self._onboarding_services_scroll,
-            self._onboarding_services_grid,
-        ):
-            if widget is None:
-                continue
-            widget.ensurePolished()
-            layout = widget.layout()
-            if layout is not None:
-                try:
-                    layout.activate()
-                except Exception:
-                    pass
-            widget.updateGeometry()
+        self._onboarding_services_panel.ensurePolished()
+        layout = self._onboarding_services_panel.layout()
+        if layout is not None:
+            try:
+                layout.activate()
+            except Exception:
+                pass
+        self._onboarding_services_panel.updateGeometry()
         self._relayout_onboarding_content()
-        self._onboarding_services_surface_ready = bool(getattr(self._onboarding_services_grid, "_cards", []))
+        self._onboarding_services_surface_ready = bool(self._onboarding_category_cards)
         return self._onboarding_services_surface_ready
 
     def _prepare_onboarding_services_stage(self) -> None:
@@ -3818,10 +4096,6 @@ class MainWindow(QMainWindow):
             self._ensure_widget_opacity_ready(widget)
         if self._onboarding_services_panel is not None:
             self._onboarding_services_panel.ensurePolished()
-        if self._onboarding_services_scroll is not None:
-            self._onboarding_services_scroll.ensurePolished()
-        if self._onboarding_services_grid is not None:
-            self._onboarding_services_grid.ensurePolished()
         if self._onboarding_service_action_btn is not None:
             self._onboarding_service_action_btn.set_theme(self.context.settings.get().theme)
             self._onboarding_service_action_btn.set_force_light(True)
@@ -4332,10 +4606,8 @@ class MainWindow(QMainWindow):
             progress_width = max(360, min(560, content_width - 80))
             self._onboarding_progress_bar.setFixedWidth(progress_width)
         if self._onboarding_services_panel is not None:
-            scroll_height = max(268, min(356, page_height - 136))
+            scroll_height = max(280, min(420, page_height - 120))
             self._onboarding_services_panel.setFixedSize(content_width, scroll_height)
-            if self._onboarding_services_scroll is not None:
-                self._onboarding_services_scroll.setFixedHeight(scroll_height)
         if self._onboarding_back_btn is not None:
             self._onboarding_back_btn.move(18, 16)
             if self._onboarding_back_btn.isVisible():
@@ -5358,8 +5630,8 @@ class MainWindow(QMainWindow):
 
         subtitle = QLabel(
             self._t(
-                "Выберите приложения, сайты и сервисы, которыми вы пользуетесь.",
-                "Choose the apps, sites, and services you actually use.",
+                "Выберите категории сервисов, которыми вы пользуетесь.",
+                "Choose the service categories you actually use.",
             )
         )
         subtitle.setProperty("class", "muted")
@@ -5399,13 +5671,15 @@ class MainWindow(QMainWindow):
         canvas.setObjectName("ServicesCanvas")
         canvas.setProperty("class", "pageCanvas")
         canvas_layout = QVBoxLayout(canvas)
-        canvas_layout.setContentsMargins(1, 0, 1, 14)
+        canvas_layout.setContentsMargins(0, 14, 0, 14)
         canvas_layout.setSpacing(0)
-        grid = ServiceGridPanel(base_columns=4, min_card_width=166, offset_pattern=(0,), horizontal_spacing=12, vertical_spacing=12)
-        grid.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-        grid.set_cards(self._create_service_cards(scope="main"))
-        self._services_grid = grid
-        canvas_layout.addWidget(grid)
+        cards_layout = QHBoxLayout()
+        cards_layout.setContentsMargins(0, 0, 0, 0)
+        cards_layout.setSpacing(16)
+        self._category_cards = self._create_category_cards(scope="main")
+        for card in self._category_cards:
+            cards_layout.addWidget(card, 1)
+        canvas_layout.addLayout(cards_layout)
         scroll.setWidget(canvas)
         self._register_scroll_fade(scroll, surface_color=_content_surface_color(self.context.settings.get().theme))
         self._register_smooth_scroll(scroll, duration=250, angle_divisor=3.0)
@@ -5419,93 +5693,39 @@ class MainWindow(QMainWindow):
         panel.hide()
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(0)
+        layout.setSpacing(8)
 
         count = QLabel("")
         count.setAlignment(Qt.AlignmentFlag.AlignCenter)
         count.setProperty("class", "muted")
         count.hide()
         self._onboarding_services_count_label = count
+        layout.addWidget(count)
 
-        scroll = QScrollArea()
-        scroll.setObjectName("OnboardingServicesScroll")
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.Shape.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
-        scroll.setMinimumHeight(294)
-        scroll.setMaximumHeight(364)
-        canvas = QWidget()
-        canvas.setObjectName("OnboardingServicesCanvas")
-        canvas.setProperty("class", "pageCanvas")
-        canvas_layout = QVBoxLayout(canvas)
-        canvas_layout.setContentsMargins(0, 16, 0, 84)
-        canvas_layout.setSpacing(0)
-        search_input = QLineEdit()
-        search_input.setPlaceholderText(self._t("Поиск сервисов...", "Search services..."))
-        search_input.setClearButtonEnabled(True)
-        search_input.setFixedWidth(320)
-        search_input.setMinimumHeight(34)
-        search_input.setStyleSheet(
-            "QLineEdit {"
-            "background: rgba(255,255,255,0.85);"
-            "border: 1px solid #bfd2f0;"
-            "border-radius: 10px;"
-            "padding: 4px 10px;"
-            "color: #111827;"
-            "font-size: 10pt;"
-            "}"
-            "QLineEdit:focus {"
-            "border: 1px solid #4f73d9;"
-            "}"
-        )
-        self._onboarding_services_search = search_input
-        canvas_layout.addWidget(search_input, 0, Qt.AlignmentFlag.AlignHCenter)
-
-        grid = ServiceGridPanel(base_columns=5, min_card_width=150, offset_pattern=(10, 0, 10, 0, 10), horizontal_spacing=8, vertical_spacing=8)
-        grid.set_cards(self._create_service_cards(scope="onboarding"))
-        self._onboarding_services_grid = grid
-        canvas_layout.addWidget(grid)
-
-        search_input.textChanged.connect(lambda text: self._filter_onboarding_services(text))
-
-        scroll.setWidget(canvas)
-        fade = self._register_scroll_fade(scroll, surface_color=_chrome_surface_color(self.context.settings.get().theme))
-        fade.set_fade_height(58)
-        fade.set_edges(top=True, bottom=True)
-        self._onboarding_services_fade = fade
-        self._register_smooth_scroll(scroll, duration=260, angle_divisor=3.2)
-        self._onboarding_services_scroll = scroll
-        layout.addWidget(scroll, 1)
+        cards_layout = QHBoxLayout()
+        cards_layout.setContentsMargins(0, 0, 0, 0)
+        cards_layout.setSpacing(16)
+        self._onboarding_category_cards = self._create_category_cards(scope="onboarding")
+        for card in self._onboarding_category_cards:
+            cards_layout.addWidget(card, 1)
+        layout.addLayout(cards_layout, 1)
         return panel
 
-    def _filter_onboarding_services(self, text: str) -> None:
-        query = str(text or "").strip().lower()
-        grid = self._onboarding_services_grid
-        if grid is None:
-            return
-        for card in grid._cards:
-            match = not query or query in card.preset.title_ru.lower() or query in card.preset.title_en.lower()
-            card.setVisible(match)
-
-    def _create_service_cards(self, *, scope: str) -> list[ServiceCardFrame]:
-        cards: list[ServiceCardFrame] = []
+    def _create_category_cards(self, *, scope: str) -> list[ServiceCategoryCard]:
+        cards: list[ServiceCategoryCard] = []
         theme = self.context.settings.get().theme
         selected = set(self._selected_service_ids())
-        for preset in SERVICE_PRESETS:
-            card = ServiceCardFrame(preset)
+        for cat in SERVICE_CATEGORIES:
+            card = ServiceCategoryCard(cat)
             card.set_visual_scope(scope)
-            title, description = self._service_card_texts(preset, scope=scope)
-            is_selected = preset.id in selected
-            card.set_texts(title, description)
-            card.set_icon_pixmap(self._service_icon_pixmap(preset, 34, selected=is_selected, onboarding=scope == "onboarding"))
+            is_selected = any(sid in selected for sid in cat.member_ids)
+            card.set_texts(cat.title_en, self._t(cat.description_ru, cat.description_en), self._category_card_members_text(cat))
+            card.set_icon_pixmap(self._category_card_icon_pixmap(cat, 28, selected=is_selected, onboarding=scope == "onboarding"))
             card.set_check_pixmap(self._service_check_pixmap(10))
             card.set_theme(theme)
             card.set_selected(is_selected)
-            card.setProperty("serviceScope", scope)
-            card.toggled.connect(self._on_service_card_toggled)
+            card.toggled.connect(self._on_category_card_toggled)
             cards.append(card)
-            self._service_cards_by_id.setdefault(preset.id, []).append(card)
         return cards
 
     def _service_card_texts(self, preset: ServicePreset, *, scope: str = "onboarding") -> tuple[str, str]:
@@ -5521,6 +5741,102 @@ class MainWindow(QMainWindow):
         if preset is None:
             return service_id
         return self._t(preset.title_ru, preset.title_en)
+
+    def _category_card_icon_pixmap(self, category: ServiceCategory, size: int, *, selected: bool, onboarding: bool = False) -> QPixmap:
+        theme = self.context.settings.get().theme
+        accent = ServiceCategoryCard.CATEGORY_ACCENTS.get(category.id, "#4f73d9")
+        tint = QColor(accent) if selected else (QColor("#7b8798") if (onboarding or is_light_theme(theme)) else QColor("#6f7a8c"))
+        dpr = self._service_icon_device_ratio()
+        cache_key = f"cat_{category.id}|{size}|{dpr:.2f}|{tint.name(QColor.NameFormat.HexArgb)}"
+        cached = self._service_icon_cache.get(cache_key)
+        if cached is not None and not cached.isNull():
+            return cached
+        icon_path = self._icons_dir / category.icon_file
+        pixmap = QPixmap()
+        physical_px = max(64, int(round(size * dpr)))
+        if icon_path.exists():
+            if icon_path.suffix.lower() == ".svg":
+                renderer = QSvgRenderer(str(icon_path))
+                if renderer.isValid():
+                    image = QImage(physical_px, physical_px, QImage.Format.Format_ARGB32_Premultiplied)
+                    image.fill(Qt.GlobalColor.transparent)
+                    painter = QPainter(image)
+                    painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+                    painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+                    renderer.render(painter, QRectF(0, 0, physical_px, physical_px))
+                    painter.end()
+                    image = self._trim_transparent_bounds(image, padding=max(2, physical_px // 10))
+                    pixmap = QPixmap.fromImage(image)
+                    pixmap.setDevicePixelRatio(dpr)
+            if pixmap.isNull():
+                pixmap = QIcon(str(icon_path)).pixmap(QSize(physical_px, physical_px))
+                if not pixmap.isNull() and pixmap.devicePixelRatio() < dpr:
+                    pixmap.setDevicePixelRatio(dpr)
+        if pixmap.isNull():
+            pixmap = QPixmap(physical_px, physical_px)
+            pixmap.fill(Qt.GlobalColor.transparent)
+            pixmap.setDevicePixelRatio(dpr)
+        if not pixmap.isNull():
+            source = QPixmap(physical_px, physical_px)
+            source.fill(Qt.GlobalColor.transparent)
+            source.setDevicePixelRatio(dpr)
+            source_painter = QPainter(source)
+            source_painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+            source_painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+            if hasattr(QPainter.RenderHint, "LosslessImageRendering"):
+                source_painter.setRenderHint(QPainter.RenderHint.LosslessImageRendering, True)
+            source_size = pixmap.deviceIndependentSize() if hasattr(pixmap, "deviceIndependentSize") else QSizeF(
+                float(pixmap.width()) / max(1.0, float(pixmap.devicePixelRatio())),
+                float(pixmap.height()) / max(1.0, float(pixmap.devicePixelRatio())),
+            )
+            target_width = float(source_size.width())
+            target_height = float(source_size.height())
+            max_box = float(size) * 0.84
+            if target_width > 0.0 and target_height > 0.0:
+                scale = min(max_box / target_width, max_box / target_height, 1.0)
+                target_width *= scale
+                target_height *= scale
+            source_painter.drawPixmap(
+                QRectF((size - target_width) / 2.0, (size - target_height) / 2.0, target_width, target_height),
+                pixmap,
+                QRectF(0, 0, pixmap.width(), pixmap.height()),
+            )
+            source_painter.end()
+            tinted = QPixmap(source.size())
+            tinted.fill(Qt.GlobalColor.transparent)
+            tinted.setDevicePixelRatio(dpr)
+            painter = QPainter(tinted)
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+            painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+            if hasattr(QPainter.RenderHint, "LosslessImageRendering"):
+                painter.setRenderHint(QPainter.RenderHint.LosslessImageRendering, True)
+            painter.drawPixmap(0, 0, source)
+            painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
+            painter.fillRect(tinted.rect(), tint)
+            painter.end()
+            pixmap = tinted
+        self._service_icon_cache[cache_key] = pixmap
+        return pixmap
+
+    def _category_card_members_text(self, category: ServiceCategory) -> str:
+        names: list[str] = []
+        selected = set(self._selected_service_ids())
+        for member_id in category.member_ids:
+            name = self._service_title_by_id(member_id)
+            name = name if name != member_id else member_id
+            names.append(name)
+        return ", ".join(names)
+
+    def _on_category_card_toggled(self, category_id: str, selected: bool) -> None:
+        cat = next((c for c in SERVICE_CATEGORIES if c.id == category_id), None)
+        if cat is None:
+            return
+        current = set(self._selected_service_ids())
+        if selected:
+            current.update(cat.member_ids)
+        else:
+            current.difference_update(cat.member_ids)
+        self._set_selected_service_ids(list(current))
 
     def _service_ids_from_failed_targets(self, failed_targets: list[object]) -> list[str]:
         selected = self._selected_service_ids()
@@ -11237,15 +11553,12 @@ class MainWindow(QMainWindow):
         if self._onboarding_desc_label is not None:
             self._onboarding_desc_label.setText(
                 self._t(
-                    "Выберите от трёх приложений, сайтов и сервисов, которыми вы планируете пользоваться. Приложение само настроит Zapret так, чтобы выбранные сервисы работали.",
-                    "Choose at least three apps, sites, and services you plan to use. The app will configure Zapret so the selected services work.",
+                    "Выберите категории сервисов, которыми вы планируете пользоваться. Приложение само настроит Zapret так, чтобы выбранные сервисы работали.",
+                    "Choose the service categories you plan to use. The app will configure Zapret so the selected services work.",
                 )
             )
         if self._onboarding_services_panel is not None:
             self._onboarding_services_panel.show()
-        if self._onboarding_services_search is not None:
-            self._onboarding_services_search.clear()
-            self._onboarding_services_search.setFocus()
         if self._onboarding_primary_btn is not None:
             self._onboarding_primary_btn.setText(self._t("Продолжить", "Continue"))
         if self._onboarding_actions_widget is not None:
@@ -11265,8 +11578,6 @@ class MainWindow(QMainWindow):
             self._onboarding_secondary_btn.hide()
             self._onboarding_secondary_btn.setText(self._t("Пропустить", "Skip"))
         self._update_service_selection_summary()
-        if self._onboarding_services_scroll is not None:
-            QTimer.singleShot(0, lambda: self._onboarding_services_scroll.verticalScrollBar().setValue(0))
         self._sync_onboarding_back_button_visibility()
 
     def _sync_onboarding_service_action_button(self) -> None:
@@ -11770,38 +12081,38 @@ class MainWindow(QMainWindow):
             self.context.settings.update(selected_service_ids=normalized)
             if "fortnite" in normalized:
                 self._apply_fortnite_service_preferences_locally()
-            changed = set(current).symmetric_difference(normalized)
-            self._refresh_service_cards_subset(changed)
+            self._refresh_category_cards()
             self._update_service_selection_summary()
             self._schedule_selected_services_backend_sync(normalized, revision)
             return
         self._update_service_selection_summary()
 
     def _update_service_selection_summary(self) -> None:
-        count = len(self._selected_service_ids())
-        total = len(SERVICE_PRESETS)
+        selected = set(self._selected_service_ids())
+        cat_count = sum(1 for cat in SERVICE_CATEGORIES if any(sid in selected for sid in cat.member_ids))
+        total_cats = len(SERVICE_CATEGORIES)
         if self._services_count_label is not None:
             self._services_count_label.setText(
                 self._t(
-                    f"Выбрано: {count} из {total}",
-                    f"Selected: {count} of {total}",
+                    f"Выбрано: {cat_count} из {total_cats}",
+                    f"Selected: {cat_count} of {total_cats}",
                 )
             )
         if self._onboarding_services_count_label is not None:
             self._onboarding_services_count_label.hide()
-            if count >= self._onboarding_services_minimum:
+            if cat_count >= self._onboarding_services_minimum:
                 text = self._t(
-                    f"Выбрано {count} сервисов. Можно продолжать.",
-                    f"{count} services selected. You can continue.",
+                    f"Выбрано {cat_count} категорий. Можно продолжать.",
+                    f"{cat_count} categories selected. You can continue.",
                 )
             else:
-                remaining = self._onboarding_services_minimum - count
+                remaining = self._onboarding_services_minimum - cat_count
                 text = self._t(
                     f"Нужно выбрать ещё {remaining}, минимум {self._onboarding_services_minimum}.",
                     f"Choose {remaining} more, at least {self._onboarding_services_minimum} total.",
                 )
             self._onboarding_services_count_label.setText(text)
-            good = count >= self._onboarding_services_minimum
+            good = cat_count >= self._onboarding_services_minimum
             color = "#4f73d9" if (good and is_light_theme(self.context.settings.get().theme)) else "#b86b4b" if is_light_theme(self.context.settings.get().theme) else "#7ea5ff" if good else "#d18a5e"
             self._onboarding_services_count_label.setStyleSheet(
                 f"color: {color}; background: transparent;"
@@ -11811,36 +12122,58 @@ class MainWindow(QMainWindow):
             self._onboarding_primary_btn.setVisible(False)
         if self._onboarding_service_action_btn is not None:
             self._onboarding_service_action_btn.set_selection_state(
-                count,
+                cat_count,
                 self._onboarding_services_minimum,
                 text=self._t("Продолжить", "Continue"),
             )
             self._position_onboarding_service_action()
 
+    def _all_category_cards(self) -> list[ServiceCategoryCard]:
+        seen: set[int] = set()
+        result: list[ServiceCategoryCard] = []
+        for card in self._category_cards + self._onboarding_category_cards:
+            cid = id(card)
+            if cid not in seen:
+                seen.add(cid)
+                result.append(card)
+        return result
+
     def refresh_services(self) -> None:
         theme = self.context.settings.get().theme
         selected = set(self._selected_service_ids())
-        for preset in SERVICE_PRESETS:
-            is_selected = preset.id in selected
-            for card in self._service_cards_by_id.get(preset.id, []):
-                title, description = self._service_card_texts(preset, scope=str(card.property("serviceScope") or "onboarding"))
+        for card in self._all_category_cards():
+            cat = card.category
+            is_selected = any(sid in selected for sid in cat.member_ids)
+            try:
+                card.blockSignals(True)
+                card.set_theme(theme)
+                card.set_texts(cat.title_en, self._t(cat.description_ru, cat.description_en), self._category_card_members_text(cat))
+                card.set_icon_pixmap(self._category_card_icon_pixmap(cat, 28, selected=is_selected))
+                card.set_check_pixmap(self._service_check_pixmap(10))
+                card.set_selected(is_selected)
+            finally:
                 try:
-                    card.blockSignals(True)
-                    card.set_theme(theme)
-                    card.set_texts(title, description)
-                    card.set_icon_pixmap(self._service_icon_pixmap(preset, 34, selected=is_selected))
-                    card.set_check_pixmap(self._service_check_pixmap(10))
-                    card.set_selected(is_selected)
-                finally:
-                    try:
-                        card.blockSignals(False)
-                    except Exception:
-                        pass
+                    card.blockSignals(False)
+                except Exception:
+                    pass
         self._update_service_selection_summary()
-        if self._services_grid is not None:
-            self._services_grid.updateGeometry()
-        if self._onboarding_services_grid is not None:
-            self._onboarding_services_grid.updateGeometry()
+
+    def _refresh_category_cards(self) -> None:
+        theme = self.context.settings.get().theme
+        selected = set(self._selected_service_ids())
+        for card in self._all_category_cards():
+            cat = card.category
+            is_selected = any(sid in selected for sid in cat.member_ids)
+            try:
+                card.blockSignals(True)
+                card.set_icon_pixmap(self._category_card_icon_pixmap(cat, 28, selected=is_selected))
+                card.set_check_pixmap(self._service_check_pixmap(10))
+                card.set_selected(is_selected)
+            finally:
+                try:
+                    card.blockSignals(False)
+                except Exception:
+                    pass
 
     def _restart_zapret_worker(self) -> None:
         self.context.settings.save()

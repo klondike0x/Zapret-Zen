@@ -239,7 +239,7 @@ def app_pixmap(size: int) -> QPixmap:
 
 
 def close_icon() -> QIcon:
-    icon_path = resource_root() / "ui_assets" / "icons" / "window_close_dark.svg"
+    icon_path = resource_root() / "ui_assets" / "icons" / "window_close_light.svg"
     if icon_path.exists():
         icon = QIcon(str(icon_path))
         if not icon.isNull():
@@ -248,7 +248,7 @@ def close_icon() -> QIcon:
     pixmap.fill(Qt.GlobalColor.transparent)
     painter = QPainter(pixmap)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-    pen = QPen(QColor("#e7edf9"), 2.2, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
+    pen = QPen(QColor("#1f2a3d"), 2.2, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
     painter.setPen(pen)
     painter.drawLine(7, 7, 17, 17)
     painter.drawLine(17, 7, 7, 17)
@@ -265,7 +265,7 @@ def close_pixmap(size: int) -> QPixmap:
     fallback.fill(Qt.GlobalColor.transparent)
     painter = QPainter(fallback)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-    pen = QPen(QColor("#e7edf9"), max(1.8, size / 10.0), Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
+    pen = QPen(QColor("#1f2a3d"), max(1.8, size / 10.0), Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
     painter.setPen(pen)
     inset = max(5, int(size * 0.28))
     painter.drawLine(inset, inset, size - inset, size - inset)
@@ -454,7 +454,7 @@ def set_windows_app_id() -> None:
     if not sys.platform.startswith("win"):
         return
     try:
-        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("peshk0v.ZapretZen.NuitkaInstaller.1.4.2.pngsync2")  # type: ignore[attr-defined]
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("peshk0v.ZapretZen.NuitkaInstaller.2.0.0.pngsync2")  # type: ignore[attr-defined]
     except Exception:
         return
 
@@ -745,7 +745,7 @@ def _write_uninstall_registry(install_dir: Path, uninstaller_exe: Path, app_exe:
     uninstall_cmd = f'"{uninstaller_exe}" --uninstall --install-dir "{install_dir}"'
     values = {
         "DisplayName": "Zapret-Zen",
-        "DisplayVersion": "1.4.0",
+        "DisplayVersion": "2.0.0",
         "Publisher": "peshk0v",
         "InstallLocation": str(install_dir),
         "DisplayIcon": str(app_exe),
@@ -901,10 +901,10 @@ class InstallerDialog(QDialog):
 
         self.setStyleSheet(
             """
-            #DlgRoot { background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #11182a, stop:0.72 #11182a, stop:1 #162344); color: #dbe5fb; border: 1px solid #2a3f61; border-radius: 12px; font-family: Segoe UI; font-size: 10pt; }
-            #DlgTitle { background: transparent; border-bottom: 1px solid #243551; }
-            QLabel { background: transparent; color: #dbe5fb; }
-            QPushButton { background: #253b62; border: 1px solid #396197; border-radius: 12px; padding: 8px 14px; min-width: 88px; color: #dbe5fb; }
+            #DlgRoot { background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #f4f7fc, stop:0.72 #f4f7fc, stop:1 #eef4ff); color: #152033; border: 1px solid #c8d7ee; border-radius: 12px; font-family: Segoe UI; font-size: 10pt; }
+            #DlgTitle { background: transparent; border-bottom: 1px solid #d0ddf0; }
+            QLabel { background: transparent; color: #152033; }
+            QPushButton { background: #e6eef9; border: 1px solid #c8d7ee; border-radius: 12px; padding: 8px 14px; min-width: 88px; color: #152033; }
             QPushButton#primary { background: #5865f2; border: 1px solid #7481ff; color: #fff; font-weight: 700; }
             QToolButton { border: none; background: transparent; min-width: 26px; min-height: 26px; max-width: 26px; max-height: 26px; border-radius: 12px; padding: 0px; margin: 0px; }
             QToolButton[role="close"]:hover { background: rgba(170, 84, 97, 0.62); border-radius: 12px; }
@@ -1146,18 +1146,18 @@ class InstallerWindow(QMainWindow):
         self.setStyleSheet(
             f"""
             QMainWindow {{ background: transparent; }}
-            QWidget#Root {{ background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #11182a, stop:0.7 #11182a, stop:1 #162344); color: #dbe5fb; font-family: Segoe UI; font-size: 10pt; border: 1px solid #2a3f61; border-radius: 12px; }}
-            #InstallerTitleBar {{ background: transparent; border-bottom: 1px solid #243551; }}
-            QLabel#title {{ font-size: 18pt; font-weight: 800; color: #ffffff; }}
-            QLabel {{ background: transparent; }}
-            QLineEdit {{ background: #15213a; border: 1px solid #304a73; border-radius: 10px; padding: 9px; font-size: 11pt; }}
-            QPushButton {{ background: #253b62; border: 1px solid #396197; border-radius: 12px; padding: 10px 14px; font-size: 11pt; color: #dbe5fb; }}
+            QWidget#Root {{ background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #f4f7fc, stop:0.7 #f4f7fc, stop:1 #eef4ff); color: #152033; font-family: Segoe UI; font-size: 10pt; border: 1px solid #c8d7ee; border-radius: 12px; }}
+            #InstallerTitleBar {{ background: transparent; border-bottom: 1px solid #d0ddf0; }}
+            QLabel#title {{ font-size: 18pt; font-weight: 800; color: #0f172a; }}
+            QLabel {{ background: transparent; color: #152033; }}
+            QLineEdit {{ background: #ffffff; color: #152033; border: 1px solid #c8d7ee; border-radius: 10px; padding: 9px; font-size: 11pt; }}
+            QPushButton {{ background: #e6eef9; border: 1px solid #c8d7ee; border-radius: 12px; padding: 10px 14px; font-size: 11pt; color: #152033; }}
             QPushButton#primary {{ background: #5865f2; border: 1px solid #7481ff; color: #fff; font-weight: 800; }}
             QToolButton {{ border: none; background: transparent; min-width: 26px; min-height: 26px; max-width: 26px; max-height: 26px; border-radius: 12px; padding: 0px; margin: 0px; }}
             QToolButton[role="close"]:hover {{ background: rgba(170, 84, 97, 0.62); border-radius: 12px; }}
-            QProgressBar {{ background: #15213a; border: 1px solid #304a73; border-radius: 10px; text-align: center; }}
+            QProgressBar {{ background: #e6eef9; border: 1px solid #c8d7ee; border-radius: 10px; text-align: center; }}
             QProgressBar::chunk {{ background: #5865f2; border-radius: 9px; }}
-            QCheckBox::indicator {{ width: 16px; height: 16px; border-radius: 5px; border: 1px solid #4f6a98; background: transparent; }}
+            QCheckBox::indicator {{ width: 16px; height: 16px; border-radius: 5px; border: 1px solid #b0c4de; background: #ffffff; }}
             QCheckBox::indicator:checked {{ background: #5865f2; border: 1px solid #7a86ff; image: url("{check_icon}"); }}
             """
         )
