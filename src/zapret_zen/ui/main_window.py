@@ -3540,7 +3540,6 @@ class MainWindow(QMainWindow):
         self._component_loading_buttons: dict[str, QPushButton] = {}
         self._component_loading_base_text: dict[str, str] = {}
         self._component_loading_frame = 0
-        self._power_caption_base_text = "OFF"
         self._general_loading_combo: QComboBox | None = None
         self._general_loading_label: QLabel | None = None
         self._general_test_dialog: AppDialog | None = None
@@ -3668,12 +3667,7 @@ class MainWindow(QMainWindow):
         self._mods_subtitle_label: QLabel | None = None
         self._mods_add_btn: QPushButton | None = None
         self.power_aura: PowerAuraWidget | None = None
-        self.power_caption_text: QLabel | None = None
         self.power_vpn_btn: QToolButton | None = None
-        self.power_reconfigure_btn: QToolButton | None = None
-        self.power_caption_dots: QLabel | None = None
-        self._power_caption_dots_opacity: QGraphicsOpacityEffect | None = None
-        self._power_caption_dots_blur: QGraphicsBlurEffect | None = None
         self._files_title_label: QLabel | None = None
         self._editor_title_label: QLabel | None = None
         self._logs_title_label: QLabel | None = None
@@ -5497,12 +5491,12 @@ class MainWindow(QMainWindow):
         self.power_aura.lower()
 
         power_stage = QWidget(power_block)
-        power_stage.setFixedSize(224, 188)
+        power_stage.setFixedSize(224, 160)
         power_stage.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, False)
         power_stage.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         power_stage.setStyleSheet("background: transparent;")
         power_stage_layout = QVBoxLayout(power_stage)
-        power_stage_layout.setContentsMargins(0, 28, 0, 28)
+        power_stage_layout.setContentsMargins(0, 14, 0, 14)
         power_stage_layout.setSpacing(0)
         power_stage_layout.addStretch(1)
         power_button_row = QHBoxLayout()
@@ -5523,46 +5517,7 @@ class MainWindow(QMainWindow):
         power_stage_layout.addLayout(power_button_row)
         power_stage_layout.addStretch(1)
 
-        self.power_caption = QWidget()
-        self.power_caption.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
-        self.power_caption.setStyleSheet("background: transparent;")
-        self.power_caption.setFixedWidth(power_stage.width())
-        caption_layout = QHBoxLayout(self.power_caption)
-        caption_layout.setContentsMargins(0, 0, 0, 0)
-        caption_layout.setSpacing(8)
-        self.power_reconfigure_btn = QToolButton(self.power_caption)
-        self.power_reconfigure_btn.setObjectName("PowerReconfigureButton")
-        self.power_reconfigure_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.power_reconfigure_btn.setIcon(
-            self._build_tinted_icon(
-                self._icons_dir / "rerun.svg",
-                self._themed_icon_color("refresh.svg") or QColor("#f3f7ff"),
-                fill_ratio=0.82,
-                offset_x=-0.8,
-                offset_y=1.8,
-            )
-        )
-        self.power_reconfigure_btn.setIconSize(QSize(15, 15))
-        self.power_reconfigure_btn.setFixedSize(30, 30)
-        self.power_reconfigure_btn.setToolTip(self._t("Подобрать настройки", "Find settings"))
-        self.power_reconfigure_btn.clicked.connect(self._restart_onboarding_from_dashboard)
-        self._attach_button_animations(self.power_reconfigure_btn)
-        self._sync_power_reconfigure_button_style()
-        self.power_caption_text = QLabel("OFF")
-        self.power_caption_text.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.power_caption_text.setProperty("class", "title")
-        self.power_caption_text.setObjectName("PowerStatusPill")
-        self.power_caption_text.setMinimumWidth(96)
-        self.power_caption_text.setFixedHeight(30)
-        self.power_caption_dots = None
-        self._power_caption_dots_blur = None
-        self._power_caption_dots_opacity = None
-        caption_layout.addStretch(1)
-        caption_layout.addWidget(self.power_caption_text, 0, Qt.AlignmentFlag.AlignCenter)
-        caption_layout.addWidget(self.power_reconfigure_btn, 0, Qt.AlignmentFlag.AlignCenter)
-        caption_layout.addStretch(1)
         power_block_layout.addWidget(power_stage, 0, Qt.AlignmentFlag.AlignHCenter)
-        power_block_layout.addWidget(self.power_caption, 0, Qt.AlignmentFlag.AlignHCenter)
         self._power_aura_host = top
         self._power_block = power_block
         self._power_stage = power_stage
@@ -8225,9 +8180,6 @@ class MainWindow(QMainWindow):
         if self._notifications_btn is not None:
             self._notifications_btn.setIcon(self._icon("bell.svg"))
 
-        if self.power_reconfigure_btn is not None:
-            self._sync_power_reconfigure_button_style()
-
         self._sync_onboarding_back_button_style()
         self._refresh_notifications_badge()
         self._apply_onboarding_style()
@@ -8509,8 +8461,6 @@ class MainWindow(QMainWindow):
             self._notifications_btn.setToolTip(self._t("Уведомления", "Notifications"))
         if self._settings_btn is not None:
             self._settings_btn.setToolTip(self._t("Настройки", "Settings"))
-        if self.power_reconfigure_btn is not None:
-            self.power_reconfigure_btn.setToolTip(self._t("Подобрать настройки", "Find settings"))
         if self._onboarding_back_btn is not None:
             self._onboarding_back_btn.setToolTip(self._t("Назад", "Back"))
         if self._dashboard_title_label is not None:
@@ -8916,51 +8866,6 @@ class MainWindow(QMainWindow):
             group.start()
         except Exception:
             label.setText(text)
-
-    def _animate_caption_dots(self, dots: str, *, duration: int = 150) -> None:
-        if self.power_caption_dots is None:
-            return
-        if self.power_caption_dots.text() == dots:
-            return
-        if self._power_caption_dots_opacity is None or self._power_caption_dots_blur is None:
-            self.power_caption_dots.setText(dots)
-            return
-        fade_out = QPropertyAnimation(self._power_caption_dots_opacity, b"opacity", self)
-        fade_out.setDuration(max(70, duration // 2))
-        fade_out.setStartValue(float(self._power_caption_dots_opacity.opacity()))
-        fade_out.setEndValue(0.0)
-        fade_out.setEasingCurve(QEasingCurve.Type.InCubic)
-        blur_out = QPropertyAnimation(self._power_caption_dots_blur, b"blurRadius", self)
-        blur_out.setDuration(max(70, duration // 2))
-        blur_out.setStartValue(float(self._power_caption_dots_blur.blurRadius()))
-        blur_out.setEndValue(6.0)
-        blur_out.setEasingCurve(QEasingCurve.Type.InCubic)
-        out_group = QParallelAnimationGroup(self)
-        out_group.addAnimation(fade_out)
-        out_group.addAnimation(blur_out)
-
-        def _show_new() -> None:
-            if self.power_caption_dots is None or self._power_caption_dots_opacity is None or self._power_caption_dots_blur is None:
-                return
-            self.power_caption_dots.setText(dots)
-            self._power_caption_dots_blur.setBlurRadius(6.0)
-            fade_in = QPropertyAnimation(self._power_caption_dots_opacity, b"opacity", self)
-            fade_in.setDuration(duration)
-            fade_in.setStartValue(0.0)
-            fade_in.setEndValue(1.0)
-            fade_in.setEasingCurve(QEasingCurve.Type.OutCubic)
-            blur_in = QPropertyAnimation(self._power_caption_dots_blur, b"blurRadius", self)
-            blur_in.setDuration(duration)
-            blur_in.setStartValue(6.0)
-            blur_in.setEndValue(0.0)
-            blur_in.setEasingCurve(QEasingCurve.Type.OutCubic)
-            in_group = QParallelAnimationGroup(self)
-            in_group.addAnimation(fade_in)
-            in_group.addAnimation(blur_in)
-            in_group.start()
-
-        out_group.finished.connect(_show_new)
-        out_group.start()
 
     def _advance_component_loading(self) -> None:
         frames = ["", ".", "..", "...", "..", "."]
@@ -9486,12 +9391,6 @@ class MainWindow(QMainWindow):
         base = self._t("Подключение", "Connecting") if self._loading_action == "connect" else self._t("Отключение", "Disconnecting")
         dots_frames = ["", ".", "..", "...", "..", "."]
         full_text = f"{base}{dots_frames[self._loading_frame % len(dots_frames)]}"
-        if self.power_caption_dots is not None:
-            self.power_caption_dots.setText("")
-            self.power_caption_dots.hide()
-        if self.power_caption_text is not None:
-            self._set_power_status_pill(full_text, "loading")
-        self._power_caption_base_text = base
         self._loading_frame += 1
         self.power_button.setProperty("state", "loading")
         if isinstance(self.power_button, AnimatedPowerButton):
@@ -10875,12 +10774,6 @@ class MainWindow(QMainWindow):
             if self.power_aura is not None:
                 self.power_aura.set_idle_pulse_enabled(False)
                 self.power_aura.set_status_glow_enabled(True)
-            if self.power_caption_dots is not None:
-                self.power_caption_dots.setText("")
-                self.power_caption_dots.hide()
-            self._power_caption_base_text = self._t("ЗАГРУЗКА", "LOADING")
-            if self.power_caption_text is not None:
-                self._set_power_status_pill(self._power_caption_base_text, "loading")
             self._set_badge("app", self._t("Загрузка", "Loading"), "status_warn.svg")
             self._set_badge("zapret", self._t("Загрузка", "Loading"), "status_warn.svg")
             self._set_badge("tg", self._t("Загрузка", "Loading"), "status_warn.svg")
@@ -10906,19 +10799,6 @@ class MainWindow(QMainWindow):
         if self.power_aura is not None:
             self.power_aura.set_idle_pulse_enabled(fully_running and not self._toggle_in_progress)
             self.power_aura.set_status_glow_enabled(fully_running or self._toggle_in_progress)
-        if self.power_caption_dots is not None:
-            self.power_caption_dots.setText("")
-            self.power_caption_dots.hide()
-        self._power_caption_base_text = ""
-        if not active_ids:
-            if self.power_caption_text is not None:
-                self._set_power_status_pill(self._t("Нет компонентов", "No components"), "off")
-                self._power_caption_base_text = self._t("НЕТ КОМПОНЕНТОВ", "NO COMPONENTS")
-        else:
-            target_caption = self._t("Включено", "On") if fully_running else (self._t("Частично", "Partial") if any_running else self._t("Выключено", "Off"))
-            if self.power_caption_text is not None:
-                self._set_power_status_pill(target_caption, "on" if fully_running else ("partial" if any_running else "off"))
-                self._power_caption_base_text = target_caption
 
         enabled_mods = list(settings.enabled_mod_ids or [])
 
@@ -10938,27 +10818,6 @@ class MainWindow(QMainWindow):
         self._set_badge("tg", tg_text, tg_icon)
         self._set_badge("mods", f"{len(enabled_mods)} {self._t('Активно', 'Active')}", "status_mod.svg")
 
-    def _set_power_status_pill(self, text: str, state: str) -> None:
-        if self.power_caption_text is None:
-            return
-        text_color, accent, alpha = self._power_status_palette(state)
-        border = QColor(accent)
-        border.setAlpha(96 if state != "off" else 56)
-        fill = QColor(accent)
-        fill.setAlpha(alpha)
-        self.power_caption_text.setText(text)
-        self.power_caption_text.setStyleSheet(
-            "QLabel#PowerStatusPill {"
-            f"color: {text_color};"
-            f"background: {fill.name(QColor.NameFormat.HexArgb)};"
-            f"border: 1px solid {border.name(QColor.NameFormat.HexArgb)};"
-            "border-radius: 15px;"
-            "font-size: 12px;"
-            "font-weight: 700;"
-            "padding: 0 14px;"
-            "}"
-        )
-
     def _power_status_palette(self, state: str) -> tuple[str, str, int]:
         theme = self.context.settings.get().theme
         light = is_light_theme(theme)
@@ -10977,37 +10836,6 @@ class MainWindow(QMainWindow):
         fill = QColor(accent)
         fill.setAlpha(alpha)
         return text_color, border, fill
-
-    def _sync_power_reconfigure_button_style(self) -> None:
-        button = self.power_reconfigure_btn
-        if button is None:
-            return
-        text, border, fill = self._inactive_control_style_values()
-        hover = QColor(fill)
-        hover.setAlpha(min(255, fill.alpha() + 14))
-        button.setIcon(
-            self._build_tinted_icon(
-                self._icons_dir / "rerun.svg",
-                QColor(text),
-                fill_ratio=0.82,
-                offset_x=-1.0,
-                offset_y=-0.3,
-            )
-        )
-        button.setIconSize(QSize(15, 15))
-        button.setStyleSheet(
-            "QToolButton#PowerReconfigureButton {"
-            f"background: {fill.name(QColor.NameFormat.HexArgb)};"
-            f"border: 1px solid {border.name(QColor.NameFormat.HexArgb)};"
-            f"color: {text};"
-            "border-radius: 15px;"
-            "padding: 0px;"
-            "margin: 0px;"
-            "}"
-            "QToolButton#PowerReconfigureButton:hover {"
-            f"background: {hover.name(QColor.NameFormat.HexArgb)};"
-            "}"
-        )
 
     def _sync_power_vpn_button_style(self) -> None:
         button = self.power_vpn_btn
