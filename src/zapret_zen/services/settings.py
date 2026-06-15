@@ -50,22 +50,42 @@ class SettingsManager:
             settings.language = self._detect_system_language()
             changed = True
 
-        if raw.get("theme") == "midnight":
-            settings.theme = "night"
-            changed = True
-        elif raw.get("theme") == "light blue":
-            settings.theme = "light_blue"
-            changed = True
-
-        current_theme = str(settings.theme or "")
-        if not current_theme:
+        old_theme = raw.get("theme", "")
+        old_accent = raw.get("accent_color", "")
+        if old_theme and old_theme not in {"light", "dark", "oled"}:
+            # Migration from old theme system to new mode + accent
+            old_theme_lower = old_theme.lower().replace(" ", "_")
+            if old_theme == "midnight":
+                settings.theme = "dark"
+                if not old_accent:
+                    settings.accent_color = "#7380ff"
+                changed = True
+            elif old_theme_lower in ("light_blue", "light blue"):
+                settings.theme = "light"
+                if not old_accent:
+                    settings.accent_color = "#3b82f6"
+                changed = True
+            elif old_theme_lower in ("night", "dark"):
+                settings.theme = "dark"
+                if not old_accent:
+                    settings.accent_color = "#7380ff"
+                changed = True
+            elif old_theme_lower == "oled":
+                settings.theme = "oled"
+                if not old_accent:
+                    settings.accent_color = "#7380ff"
+                changed = True
+            else:
+                # Other external themes -> light with default accent
+                settings.theme = "light"
+                if not old_accent:
+                    settings.accent_color = "#7380ff"
+                changed = True
+        elif not old_theme:
             settings.theme = "light"
             changed = True
-        else:
-            theme_file = self.storage.paths.themes_dir / f"{current_theme.replace(' ', '_')}.json"
-            if not theme_file.exists():
-                settings.theme = "light"
-                changed = True
+        if old_accent and len(old_accent) == 7 and old_accent[0] == "#":
+            settings.accent_color = old_accent
 
         if raw.get("zapret_ipset_mode") not in {"loaded", "none", "any"}:
             settings.zapret_ipset_mode = "loaded"

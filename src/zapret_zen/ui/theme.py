@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from PySide6.QtGui import QColor
+
 from zapret_zen.domain.models import ThemeDefinition
 
 
@@ -1406,3 +1408,90 @@ def _compute_light_blue(light_css: str) -> str:
         .replace("#7480ff", "#76a7ff")
         .replace("#6773ff", "#78aaff")
     )
+
+
+# --- New accent-based theme system ---
+
+ACCENT_PALETTE: list[str] = [
+    "#3b82f6",  # blue
+    "#7380ff",  # indigo
+    "#8b5cf6",  # violet
+    "#ec4899",  # pink
+    "#ef4444",  # red
+    "#f97316",  # orange
+    "#eab308",  # yellow
+    "#22c55e",  # green
+    "#06b6d4",  # cyan
+]
+
+
+def _hex_to_qcolor(hex_color: str) -> QColor:
+    return QColor(hex_color)
+
+
+def lighten(hex_color: str, factor: float) -> str:
+    c = QColor(hex_color)
+    h = c.hueF()
+    s = c.saturationF()
+    l = min(1.0, c.lightnessF() + (1.0 - c.lightnessF()) * factor)
+    result = QColor()
+    result.setHslF(h, s, l)
+    return result.name()
+
+
+def darken(hex_color: str, factor: float) -> str:
+    c = QColor(hex_color)
+    h = c.hueF()
+    s = c.saturationF()
+    l = max(0.0, c.lightnessF() * (1.0 - factor))
+    result = QColor()
+    result.setHslF(h, s, l)
+    return result.name()
+
+
+def generate_palette(accent_hex: str, mode: str) -> dict[str, str]:
+    is_light = mode == "light"
+    if is_light:
+        on_top = accent_hex
+        on_bottom = darken(accent_hex, 0.35)
+        on_border = accent_hex
+        glow = accent_hex
+    else:
+        on_top = lighten(accent_hex, 0.25)
+        on_bottom = accent_hex
+        on_border = lighten(accent_hex, 0.15)
+        glow = accent_hex
+    return {
+        "on_top": on_top,
+        "on_bottom": on_bottom,
+        "on_border": on_border,
+        "glow": glow,
+    }
+
+
+def is_light_theme(theme_or_mode: str) -> bool:
+    if theme_or_mode in ("light",):
+        return True
+    if theme_or_mode in ("dark", "oled"):
+        return False
+    # Fallback: old theme registry lookup
+    td = _get_theme(theme_or_mode)
+    return td.is_light if td else False
+
+
+def build_stylesheet(theme_or_mode: str, chevron_icon: str = "", check_icon: str = "") -> str:
+    # Use old theme registry for backwards compatibility
+    td = _get_theme(theme_or_mode)
+    css = td.stylesheet if td else ""
+    if not css:
+        return ""
+    arrow_rule = "image: none;"
+    if chevron_icon:
+        normalized_icon = chevron_icon.replace("\\", "/")
+        arrow_rule = f'image: url("{normalized_icon}");'
+    check_rule = "image: none;"
+    if check_icon:
+        normalized_check = check_icon.replace("\\", "/")
+        check_rule = f'image: url("{normalized_check}");'
+    css = css.replace("__COMBO_ARROW__", arrow_rule)
+    return css.replace("__CHECK_ICON__", check_rule)

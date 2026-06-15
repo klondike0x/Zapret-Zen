@@ -17,6 +17,7 @@ class ThemeDefinition:
 @dataclass(slots=True)
 class AppSettings:
     theme: str = "light"
+    accent_color: str = "#7380ff"
     language: str = "ru"
     start_in_tray: bool = False
     autostart_windows: bool = False

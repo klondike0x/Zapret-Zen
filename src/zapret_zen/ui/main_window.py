@@ -40,6 +40,7 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QFrame,
     QGraphicsBlurEffect,
+    QGraphicsDropShadowEffect,
     QGraphicsOpacityEffect,
     QGridLayout,
     QHBoxLayout,
@@ -69,7 +70,7 @@ from PySide6.QtWidgets import (
 )
 
 from zapret_zen.bootstrap import ApplicationContext
-from zapret_zen.ui.theme import _get_theme, build_stylesheet, is_light_theme, list_available_themes, load_theme_registry
+from zapret_zen.ui.theme import ACCENT_PALETTE, _get_theme, build_stylesheet, generate_palette, is_light_theme, list_available_themes, load_theme_registry
 
 
 class WindowsTaskbarIntegration:
@@ -925,11 +926,11 @@ class ServiceCardFrame(QFrame):
 class ServiceCategoryCard(QFrame):
     toggled = Signal(str, bool)
 
-    CATEGORY_ACCENTS: dict[str, str] = {
-        "gaming": "#7c5cff",
-        "socials": "#5865f2",
-        "workplace": "#4f73d9",
-    }
+    _current_accent: str = "#7380ff"
+
+    @staticmethod
+    def get_category_accents(accent: str) -> dict[str, str]:
+        return {"gaming": accent, "socials": accent, "workplace": accent}
 
     def __init__(self, category: ServiceCategory, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -1004,6 +1005,11 @@ class ServiceCategoryCard(QFrame):
 
     def set_theme(self, theme: str) -> None:
         self._theme = theme
+        self._sync_style()
+        self.update()
+
+    def set_accent_color(self, accent_hex: str) -> None:
+        self._current_accent = accent_hex
         self._sync_style()
         self.update()
 
@@ -1091,7 +1097,7 @@ class ServiceCategoryCard(QFrame):
             self._paint_burst(painter, accent)
 
     def _category_accent(self) -> QColor:
-        return QColor(self.CATEGORY_ACCENTS.get(self.category.id, "#4f73d9"))
+        return QColor(self._current_accent)
 
     def _paint_burst(self, painter: QPainter, accent: QColor) -> None:
         progress = max(0.0, min(1.0, self._burst_progress))
@@ -1341,6 +1347,9 @@ class AnimatedPowerButton(QToolButton):
         self._wave_outward = True
         self._glint_progress = 0.0
         self._burst_progress = 0.0
+        self._on_top = QColor("#7380ff")
+        self._on_bottom = QColor("#4551cb")
+        self._on_border = QColor("#7b87ff")
         self._scale_anim: QPropertyAnimation | None = None
         self._hover_anim: QPropertyAnimation | None = None
         self._wave_progress_anim: QPropertyAnimation | None = None
@@ -1348,9 +1357,13 @@ class AnimatedPowerButton(QToolButton):
         self._glint_anim: QPropertyAnimation | None = None
         self._burst_anim: QPropertyAnimation | None = None
 
-    def set_power_theme(self, theme: str) -> None:
-        self._theme_name = theme
-        self._light_theme = is_light_theme(theme)
+    def set_power_theme(self, mode: str, accent_color: str = "#7380ff") -> None:
+        self._theme_name = mode
+        self._light_theme = is_light_theme(mode)
+        palette = generate_palette(accent_color, mode)
+        self._on_top = QColor(palette["on_top"])
+        self._on_bottom = QColor(palette["on_bottom"])
+        self._on_border = QColor(palette["on_border"])
         self.update()
 
     def set_active_state(self, active: bool, *, animate: bool = True) -> None:
@@ -1532,9 +1545,6 @@ class AnimatedPowerButton(QToolButton):
             off_top = QColor("#f7f9ff")
             off_bottom = QColor("#dfe8f7")
             off_border = QColor("#bfd2f0")
-            on_top = QColor("#7b86ff")
-            on_bottom = QColor("#4c58d8")
-            on_border = QColor("#7b87ff")
             loading_top = QColor("#c7d3e6")
             loading_bottom = QColor("#9ba8bd")
             loading_border = QColor("#b9c6db")
@@ -1542,9 +1552,6 @@ class AnimatedPowerButton(QToolButton):
             off_top = QColor("#5a5f67")
             off_bottom = QColor("#3c4148")
             off_border = QColor("#70757d")
-            on_top = QColor("#7380ff")
-            on_bottom = QColor("#4551cb")
-            on_border = QColor("#7b87ff")
             loading_top = QColor("#707785")
             loading_bottom = QColor("#565d69")
             loading_border = QColor("#8b94a3")
@@ -1566,9 +1573,9 @@ class AnimatedPowerButton(QToolButton):
             gradient.setColorAt(1.0, loading_bottom)
             border = loading_border
         elif self._active:
-            gradient.setColorAt(0.0, on_top)
-            gradient.setColorAt(1.0, on_bottom)
-            border = on_border
+            gradient.setColorAt(0.0, self._on_top)
+            gradient.setColorAt(1.0, self._on_bottom)
+            border = self._on_border
         else:
             gradient.setColorAt(0.0, off_top)
             gradient.setColorAt(1.0, off_bottom)
@@ -1613,7 +1620,7 @@ class AnimatedPowerButton(QToolButton):
         target = QRectF(center.x() - icon_size / 2.0, center.y() - icon_size / 2.0, icon_size, icon_size)
         painter.drawPixmap(target, pixmap, QRectF(0, 0, pixmap.width(), pixmap.height()))
 
-        on_color = on_top if self._active else off_top
+        on_color = self._on_top if self._active else off_top
         self._paint_glint(painter, center, radius)
         self._paint_burst(painter, center, on_color)
 
@@ -1694,10 +1701,12 @@ class PowerAuraWidget(QWidget):
         self._wave_progress_anim: QPropertyAnimation | None = None
         self._wave_strength_anim: QPropertyAnimation | None = None
         self._status_glow_presence_anim: QPropertyAnimation | None = None
+        self._accent_color = "#7380ff"
 
-    def set_power_theme(self, theme: str) -> None:
-        self._theme_name = theme
-        self._light_theme = is_light_theme(theme)
+    def set_power_theme(self, mode: str, accent_color: str = "#7380ff") -> None:
+        self._theme_name = mode
+        self._light_theme = is_light_theme(mode)
+        self._accent_color = accent_color
         self.update()
 
     def set_center_point(self, point: QPointF) -> None:
@@ -1797,12 +1806,11 @@ class PowerAuraWidget(QWidget):
         if self.width() <= 0 or self.height() <= 0 or center.x() <= 1.0 or center.y() <= 1.0:
             return
         if self._status_glow_presence > 0.001:
-            if self._theme_name == "oled":
-                aura_color = QColor(104, 118, 210, 70)
-            elif self._light_theme:
-                aura_color = QColor(19, 58, 142, 66)
+            accent = QColor(self._accent_color)
+            if self._light_theme:
+                aura_color = QColor(accent.red(), accent.green(), accent.blue(), 66)
             else:
-                aura_color = QColor(100, 172, 255, 74)
+                aura_color = QColor(accent.red(), accent.green(), accent.blue(), 74)
             breath = 0.36 + 0.64 * self._status_glow_breath
             presence = max(0.0, min(1.0, self._status_glow_presence))
             radius = 98.0 + 48.0 * breath
@@ -1814,11 +1822,11 @@ class PowerAuraWidget(QWidget):
             painter.setBrush(aura)
             painter.drawEllipse(center, radius, radius)
         if self._theme_name == "oled":
-            color = QColor(124, 134, 182, int(132 * self._wave_strength))
-        elif self._light_theme:
-            color = QColor(64, 116, 255, int(176 * self._wave_strength))
+            color = QColor(104, 118, 210, int(132 * self._wave_strength))
         else:
-            color = QColor(122, 214, 255, int(168 * self._wave_strength))
+            accent = QColor(self._accent_color)
+            alpha = int(176 * self._wave_strength) if self._light_theme else int(168 * self._wave_strength)
+            color = QColor(accent.red(), accent.green(), accent.blue(), alpha)
         base = self._wave_base_radius
         travel = self._wave_travel_radius * (self._wave_progress if self._wave_outward else (1.0 - self._wave_progress))
         for factor, width, alpha_factor in ((1.0, 14.0, 1.0), (0.8, 9.0, 0.78), (0.62, 5.5, 0.52)):
@@ -2564,6 +2572,115 @@ class OnboardingPageWidget(QWidget):
         side.setColorAt(1.0, side_color)
         painter.fillRect(rect, side)
         painter.restore()
+
+
+class ContentGlowWidget(QWidget):
+    """Background glow behind all pages — diffused radial gradient from accent color."""
+
+    glowChanged = Signal()
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._accent_color = QColor("#7380ff")
+        self._glow_x = 0.5
+        self._glow_y = 0.5
+        self._glow_intensity = 1.0
+        self._pulse_anim: QPropertyAnimation | None = None
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, False)
+
+    def set_accent_color(self, hex_color: str) -> None:
+        self._accent_color = QColor(hex_color)
+        self.update()
+
+    def set_glow_position(self, x: float, y: float, *, animated: bool = True, duration: int = 400) -> None:
+        x = max(-0.35, min(1.35, float(x)))
+        y = max(-0.35, min(1.45, float(y)))
+        if not animated:
+            self._glow_x = x
+            self._glow_y = y
+            self.update()
+            self.glowChanged.emit()
+            return
+        if self._pulse_anim is not None:
+            self._pulse_anim.stop()
+            self._pulse_anim = None
+        group = QParallelAnimationGroup(self)
+        for prop, start, end in ((b"glowX", self._glow_x, x), (b"glowY", self._glow_y, y)):
+            anim = QPropertyAnimation(self, prop, group)
+            anim.setDuration(duration)
+            anim.setStartValue(start)
+            anim.setEndValue(end)
+            anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+            group.addAnimation(anim)
+        group.start()
+
+    def animate_pulse(self) -> None:
+        if self._pulse_anim is not None:
+            self._pulse_anim.stop()
+        anim = QPropertyAnimation(self, b"glowIntensity")
+        anim.setDuration(1200)
+        kf1 = 0.0
+        kf2 = 0.3
+        kf3 = 0.6
+        kf4 = 0.85
+        anim.setKeyValueAt(kf1, self._glow_intensity)
+        anim.setKeyValueAt(kf2, 1.45)
+        anim.setKeyValueAt(kf3, 0.85)
+        anim.setKeyValueAt(kf4, 1.35)
+        anim.setKeyValueAt(1.0, 1.0)
+        anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        anim.finished.connect(lambda: setattr(self, "_pulse_anim", None))
+        self._pulse_anim = anim
+        anim.start()
+
+    def _get_glow_x(self) -> float:
+        return self._glow_x
+
+    def _set_glow_x(self, value: float) -> None:
+        self._glow_x = float(value)
+        self.update()
+        self.glowChanged.emit()
+
+    def _get_glow_y(self) -> float:
+        return self._glow_y
+
+    def _set_glow_y(self, value: float) -> None:
+        self._glow_y = float(value)
+        self.update()
+        self.glowChanged.emit()
+
+    def _get_glow_intensity(self) -> float:
+        return self._glow_intensity
+
+    def _set_glow_intensity(self, value: float) -> None:
+        self._glow_intensity = float(value)
+        self.update()
+
+    glowX = Property(float, _get_glow_x, _set_glow_x)
+    glowY = Property(float, _get_glow_y, _set_glow_y)
+    glowIntensity = Property(float, _get_glow_intensity, _set_glow_intensity)
+
+    def paintEvent(self, event: QEvent) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        rect = QRectF(self.rect())
+        if rect.width() <= 0 or rect.height() <= 0:
+            return
+        intensity = max(0.0, min(2.0, self._glow_intensity))
+        c = self._accent_color
+        light = c.lightnessF() > 0.5
+        base_alpha = 0.06 if light else 0.10
+        glow = QRadialGradient(
+            rect.left() + rect.width() * self._glow_x,
+            rect.top() + rect.height() * self._glow_y,
+            max(rect.width() * 0.85, rect.height() * 1.0),
+        )
+        a = lambda factor: max(0, min(255, int(base_alpha * intensity * factor * 255)))
+        glow.setColorAt(0.0, QColor(c.red(), c.green(), c.blue(), a(3.0)))
+        glow.setColorAt(0.3, QColor(c.red(), c.green(), c.blue(), a(1.8)))
+        glow.setColorAt(0.6, QColor(c.red(), c.green(), c.blue(), a(0.8)))
+        glow.setColorAt(1.0, QColor(c.red(), c.green(), c.blue(), 0))
+        painter.fillRect(rect, glow)
 
 
 class OnboardingFrame(QFrame):
@@ -3862,7 +3979,7 @@ class MainWindow(QMainWindow):
         self._page_transition_overlay_opacity_effect: QGraphicsOpacityEffect | None = None
         self._page_transition_overlay_next_opacity_effect: QGraphicsOpacityEffect | None = None
         self._pages_shell: QWidget | None = None
-        self._pages_host: QWidget | None = None
+        self._pages_host: ContentGlowWidget | None = None
         self._content_surface: QWidget | None = None
         self._content_surface_layout: QVBoxLayout | None = None
         self._page_transition_out: QPropertyAnimation | None = None
@@ -4617,6 +4734,24 @@ class MainWindow(QMainWindow):
         body.addWidget(self._build_content(), 1)
 
         root.addWidget(frame)
+
+        glow = ContentGlowWidget(shell)
+        glow.setObjectName("FullWindowGlow")
+        glow.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self._pages_host = glow
+        glow.raise_()
+
+        class _GlowResizer(QObject):
+            def __init__(self, g, f):
+                super().__init__(f)
+                self._g = g
+                f.installEventFilter(self)
+            def eventFilter(self, obj, event):
+                if event.type() == QEvent.Type.Resize:
+                    self._g.setGeometry(obj.rect())
+                return super().eventFilter(obj, event)
+        _GlowResizer(glow, shell)
+
         self.setCentralWidget(shell)
         self._build_loading_overlay(shell)
 
@@ -5237,9 +5372,6 @@ class MainWindow(QMainWindow):
         pages_host = QWidget()
         pages_host.setObjectName("PagesHost")
         pages_host.setProperty("class", "pageCanvas")
-        pages_host.setAutoFillBackground(False)
-        pages_host.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, False)
-        self._pages_host = pages_host
         pages_host_layout = QVBoxLayout(pages_host)
         pages_host_layout.setContentsMargins(0, 0, 0, 0)
         pages_host_layout.setSpacing(0)
@@ -5777,7 +5909,9 @@ class MainWindow(QMainWindow):
 
     def _create_category_cards(self, *, scope: str) -> list[ServiceCategoryCard]:
         cards: list[ServiceCategoryCard] = []
-        theme = self.context.settings.get().theme
+        settings = self.context.settings.get()
+        theme = settings.theme
+        accent = settings.accent_color
         selected = set(self._selected_service_ids())
         for cat in SERVICE_CATEGORIES:
             card = ServiceCategoryCard(cat)
@@ -5787,6 +5921,7 @@ class MainWindow(QMainWindow):
             card.set_icon_pixmap(self._category_card_icon_pixmap(cat, 28, selected=is_selected, onboarding=scope == "onboarding"))
             card.set_check_pixmap(self._service_check_pixmap(10))
             card.set_theme(theme)
+            card.set_accent_color(accent)
             card.set_selected(is_selected)
             card.toggled.connect(self._on_category_card_toggled)
             cards.append(card)
@@ -5808,7 +5943,7 @@ class MainWindow(QMainWindow):
 
     def _category_card_icon_pixmap(self, category: ServiceCategory, size: int, *, selected: bool, onboarding: bool = False) -> QPixmap:
         theme = self.context.settings.get().theme
-        accent = ServiceCategoryCard.CATEGORY_ACCENTS.get(category.id, "#4f73d9")
+        accent = ServiceCategoryCard.get_category_accents(self.context.settings.get().accent_color).get(category.id, self.context.settings.get().accent_color)
         tint = QColor(accent) if selected else (QColor("#7b8798") if (onboarding or is_light_theme(theme)) else QColor("#6f7a8c"))
         dpr = self._service_icon_device_ratio()
         cache_key = f"cat_{category.id}|{size}|{dpr:.2f}|{tint.name(QColor.NameFormat.HexArgb)}"
@@ -6690,16 +6825,45 @@ class MainWindow(QMainWindow):
 
         # --- Application section ---
         app_section = _section(self._t("Приложение", "Application"))
-        theme_combo = QComboBox()
-        theme_combo.setObjectName("SettingsThemeCombo")
-        theme_items = list_available_themes(self.context.paths.themes_dir, ui_language)
-        for tid, tname in theme_items:
-            theme_combo.addItem(tname, tid)
-            if tid == settings.theme:
-                theme_combo.setCurrentIndex(theme_combo.count() - 1)
-        ctrl["theme_combo"] = theme_combo
+
+        mode_items = [
+            (self._t("Светлая", "Light"), "light"),
+            (self._t("Тёмная", "Dark"), "dark"),
+            ("OLED", "oled"),
+        ]
+        mode_w, mode_group = _segment(mode_items, settings.theme, "theme_mode")
         app_section.addWidget(QLabel(self._t("Тема", "Theme")))
-        app_section.addWidget(theme_combo)
+        app_section.addWidget(mode_w)
+
+        palette_row = QWidget()
+        palette_row.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, False)
+        palette_layout = QHBoxLayout(palette_row)
+        palette_layout.setContentsMargins(0, 0, 0, 0)
+        palette_layout.setSpacing(8)
+        palette_group = QButtonGroup(palette_row)
+        for i, hex_color in enumerate(ACCENT_PALETTE):
+            btn = QPushButton()
+            btn.setFixedSize(32, 32)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.setCheckable(True)
+            btn.setChecked(hex_color == settings.accent_color)
+            btn._palette_value = hex_color
+            btn.setStyleSheet(
+                f"QPushButton {{ background: {hex_color}; border-radius: 16px; border: 3px solid {'white' if hex_color == settings.accent_color else 'transparent'}; }}"
+                f"QPushButton:hover {{ border: 3px solid white; }}"
+            )
+            if btn.isChecked():
+                shadow = QGraphicsDropShadowEffect(btn)
+                shadow.setBlurRadius(20)
+                shadow.setOffset(0, 0)
+                shadow.setColor(QColor(hex_color))
+                btn.setGraphicsEffect(shadow)
+            palette_group.addButton(btn, i)
+            palette_layout.addWidget(btn)
+        palette_group.setExclusive(True)
+        ctrl["accent_palette"] = palette_group
+        app_section.addWidget(QLabel(self._t("Цвет", "Color")))
+        app_section.addWidget(palette_row)
         lang_items = [(_language_display_name(l, ui_language), l) for l in ("ru", "en")]
         lang_w, _ = _segment(lang_items, settings.language, "language")
         app_section.addWidget(lang_w)
@@ -6817,12 +6981,6 @@ class MainWindow(QMainWindow):
 
         layout.addStretch(1)
 
-        save_btn = QPushButton(self._t("Сохранить настройки", "Save settings"))
-        save_btn.setProperty("class", "primary")
-        save_btn.setMinimumHeight(38)
-        save_btn.clicked.connect(lambda: self._save_settings_page(page))
-        layout.addWidget(save_btn)
-
         # --- Logs and Files section ---
         logs_files_section = _section(self._t("Логи и файлы", "Logs and Files"))
         logs_files_tabs = QTabWidget()
@@ -6899,6 +7057,68 @@ class MainWindow(QMainWindow):
         credits.setWordWrap(True)
         layout.addWidget(credits)
 
+        # --- Auto-save connections ---
+        def _theme_changed() -> None:
+            mode_grp = ctrl.get("theme_mode")
+            pal_grp = ctrl.get("accent_palette")
+            mode = ""
+            accent = "#7380ff"
+            if isinstance(mode_grp, QButtonGroup):
+                checked = mode_grp.checkedButton()
+                if checked is not None and hasattr(checked, "_seg_value"):
+                    mode = str(checked._seg_value)
+            if isinstance(pal_grp, QButtonGroup):
+                checked = pal_grp.checkedButton()
+                if checked is not None and hasattr(checked, "_palette_value"):
+                    accent = str(checked._palette_value)
+            if mode:
+                self.context.settings.update(theme=mode, accent_color=accent)
+                self._apply_theme()
+                QTimer.singleShot(0, lambda: self._reload_settings_page())
+                QTimer.singleShot(200, self._animate_settings_saved)
+
+        def _lang_changed() -> None:
+            grp = ctrl.get("language")
+            if isinstance(grp, QButtonGroup):
+                checked = grp.checkedButton()
+                if checked is not None and hasattr(checked, "_seg_value"):
+                    self.context.settings.update(language=str(checked._seg_value))
+                    self._retranslate_ui()
+                    self._schedule_full_locale_theme_refresh()
+
+        def _ctrl_changed() -> None:
+            self._save_settings_page(page)
+
+        debounce = QTimer(page)
+        debounce.setSingleShot(True)
+        debounce.setInterval(300)
+        debounce.timeout.connect(lambda: self._save_settings_page(page))
+
+        def _schedule_ctrl_save() -> None:
+            debounce.stop()
+            debounce.start()
+
+        mode_grp = ctrl.get("theme_mode")
+        if isinstance(mode_grp, QButtonGroup):
+            mode_grp.idClicked.connect(_theme_changed)
+        pal_grp = ctrl.get("accent_palette")
+        if isinstance(pal_grp, QButtonGroup):
+            pal_grp.idClicked.connect(_theme_changed)
+        lang_grp = ctrl.get("language")
+        if isinstance(lang_grp, QButtonGroup):
+            lang_grp.idClicked.connect(_lang_changed)
+        for key in ("autostart", "tray", "auto_components", "check_updates", "tg_cfproxy", "tg_cfproxy_priority"):
+            cb = ctrl.get(key)
+            if isinstance(cb, QCheckBox):
+                cb.stateChanged.connect(_ctrl_changed)
+        for key in ("udp_exclude", "tg_host", "tg_port", "tg_secret", "tg_cf_domain", "tg_fake_tls", "tg_buf", "tg_pool"):
+            inp = ctrl.get(key)
+            if isinstance(inp, QLineEdit):
+                inp.textChanged.connect(_schedule_ctrl_save)
+        tg_dc = ctrl.get("tg_dc")
+        if isinstance(tg_dc, QTextEdit):
+            tg_dc.textChanged.connect(_schedule_ctrl_save)
+
         return page
 
     def _reload_settings_page(self) -> None:
@@ -6918,12 +7138,29 @@ class MainWindow(QMainWindow):
                         btn.setChecked(True)
                         break
 
-        tc = ctrl.get("theme_combo")
-        if isinstance(tc, QComboBox):
-            for i in range(tc.count()):
-                if tc.itemData(i) == settings.theme:
-                    tc.setCurrentIndex(i)
-                    break
+        _set_seg("theme_mode", settings.theme)
+        pal_grp = ctrl.get("accent_palette")
+        if isinstance(pal_grp, QButtonGroup):
+            for btn in pal_grp.buttons():
+                hex_color = getattr(btn, "_palette_value", "")
+                is_selected = hex_color == settings.accent_color
+                if is_selected:
+                    btn.setChecked(True)
+                btn.setStyleSheet(
+                    f"QPushButton {{ background: {hex_color}; border-radius: 16px; border: 3px solid {'white' if is_selected else 'transparent'}; }}"
+                    f"QPushButton:hover {{ border: 3px solid white; }}"
+                )
+                if is_selected:
+                    old = btn.graphicsEffect()
+                    if old is not None:
+                        old.deleteLater()
+                    shadow = QGraphicsDropShadowEffect(btn)
+                    shadow.setBlurRadius(20)
+                    shadow.setOffset(0, 0)
+                    shadow.setColor(QColor(hex_color))
+                    btn.setGraphicsEffect(shadow)
+                else:
+                    btn.setGraphicsEffect(None)
         _set_seg("language", settings.language)
         cb = ctrl.get("autostart")
         if isinstance(cb, QCheckBox):
@@ -6990,11 +7227,14 @@ class MainWindow(QMainWindow):
                     return str(checked._seg_value)
             return None
 
-        tc = ctrl.get("theme_combo")
-        if isinstance(tc, QComboBox):
-            tid = tc.currentData()
-            if tid:
-                payload["theme"] = tid
+        val = _read_seg("theme_mode")
+        if val:
+            payload["theme"] = val
+        pal_grp = ctrl.get("accent_palette")
+        if isinstance(pal_grp, QButtonGroup):
+            checked = pal_grp.checkedButton()
+            if checked is not None and hasattr(checked, "_palette_value"):
+                payload["accent_color"] = str(checked._palette_value)
         val = _read_seg("language")
         if val:
             payload["language"] = val
@@ -7459,6 +7699,7 @@ class MainWindow(QMainWindow):
             elif index == 4:
                 self._reload_settings_page()
                 self.refresh_dashboard()
+            self._animate_glow_for_page(index)
             if index != self.pages.currentIndex():
                 self._prepare_page_geometry_for_index(index)
                 try:
@@ -7489,6 +7730,22 @@ class MainWindow(QMainWindow):
                 btn.setChecked(i == actual_index)
             self._sync_nav_highlight(animated=False)
             self._set_logs_live_enabled(False)
+
+    PAGE_GLOW_POSITIONS: dict[int, tuple[float, float]] = {
+        0: (0.50, 0.50),
+        1: (0.80, 0.15),
+        2: (0.15, 0.80),
+        3: (0.80, 0.80),
+        4: (0.50, 0.85),
+    }
+
+    def _animate_glow_for_page(self, index: int) -> None:
+        if self._pages_host is None:
+            return
+        target = self.PAGE_GLOW_POSITIONS.get(index)
+        if target is None:
+            return
+        self._pages_host.set_glow_position(target[0], target[1], animated=True, duration=500)
 
     def _sync_nav_highlight(self, *, animated: bool) -> None:
         sidebar = self.findChild(SidebarPanel, "Sidebar")
@@ -7676,9 +7933,11 @@ class MainWindow(QMainWindow):
             effective_payload["zapret_game_filter_mode"] = "tcpudp"
         before_theme = str(getattr(before, "theme", self.context.settings.get().theme))
         before_language = str(getattr(before, "language", self.context.settings.get().language))
+        before_accent = str(getattr(before, "accent_color", self.context.settings.get().accent_color))
         next_theme = str(effective_payload.get("theme", before_theme))
         next_language = str(effective_payload.get("language", before_language))
-        theme_changed = before_theme != next_theme
+        next_accent = str(effective_payload.get("accent_color", before_accent))
+        theme_changed = before_theme != next_theme or before_accent != next_accent
         language_changed = before_language != next_language
         self._settings_save_revision += 1
         revision = self._settings_save_revision
@@ -7690,9 +7949,17 @@ class MainWindow(QMainWindow):
             self._retranslate_ui()
         if theme_changed or language_changed:
             self._schedule_full_locale_theme_refresh()
+        if theme_changed or language_changed or "accent_color" in effective_payload:
+            if self._pages_host is not None:
+                self._pages_host.set_accent_color(str(effective_payload.get("accent_color", self.context.settings.get().accent_color)))
+                QTimer.singleShot(200, self._pages_host.animate_pulse)
         backend_payload = dict(effective_payload)
         backend_payload["client_revision"] = revision
         self._submit_backend_task("apply_settings", backend_payload, action_id="__settings__")
+
+    def _animate_settings_saved(self) -> None:
+        if self._pages_host is not None:
+            self._pages_host.animate_pulse()
 
     def _schedule_full_locale_theme_refresh(self) -> None:
         QTimer.singleShot(0, self._refresh_ui_after_locale_theme_change)
@@ -8248,7 +8515,9 @@ class MainWindow(QMainWindow):
 
     def _apply_theme(self) -> None:
         load_theme_registry(self.context.paths.themes_dir)
-        theme = self.context.settings.get().theme
+        settings = self.context.settings.get()
+        theme = settings.theme
+        accent = settings.accent_color
         self._icon_cache.clear()
         self._service_icon_cache.clear()
         self._service_check_cache.clear()
@@ -8257,9 +8526,11 @@ class MainWindow(QMainWindow):
         self.setStyleSheet(build_stylesheet(theme, chevron_icon=chevron, check_icon=check))
         self._update_power_icon()
         if isinstance(self.power_button, AnimatedPowerButton):
-            self.power_button.set_power_theme(theme)
+            self.power_button.set_power_theme(theme, accent)
         if self.power_aura is not None:
-            self.power_aura.set_power_theme(theme)
+            self.power_aura.set_power_theme(theme, accent)
+        if self._pages_host is not None:
+            self._pages_host.set_accent_color(accent)
         sidebar = self.findChild(SidebarPanel, "Sidebar")
         if sidebar is not None:
             sidebar.set_theme(theme)
@@ -12076,7 +12347,9 @@ class MainWindow(QMainWindow):
         return result
 
     def refresh_services(self) -> None:
-        theme = self.context.settings.get().theme
+        settings = self.context.settings.get()
+        theme = settings.theme
+        accent = settings.accent_color
         selected = set(self._selected_service_ids())
         for card in self._all_category_cards():
             cat = card.category
@@ -12084,6 +12357,7 @@ class MainWindow(QMainWindow):
             try:
                 card.blockSignals(True)
                 card.set_theme(theme)
+                card.set_accent_color(accent)
                 card.set_texts(cat.title_en, self._t(cat.description_ru, cat.description_en), self._category_card_members_text(cat))
                 card.set_icon_pixmap(self._category_card_icon_pixmap(cat, 28, selected=is_selected))
                 card.set_check_pixmap(self._service_check_pixmap(10))
@@ -12096,7 +12370,9 @@ class MainWindow(QMainWindow):
         self._update_service_selection_summary()
 
     def _refresh_category_cards(self) -> None:
-        theme = self.context.settings.get().theme
+        settings = self.context.settings.get()
+        theme = settings.theme
+        accent = settings.accent_color
         selected = set(self._selected_service_ids())
         for card in self._all_category_cards():
             cat = card.category
