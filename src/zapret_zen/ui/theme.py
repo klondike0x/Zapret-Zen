@@ -230,7 +230,7 @@ def _build_base_css() -> tuple[str, str]:
     #DialogBody {
         background: transparent;
     }
-    #SettingsScroll, #SettingsCanvas, #SettingsScroll QWidget#qt_scrollarea_viewport {
+    #SettingsScroll, #SettingsScroll QWidget#qt_scrollarea_viewport {
         background: transparent;
         border: none;
     }
@@ -794,7 +794,7 @@ def _build_base_css() -> tuple[str, str]:
     #DialogBody {
         background: transparent;
     }
-    #SettingsScroll, #SettingsCanvas, #SettingsScroll QWidget#qt_scrollarea_viewport {
+    #SettingsScroll, #SettingsScroll QWidget#qt_scrollarea_viewport {
         background: transparent;
         border: none;
     }

@@ -40,7 +40,6 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QFrame,
     QGraphicsBlurEffect,
-    QGraphicsDropShadowEffect,
     QGraphicsOpacityEffect,
     QGridLayout,
     QHBoxLayout,
@@ -6777,7 +6776,6 @@ class MainWindow(QMainWindow):
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         canvas = QWidget()
         canvas.setObjectName("SettingsCanvas")
-        canvas.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, False)
         layout = QVBoxLayout(canvas)
         layout.setContentsMargins(24, 24, 24, 24)
         layout.setSpacing(16)
@@ -6839,27 +6837,22 @@ class MainWindow(QMainWindow):
         palette_row.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, False)
         palette_layout = QHBoxLayout(palette_row)
         palette_layout.setContentsMargins(0, 0, 0, 0)
-        palette_layout.setSpacing(8)
+        palette_layout.setSpacing(6)
         palette_group = QButtonGroup(palette_row)
         for i, hex_color in enumerate(ACCENT_PALETTE):
             btn = QPushButton()
-            btn.setFixedSize(32, 32)
+            btn.setMinimumHeight(28)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
             btn.setCheckable(True)
             btn.setChecked(hex_color == settings.accent_color)
             btn._palette_value = hex_color
+            is_sel = hex_color == settings.accent_color
             btn.setStyleSheet(
-                f"QPushButton {{ background: {hex_color}; border-radius: 16px; border: 3px solid {'white' if hex_color == settings.accent_color else 'transparent'}; }}"
+                f"QPushButton {{ background: {hex_color}; border-radius: 8px; border: {3 if is_sel else 2}px solid {'white' if is_sel else 'transparent'}; }}"
                 f"QPushButton:hover {{ border: 3px solid white; }}"
             )
-            if btn.isChecked():
-                shadow = QGraphicsDropShadowEffect(btn)
-                shadow.setBlurRadius(20)
-                shadow.setOffset(0, 0)
-                shadow.setColor(QColor(hex_color))
-                btn.setGraphicsEffect(shadow)
             palette_group.addButton(btn, i)
-            palette_layout.addWidget(btn)
+            palette_layout.addWidget(btn, 1)
         palette_group.setExclusive(True)
         ctrl["accent_palette"] = palette_group
         app_section.addWidget(QLabel(self._t("Цвет", "Color")))
@@ -7147,20 +7140,9 @@ class MainWindow(QMainWindow):
                 if is_selected:
                     btn.setChecked(True)
                 btn.setStyleSheet(
-                    f"QPushButton {{ background: {hex_color}; border-radius: 16px; border: 3px solid {'white' if is_selected else 'transparent'}; }}"
+                    f"QPushButton {{ background: {hex_color}; border-radius: 8px; border: {3 if is_selected else 2}px solid {'white' if is_selected else 'transparent'}; }}"
                     f"QPushButton:hover {{ border: 3px solid white; }}"
                 )
-                if is_selected:
-                    old = btn.graphicsEffect()
-                    if old is not None:
-                        old.deleteLater()
-                    shadow = QGraphicsDropShadowEffect(btn)
-                    shadow.setBlurRadius(20)
-                    shadow.setOffset(0, 0)
-                    shadow.setColor(QColor(hex_color))
-                    btn.setGraphicsEffect(shadow)
-                else:
-                    btn.setGraphicsEffect(None)
         _set_seg("language", settings.language)
         cb = ctrl.get("autostart")
         if isinstance(cb, QCheckBox):
@@ -8531,6 +8513,7 @@ class MainWindow(QMainWindow):
             self.power_aura.set_power_theme(theme, accent)
         if self._pages_host is not None:
             self._pages_host.set_accent_color(accent)
+            self._pages_host.setVisible(theme != "oled")
         sidebar = self.findChild(SidebarPanel, "Sidebar")
         if sidebar is not None:
             sidebar.set_theme(theme)
