@@ -14,10 +14,12 @@ Set-Location $root
 & $Python scripts\sync_app_icon.py
 if ($LASTEXITCODE -ne 0) { throw "sync_app_icon.py failed with exit code $LASTEXITCODE" }
 
+$versionLine = & $Python -c "import sys; sys.path.insert(0,'src'); from zapret_zen import __version__; print(__version__)"
+
 if (-not $SkipPrepareRelease) {
-    $sourceDir = Join-Path $root $AppDir
-    if (-not (Test-Path (Join-Path $sourceDir "zapret_zen.exe"))) {
-        throw "Main app exe not found in $sourceDir. Run build_pyinstaller.ps1 first."
+    $appRoot = Join-Path $root $AppDir "zapret_zen"
+    if (-not (Test-Path (Join-Path $appRoot "zapret_zen.exe"))) {
+        throw "Main app exe not found in $appRoot. Run build_pyinstaller.ps1 first."
     }
 
     $payloadDir = Join-Path $root $PayloadDir
@@ -31,10 +33,7 @@ if (-not $SkipPrepareRelease) {
     $tempDir = Join-Path $env:TEMP "zapretzen_payload_x64"
     if (Test-Path $tempDir) { Remove-Item $tempDir -Recurse -Force }
     $payloadRoot = Join-Path $tempDir "zapret_zen"
-    New-Item -ItemType Directory -Path $payloadRoot -Force | Out-Null
-    Get-ChildItem $sourceDir -File | ForEach-Object {
-        Copy-Item -LiteralPath $_.FullName -Destination $payloadRoot -Force
-    }
+    Copy-Item -LiteralPath $appRoot -Destination $payloadRoot -Recurse -Force
     Compress-Archive -Path (Join-Path $tempDir "*") -DestinationPath $zipPath -CompressionLevel Optimal -Force
     Remove-Item $tempDir -Recurse -Force
 }
@@ -43,7 +42,7 @@ if (-not $SkipPrepareRelease) {
 if ($LASTEXITCODE -ne 0) { throw "PyInstaller installer build failed with exit code $LASTEXITCODE" }
 
 $builtExe = Join-Path $OutputDir "install_zapretzen.exe"
-$finalExe = Join-Path $OutputDir "install_zapretzen_2.1b_universal.exe"
+$finalExe = Join-Path $OutputDir "install_zapretzen_${versionLine}_universal.exe"
 if (Test-Path $builtExe) {
     Copy-Item -LiteralPath $builtExe -Destination $finalExe -Force
     Remove-Item -LiteralPath $builtExe -Force

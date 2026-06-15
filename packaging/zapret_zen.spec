@@ -105,16 +105,23 @@ pyz = PYZ(a.pure)
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.datas,
     [],
+    exclude_binaries=True,
     name="zapret_zen",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
     upx=False,
     console=False,
-    exclude_binaries=False,
     icon=str(project_root / "ui_assets" / "icons" / "app.ico"),
     version=version_info,
+)
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.datas,
+    strip=False,
+    upx=False,
+    upx_exclude=[],
+    name="zapret_zen",
 )

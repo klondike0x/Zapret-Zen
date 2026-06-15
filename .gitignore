@@ -22,6 +22,7 @@ github_release/
 portable/
 installer_payload/
 nuitka-crash-report.xml
+build_pyinstaller/
 
 # runtime data
 logs/
