@@ -1335,14 +1335,18 @@ class AnimatedPowerButton(QToolButton):
         self._visual_mode = "off"
         self._visual_scale = 1.0
         self._hover_progress = 0.0
-        self._glow_pos = QPointF(66.0, 66.0)
+        self._glow_pos = QPointF(100.0, 100.0)
         self._wave_progress = 0.0
         self._wave_strength = 0.0
         self._wave_outward = True
+        self._glint_progress = 0.0
+        self._burst_progress = 0.0
         self._scale_anim: QPropertyAnimation | None = None
         self._hover_anim: QPropertyAnimation | None = None
         self._wave_progress_anim: QPropertyAnimation | None = None
         self._wave_strength_anim: QPropertyAnimation | None = None
+        self._glint_anim: QPropertyAnimation | None = None
+        self._burst_anim: QPropertyAnimation | None = None
 
     def set_power_theme(self, theme: str) -> None:
         self._theme_name = theme
@@ -1350,6 +1354,7 @@ class AnimatedPowerButton(QToolButton):
         self.update()
 
     def set_active_state(self, active: bool, *, animate: bool = True) -> None:
+        transitioning_on = active and not self._active
         self._active = active
         self._visual_mode = "on" if active else "off"
         target = 1.14 if active else 1.0
@@ -1358,6 +1363,8 @@ class AnimatedPowerButton(QToolButton):
         if not animate:
             self._visual_scale = target
             self.update()
+            if transitioning_on:
+                self.play_burst()
             return
         anim = QPropertyAnimation(self, b"visualScale", self)
         anim.setDuration(220)
@@ -1366,6 +1373,8 @@ class AnimatedPowerButton(QToolButton):
         anim.setEasingCurve(QEasingCurve.Type.InOutCubic)
         anim.start()
         self._scale_anim = anim
+        if transitioning_on:
+            self.play_burst()
 
     def set_loading_state(self, loading: bool, *, animate: bool = True) -> None:
         self._visual_mode = "loading" if loading else ("on" if self._active else "off")
@@ -1396,6 +1405,11 @@ class AnimatedPowerButton(QToolButton):
         self._glow_pos = event.position()
         self.update()
         super().mouseMoveEvent(event)
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:
+        super().mousePressEvent(event)
+        if event.button() == Qt.MouseButton.LeftButton and self.isEnabled():
+            self.play_glint()
 
     def _animate_hover(self, target: float) -> None:
         if self._hover_anim is not None:
@@ -1430,6 +1444,80 @@ class AnimatedPowerButton(QToolButton):
         strength.start()
         self._wave_progress_anim = prog
         self._wave_strength_anim = strength
+
+    def play_glint(self) -> None:
+        if self._glint_anim is not None:
+            self._glint_anim.stop()
+        self._glint_progress = 0.0
+        anim = QPropertyAnimation(self, b"glintProgress", self)
+        anim.setDuration(350)
+        anim.setStartValue(0.0)
+        anim.setEndValue(1.0)
+        anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        anim.start()
+        self._glint_anim = anim
+
+    def play_burst(self) -> None:
+        if self._burst_anim is not None:
+            self._burst_anim.stop()
+        self._burst_progress = 0.0
+        anim = QPropertyAnimation(self, b"burstProgress", self)
+        anim.setDuration(500)
+        anim.setStartValue(0.0)
+        anim.setEndValue(1.0)
+        anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        anim.finished.connect(lambda: self._reset_burst())
+        anim.start()
+        self._burst_anim = anim
+
+    def _reset_burst(self) -> None:
+        self._burst_progress = 0.0
+        self.update()
+
+    def _paint_glint(self, painter: QPainter, center: QPointF, radius: float) -> None:
+        progress = max(0.0, min(1.0, self._glint_progress))
+        if progress <= 0.001:
+            return
+        painter.save()
+        path = QPainterPath()
+        path.addEllipse(center, radius, radius)
+        painter.setClipPath(path)
+        sweep = -0.4 + 1.8 * progress
+        grad = QLinearGradient(
+            center.x() - radius + sweep * radius * 2.0,
+            center.y() - radius * 0.7,
+            center.x() - radius + sweep * radius * 2.0 + radius * 0.6,
+            center.y() + radius * 0.7,
+        )
+        alpha = int(160 * (1.0 - abs(progress - 0.5) * 1.2))
+        grad.setColorAt(0.0, QColor(255, 255, 255, 0))
+        grad.setColorAt(0.4, QColor(255, 255, 255, alpha))
+        grad.setColorAt(0.6, QColor(255, 255, 255, alpha))
+        grad.setColorAt(1.0, QColor(255, 255, 255, 0))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(grad)
+        painter.drawEllipse(center, radius, radius)
+        painter.restore()
+
+    def _paint_burst(self, painter: QPainter, center: QPointF, accent: QColor) -> None:
+        progress = max(0.0, min(1.0, self._burst_progress))
+        if progress <= 0.001:
+            return
+        painter.save()
+        painter.setPen(Qt.PenStyle.NoPen)
+        for i in range(14):
+            angle = (i * 25.7 + 12.0) * math.pi / 180.0
+            distance = 6.0 + 42.0 * progress
+            dot_radius = 2.8 - 1.2 * progress + (0.4 if i % 2 else 0.0)
+            color = QColor(accent)
+            color.setAlpha(max(0, int(180 * (1.0 - progress) - i * 3)))
+            point = QPointF(
+                center.x() + math.cos(angle) * distance,
+                center.y() + math.sin(angle) * distance,
+            )
+            painter.setBrush(color)
+            painter.drawEllipse(point, max(1.0, dot_radius), max(1.0, dot_radius))
+        painter.restore()
 
     def paintEvent(self, event: QEvent) -> None:
         painter = QPainter(self)
@@ -1518,12 +1606,16 @@ class AnimatedPowerButton(QToolButton):
             painter.drawEllipse(center, radius, radius)
             painter.restore()
 
-        icon_size = 48 if self._active else 44
+        icon_size = 54 if self._active else 50
         if self._visual_mode == "loading":
-            icon_size = 46
+            icon_size = 52
         pixmap = self.icon().pixmap(icon_size, icon_size)
         target = QRectF(center.x() - icon_size / 2.0, center.y() - icon_size / 2.0, icon_size, icon_size)
         painter.drawPixmap(target, pixmap, QRectF(0, 0, pixmap.width(), pixmap.height()))
+
+        on_color = on_top if self._active else off_top
+        self._paint_glint(painter, center, radius)
+        self._paint_burst(painter, center, on_color)
 
     def _get_visual_scale(self) -> float:
         return self._visual_scale
@@ -1558,6 +1650,23 @@ class AnimatedPowerButton(QToolButton):
     waveStrength = Property(float, _get_wave_strength, _set_wave_strength)
     hoverProgress = Property(float, _get_hover_progress, _set_hover_progress)
 
+    def _get_glint_progress(self) -> float:
+        return self._glint_progress
+
+    def _set_glint_progress(self, value: float) -> None:
+        self._glint_progress = float(value)
+        self.update()
+
+    def _get_burst_progress(self) -> float:
+        return self._burst_progress
+
+    def _set_burst_progress(self, value: float) -> None:
+        self._burst_progress = float(value)
+        self.update()
+
+    glintProgress = Property(float, _get_glint_progress, _set_glint_progress)
+    burstProgress = Property(float, _get_burst_progress, _set_burst_progress)
+
 
 class PowerAuraWidget(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
@@ -1569,8 +1678,8 @@ class PowerAuraWidget(QWidget):
         self._wave_strength = 0.0
         self._wave_outward = True
         self._center_point = QPointF()
-        self._wave_base_radius = 74.0
-        self._wave_travel_radius = 124.0
+        self._wave_base_radius = 112.0
+        self._wave_travel_radius = 186.0
         self._idle_enabled = False
         self._status_glow_enabled = False
         self._status_glow_breath = 0.0
@@ -1645,7 +1754,7 @@ class PowerAuraWidget(QWidget):
     def _play_idle_pulse(self) -> None:
         if not self._idle_enabled or self._wave_strength > 0.08:
             return
-        self._play_wave_internal(outward=True, strength=0.30, duration=1450, base_radius=62.0, travel_radius=62.0)
+        self._play_wave_internal(outward=True, strength=0.30, duration=1450, base_radius=96.0, travel_radius=96.0)
 
     def _play_wave_internal(self, *, outward: bool, strength: float, duration: int, base_radius: float, travel_radius: float) -> None:
         self._wave_outward = outward
@@ -1673,7 +1782,7 @@ class PowerAuraWidget(QWidget):
         self._wave_strength_anim = fade
 
     def play_wave(self, outward: bool) -> None:
-        self._play_wave_internal(outward=outward, strength=0.48, duration=820, base_radius=74.0, travel_radius=118.0)
+        self._play_wave_internal(outward=outward, strength=0.48, duration=820, base_radius=112.0, travel_radius=176.0)
 
     def paintEvent(self, event: QEvent) -> None:
         if self._wave_strength <= 0.001 and self._status_glow_presence <= 0.001:
@@ -5491,12 +5600,12 @@ class MainWindow(QMainWindow):
         self.power_aura.lower()
 
         power_stage = QWidget(power_block)
-        power_stage.setFixedSize(224, 160)
+        power_stage.setFixedSize(310, 230)
         power_stage.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, False)
         power_stage.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         power_stage.setStyleSheet("background: transparent;")
         power_stage_layout = QVBoxLayout(power_stage)
-        power_stage_layout.setContentsMargins(0, 14, 0, 14)
+        power_stage_layout.setContentsMargins(0, 15, 0, 15)
         power_stage_layout.setSpacing(0)
         power_stage_layout.addStretch(1)
         power_button_row = QHBoxLayout()
@@ -5506,8 +5615,8 @@ class MainWindow(QMainWindow):
         self.power_button = AnimatedPowerButton(power_stage)
         self.power_button.setProperty("class", "power")
         self.power_button.setIcon(self._icon("power.svg"))
-        self.power_button.setIconSize(QSize(42, 42))
-        self.power_button.setFixedSize(132, 132)
+        self.power_button.setIconSize(QSize(48, 48))
+        self.power_button.setFixedSize(200, 200)
         self.power_button.setEnabled(False)
         self.power_button.clicked.connect(self._toggle_master_runtime)
         self._attach_button_animations(self.power_button)
