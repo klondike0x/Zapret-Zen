@@ -11,7 +11,7 @@
 [![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](https://python.org)
 [![PySide6](https://img.shields.io/badge/PySide6-6.7%2B-41CD52?logo=qt&logoColor=white)](https://doc.qt.io/qtforpython/)
 [![License](https://img.shields.io/badge/License-MIT-yellow?logo=github)](LICENSE)
-[![Version](https://img.shields.io/badge/Version-2.1b-blue?logo=github)](https://github.com/peshk0v/Zapret-Zen/releases)
+[![Version](https://img.shields.io/badge/Version-2.1-blue?logo=github)](https://github.com/peshk0v/Zapret-Zen/releases)
 
 </div>
 
