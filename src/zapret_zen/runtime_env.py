@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import functools
 import sys
 from pathlib import Path
 
@@ -13,6 +14,7 @@ _PYTHON_EXECUTABLE_NAMES = {
 }
 
 
+@functools.lru_cache(maxsize=1)
 def is_packaged_runtime() -> bool:
     if getattr(sys, "frozen", False):
         return True

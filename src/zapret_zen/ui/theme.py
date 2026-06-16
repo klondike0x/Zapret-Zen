@@ -125,28 +125,6 @@ def list_available_themes(themes_dir: Path | str | None, language: str = "en") -
     return result
 
 
-def is_light_theme(theme: str) -> bool:
-    td = _get_theme(theme)
-    return td.is_light if td else False
-
-
-def build_stylesheet(theme: str, chevron_icon: str = "", check_icon: str = "") -> str:
-    td = _get_theme(theme)
-    css = td.stylesheet if td else ""
-    if not css:
-        return ""
-    arrow_rule = "image: none;"
-    if chevron_icon:
-        normalized_icon = chevron_icon.replace("\\", "/")
-        arrow_rule = f'image: url("{normalized_icon}");'
-    check_rule = "image: none;"
-    if check_icon:
-        normalized_check = check_icon.replace("\\", "/")
-        check_rule = f'image: url("{normalized_check}");'
-    css = css.replace("__COMBO_ARROW__", arrow_rule)
-    return css.replace("__CHECK_ICON__", check_rule)
-
-
 def ensure_theme_files(themes_dir: Path | str) -> None:
     td = Path(themes_dir)
     td.mkdir(parents=True, exist_ok=True)
@@ -1469,19 +1447,17 @@ def generate_palette(accent_hex: str, mode: str) -> dict[str, str]:
     }
 
 
-def is_light_theme(theme_or_mode: str) -> bool:
-    if theme_or_mode in ("light",):
+def is_light_theme(theme: str) -> bool:
+    if theme in ("light",):
         return True
-    if theme_or_mode in ("dark", "oled"):
+    if theme in ("dark", "oled"):
         return False
-    # Fallback: old theme registry lookup
-    td = _get_theme(theme_or_mode)
+    td = _get_theme(theme)
     return td.is_light if td else False
 
 
-def build_stylesheet(theme_or_mode: str, chevron_icon: str = "", check_icon: str = "") -> str:
-    # Use old theme registry for backwards compatibility
-    td = _get_theme(theme_or_mode)
+def build_stylesheet(theme: str, chevron_icon: str = "", check_icon: str = "") -> str:
+    td = _get_theme(theme)
     css = td.stylesheet if td else ""
     if not css:
         return ""

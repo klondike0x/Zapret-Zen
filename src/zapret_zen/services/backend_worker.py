@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import multiprocessing as mp
 import os
@@ -6,6 +6,8 @@ import queue
 import tempfile
 import traceback
 import uuid
+from collections.abc import Callable
+from contextlib import contextmanager
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
@@ -260,637 +262,718 @@ def _action_error_source(action: str) -> str:
         return "files"
     return "backend"
 
+
+# ---------------------------------------------------------------------------
+# Action registry
+# ---------------------------------------------------------------------------
+
+ActionHandler = Callable[..., dict[str, Any]]
+_ACTION_HANDLERS: dict[str, ActionHandler] = {}
+
+
+def _register_action(name: str):
+    def decorator(fn: ActionHandler) -> ActionHandler:
+        _ACTION_HANDLERS[name] = fn
+        return fn
+    return decorator
+
+
+@contextmanager
+def _reconfigure_zapret(context):
+    """Context manager: stop zapret → yield → rebuild & optionally restart."""
+    was_running = _stop_zapret_for_reconfiguration(context)
+    yield
+    _finish_zapret_reconfiguration(context, restart=was_running)
+
+
 def _run_action(context, action: str, payload: dict[str, Any], emit_progress: callable | None = None) -> dict[str, Any]:
     payload = {key: value for key, value in payload.items() if not str(key).startswith("_")}
     context.settings.reload()
+    handler = _ACTION_HANDLERS.get(action)
+    if handler is None:
+        return {}
+    return handler(context, payload, emit_progress)
 
-    if action == "toggle_master_runtime":
-        _sync_telegram_component_from_services(context)
-        components = context.processes.list_components()
-        states = {item.component_id: item for item in context.processes.list_states()}
-        active_ids = [c.id for c in components if c.enabled]
-        running_ids = {
-            component_id
-            for component_id, state in states.items()
-            if state.status == "running"
-        }
-        if running_ids:
-            for cid in list(running_ids):
-                context.processes.stop_component(cid)
-            mode = "disconnect"
-        else:
-            for cid in active_ids:
-                context.processes.start_component(cid)
-            mode = "connect"
-        result = {"mode": mode}
-        result.update(_snapshot(context))
-        _attach_telegram_proxy_info(context, result)
-        return result
 
-    if action == "load_startup_snapshot":
-        _sync_telegram_component_from_services(context)
-        current = context.settings.get()
-        if not str(current.selected_zapret_general or "").strip():
-            options = context.processes.list_zapret_generals()
-            if options:
-                context.settings.update(selected_zapret_general=str(options[0]["id"]))
+# ---------------------------------------------------------------------------
+# Action handlers
+# ---------------------------------------------------------------------------
 
-        result = _snapshot(context)
-        result.update(_mods_payload(context))
-        result["general_options"] = list(context.processes.list_zapret_generals())
-        return result
+@_register_action("toggle_master_runtime")
+def _handle_toggle_master_runtime(context, payload, emit_progress):
+    _sync_telegram_component_from_services(context)
+    components = context.processes.list_components()
+    states = {item.component_id: item for item in context.processes.list_states()}
+    active_ids = [c.id for c in components if c.enabled]
+    running_ids = {
+        component_id
+        for component_id, state in states.items()
+        if state.status == "running"
+    }
+    if running_ids:
+        for cid in list(running_ids):
+            context.processes.stop_component(cid)
+        mode = "disconnect"
+    else:
+        for cid in active_ids:
+            context.processes.start_component(cid)
+        mode = "connect"
+    result = {"mode": mode}
+    result.update(_snapshot(context))
+    _attach_telegram_proxy_info(context, result)
+    return result
 
-    if action == "load_components_payload":
-        _sync_telegram_component_from_services(context)
-        current = context.settings.get()
+
+@_register_action("load_startup_snapshot")
+def _handle_load_startup_snapshot(context, payload, emit_progress):
+    _sync_telegram_component_from_services(context)
+    current = context.settings.get()
+    if not str(current.selected_zapret_general or "").strip():
         options = context.processes.list_zapret_generals()
-        if not str(current.selected_zapret_general or "").strip() and options:
+        if options:
             context.settings.update(selected_zapret_general=str(options[0]["id"]))
-        result = _snapshot(context)
-        result["general_options"] = options
-        return result
+    result = _snapshot(context)
+    result.update(_mods_payload(context))
+    result["general_options"] = list(context.processes.list_zapret_generals())
+    return result
 
-    if action == "start_enabled_components":
-        _sync_telegram_component_from_services(context)
-        autostart_only = bool(payload.get("autostart_only", False)) if isinstance(payload, dict) else False
-        components = context.processes.list_components()
-        if autostart_only:
-            for component in components:
-                if component.enabled and component.autostart:
-                    context.processes.start_component(component.id)
-        else:
-            for component in components:
-                if component.enabled:
-                    context.processes.start_component(component.id)
-        result = _snapshot(context)
-        _attach_telegram_proxy_info(context, result)
-        return result
 
-    if action == "start_component":
-        component_id = str(payload.get("component_id", "")).strip()
-        if component_id:
-            if component_id == "zapret":
-                result = _set_zapret_enabled_from_components(context, True)
-                _attach_telegram_proxy_info(context, result)
-                return result
-            context.processes.start_component(component_id)
-        result = _snapshot(context)
-        _attach_telegram_proxy_info(context, result)
-        return result
+@_register_action("load_components_payload")
+def _handle_load_components_payload(context, payload, emit_progress):
+    _sync_telegram_component_from_services(context)
+    current = context.settings.get()
+    options = context.processes.list_zapret_generals()
+    if not str(current.selected_zapret_general or "").strip() and options:
+        context.settings.update(selected_zapret_general=str(options[0]["id"]))
+    result = _snapshot(context)
+    result["general_options"] = options
+    return result
 
-    if action == "stop_component":
-        component_id = str(payload.get("component_id", "")).strip()
-        if component_id:
-            if component_id == "zapret":
-                return _set_zapret_enabled_from_components(context, False)
-            context.processes.stop_component(component_id)
-        return _snapshot(context)
 
-    if action == "prepare_general_autotest_runtime":
-        restore = _prepare_general_autotest_runtime(context)
-        result = {"restore_runtime": restore}
-        result.update(_snapshot(context))
-        return result
+@_register_action("start_enabled_components")
+def _handle_start_enabled_components(context, payload, emit_progress):
+    _sync_telegram_component_from_services(context)
+    autostart_only = bool(payload.get("autostart_only", False)) if isinstance(payload, dict) else False
+    components = context.processes.list_components()
+    if autostart_only:
+        for component in components:
+            if component.enabled and component.autostart:
+                context.processes.start_component(component.id)
+    else:
+        for component in components:
+            if component.enabled:
+                context.processes.start_component(component.id)
+    result = _snapshot(context)
+    _attach_telegram_proxy_info(context, result)
+    return result
 
-    if action == "restore_general_autotest_runtime":
-        restore = payload.get("restore_runtime", {})
-        restored = _restore_general_autotest_runtime(context, restore if isinstance(restore, dict) else {})
-        result = {"runtime_restored": restored}
-        result.update(_snapshot(context))
-        _attach_telegram_proxy_info(context, result)
-        return result
 
-    if action == "apply_settings":
-        before = context.settings.get()
-        try:
-            client_revision = int(payload.get("client_revision", 0) or 0)
-        except (TypeError, ValueError):
-            client_revision = 0
-        effective_payload = {key: value for key, value in payload.items() if key != "client_revision"}
-        if "fortnite" in {str(item) for item in list(before.selected_service_ids or [])}:
-            effective_payload["zapret_ipset_mode"] = "any"
-            effective_payload["zapret_game_filter_mode"] = "tcpudp"
-        tg_before = (
-            before.tg_proxy_host,
-            int(before.tg_proxy_port),
-            before.tg_proxy_secret,
-            before.tg_proxy_dc_ip,
-            bool(before.tg_proxy_cfproxy_enabled),
-            bool(before.tg_proxy_cfproxy_priority),
-            before.tg_proxy_cfproxy_domain,
-            before.tg_proxy_fake_tls_domain,
-            int(before.tg_proxy_buf_kb),
-            int(before.tg_proxy_pool_size),
-        )
-        zapret_before = (
-            before.zapret_ipset_mode,
-            before.zapret_game_filter_mode,
-            before.zapret_udp_exclude_ports,
-            before.selected_zapret_general,
-        )
-        theme_before = before.theme
-        language_before = before.language
-        autostart_before = bool(before.autostart_windows)
-        requested_zapret = (
-            str(effective_payload.get("zapret_ipset_mode", before.zapret_ipset_mode)),
-            str(effective_payload.get("zapret_game_filter_mode", before.zapret_game_filter_mode)),
-            str(effective_payload.get("zapret_udp_exclude_ports", before.zapret_udp_exclude_ports)),
-            str(effective_payload.get("selected_zapret_general", before.selected_zapret_general)),
-        )
-        zapret_changed = zapret_before != requested_zapret
-        zapret_was_running = _stop_zapret_for_reconfiguration(context) if zapret_changed else False
-        context.settings.update(**effective_payload)
-        tg_after = (
-            str(effective_payload.get("tg_proxy_host", context.settings.get().tg_proxy_host)),
-            int(effective_payload.get("tg_proxy_port", context.settings.get().tg_proxy_port)),
-            str(effective_payload.get("tg_proxy_secret", context.settings.get().tg_proxy_secret)),
-            str(effective_payload.get("tg_proxy_dc_ip", context.settings.get().tg_proxy_dc_ip)),
-            bool(effective_payload.get("tg_proxy_cfproxy_enabled", context.settings.get().tg_proxy_cfproxy_enabled)),
-            bool(effective_payload.get("tg_proxy_cfproxy_priority", context.settings.get().tg_proxy_cfproxy_priority)),
-            str(effective_payload.get("tg_proxy_cfproxy_domain", context.settings.get().tg_proxy_cfproxy_domain)),
-            str(effective_payload.get("tg_proxy_fake_tls_domain", context.settings.get().tg_proxy_fake_tls_domain)),
-            int(effective_payload.get("tg_proxy_buf_kb", context.settings.get().tg_proxy_buf_kb)),
-            int(effective_payload.get("tg_proxy_pool_size", context.settings.get().tg_proxy_pool_size)),
-        )
-        current = context.settings.get()
-        zapret_after = (
-            current.zapret_ipset_mode,
-            current.zapret_game_filter_mode,
-            current.zapret_udp_exclude_ports,
-            current.selected_zapret_general,
-        )
+@_register_action("start_component")
+def _handle_start_component(context, payload, emit_progress):
+    component_id = str(payload.get("component_id", "")).strip()
+    if component_id:
+        if component_id == "zapret":
+            result = _set_zapret_enabled_from_components(context, True)
+            _attach_telegram_proxy_info(context, result)
+            return result
+        context.processes.start_component(component_id)
+    result = _snapshot(context)
+    _attach_telegram_proxy_info(context, result)
+    return result
+
+
+@_register_action("stop_component")
+def _handle_stop_component(context, payload, emit_progress):
+    component_id = str(payload.get("component_id", "")).strip()
+    if component_id:
+        if component_id == "zapret":
+            return _set_zapret_enabled_from_components(context, False)
+        context.processes.stop_component(component_id)
+    return _snapshot(context)
+
+
+@_register_action("prepare_general_autotest_runtime")
+def _handle_prepare_general_autotest_runtime(context, payload, emit_progress):
+    restore = _prepare_general_autotest_runtime(context)
+    result = {"restore_runtime": restore}
+    result.update(_snapshot(context))
+    return result
+
+
+@_register_action("restore_general_autotest_runtime")
+def _handle_restore_general_autotest_runtime(context, payload, emit_progress):
+    restore = payload.get("restore_runtime", {})
+    restored = _restore_general_autotest_runtime(context, restore if isinstance(restore, dict) else {})
+    result = {"runtime_restored": restored}
+    result.update(_snapshot(context))
+    _attach_telegram_proxy_info(context, result)
+    return result
+
+
+@_register_action("apply_settings")
+def _handle_apply_settings(context, payload, emit_progress):
+    before = context.settings.get()
+    try:
+        client_revision = int(payload.get("client_revision", 0) or 0)
+    except (TypeError, ValueError):
+        client_revision = 0
+    effective_payload = {key: value for key, value in payload.items() if key != "client_revision"}
+    if "fortnite" in {str(item) for item in list(before.selected_service_ids or [])}:
+        effective_payload["zapret_ipset_mode"] = "any"
+        effective_payload["zapret_game_filter_mode"] = "tcpudp"
+    tg_before = (
+        before.tg_proxy_host,
+        int(before.tg_proxy_port),
+        before.tg_proxy_secret,
+        before.tg_proxy_dc_ip,
+        bool(before.tg_proxy_cfproxy_enabled),
+        bool(before.tg_proxy_cfproxy_priority),
+        before.tg_proxy_cfproxy_domain,
+        before.tg_proxy_fake_tls_domain,
+        int(before.tg_proxy_buf_kb),
+        int(before.tg_proxy_pool_size),
+    )
+    zapret_before = (
+        before.zapret_ipset_mode,
+        before.zapret_game_filter_mode,
+        before.zapret_udp_exclude_ports,
+        before.selected_zapret_general,
+    )
+    theme_before = before.theme
+    language_before = before.language
+    autostart_before = bool(before.autostart_windows)
+    requested_zapret = (
+        str(effective_payload.get("zapret_ipset_mode", before.zapret_ipset_mode)),
+        str(effective_payload.get("zapret_game_filter_mode", before.zapret_game_filter_mode)),
+        str(effective_payload.get("zapret_udp_exclude_ports", before.zapret_udp_exclude_ports)),
+        str(effective_payload.get("selected_zapret_general", before.selected_zapret_general)),
+    )
+    zapret_changed = zapret_before != requested_zapret
+    zapret_was_running = _stop_zapret_for_reconfiguration(context) if zapret_changed else False
+    context.settings.update(**effective_payload)
+    tg_after = (
+        str(effective_payload.get("tg_proxy_host", context.settings.get().tg_proxy_host)),
+        int(effective_payload.get("tg_proxy_port", context.settings.get().tg_proxy_port)),
+        str(effective_payload.get("tg_proxy_secret", context.settings.get().tg_proxy_secret)),
+        str(effective_payload.get("tg_proxy_dc_ip", context.settings.get().tg_proxy_dc_ip)),
+        bool(effective_payload.get("tg_proxy_cfproxy_enabled", context.settings.get().tg_proxy_cfproxy_enabled)),
+        bool(effective_payload.get("tg_proxy_cfproxy_priority", context.settings.get().tg_proxy_cfproxy_priority)),
+        str(effective_payload.get("tg_proxy_cfproxy_domain", context.settings.get().tg_proxy_cfproxy_domain)),
+        str(effective_payload.get("tg_proxy_fake_tls_domain", context.settings.get().tg_proxy_fake_tls_domain)),
+        int(effective_payload.get("tg_proxy_buf_kb", context.settings.get().tg_proxy_buf_kb)),
+        int(effective_payload.get("tg_proxy_pool_size", context.settings.get().tg_proxy_pool_size)),
+    )
+    current = context.settings.get()
+    zapret_after = (
+        current.zapret_ipset_mode,
+        current.zapret_game_filter_mode,
+        current.zapret_udp_exclude_ports,
+        current.selected_zapret_general,
+    )
+    states = {item.component_id: item for item in context.processes.list_states()}
+    if tg_before != tg_after and states.get("tg-ws-proxy") and states["tg-ws-proxy"].status == "running":
+        context.processes.stop_component("tg-ws-proxy")
+        context.processes.start_component("tg-ws-proxy")
+    zapret_restarted = False
+    if zapret_before != zapret_after:
+        zapret_restarted = _finish_zapret_reconfiguration(context, restart=zapret_was_running)
+    result = {
+        "theme_changed": theme_before != context.settings.get().theme,
+        "language_changed": language_before != context.settings.get().language,
+        "autostart_changed": autostart_before != bool(context.settings.get().autostart_windows),
+        "client_revision": client_revision,
+        "zapret_restarted": zapret_restarted,
+    }
+    result.update(_snapshot(context))
+    return result
+
+
+@_register_action("select_general")
+def _handle_select_general(context, payload, emit_progress):
+    selected = str(payload.get("selected", "")).strip()
+    if not selected:
+        return {}
+    zapret_was_running = _stop_zapret_for_reconfiguration(context)
+    settings = context.settings.get()
+    settings.selected_zapret_general = selected
+    context.settings.save()
+    zapret_restarted = _finish_zapret_reconfiguration(context, restart=zapret_was_running)
+    result = {"selected": selected, "zapret_restarted": zapret_restarted}
+    result.update(_snapshot(context))
+    return result
+
+
+@_register_action("set_selected_services")
+def _handle_set_selected_services(context, payload, emit_progress):
+    raw_ids = payload.get("service_ids", []) or []
+    try:
+        client_revision = int(payload.get("client_revision", 0) or 0)
+    except (TypeError, ValueError):
+        client_revision = 0
+    requested = {str(item).strip() for item in raw_ids if str(item).strip() in SERVICE_PRESET_IDS}
+    ordered = [preset.id for preset in SERVICE_PRESETS if preset.id in requested]
+    settings = context.settings.get()
+    before_services = set(settings.selected_service_ids or [])
+    enabled_components = set(settings.enabled_component_ids or [])
+    autostart_components = set(settings.autostart_component_ids or [])
+    has_zapret_services = bool(requested - {"telegram-desktop"})
+    if has_zapret_services:
+        enabled_components.add("zapret")
+    else:
+        enabled_components.discard("zapret")
+        autostart_components.discard("zapret")
+    if "telegram-desktop" in requested:
+        enabled_components.add("tg-ws-proxy")
+        autostart_components.add("tg-ws-proxy")
+    else:
+        enabled_components.discard("tg-ws-proxy")
+        autostart_components.discard("tg-ws-proxy")
+    if "telegram-desktop" in before_services and "telegram-desktop" not in requested:
         states = {item.component_id: item for item in context.processes.list_states()}
-        if tg_before != tg_after and states.get("tg-ws-proxy") and states["tg-ws-proxy"].status == "running":
+        if states.get("tg-ws-proxy") and states["tg-ws-proxy"].status == "running":
             context.processes.stop_component("tg-ws-proxy")
-            context.processes.start_component("tg-ws-proxy")
-        zapret_restarted = False
-        if zapret_before != zapret_after:
-            zapret_restarted = _finish_zapret_reconfiguration(context, restart=zapret_was_running)
-        result = {
-            "theme_changed": theme_before != context.settings.get().theme,
-            "language_changed": language_before != context.settings.get().language,
-            "autostart_changed": autostart_before != bool(context.settings.get().autostart_windows),
-            "client_revision": client_revision,
-            "zapret_restarted": zapret_restarted,
-        }
-        result.update(_snapshot(context))
-        return result
+    elif "telegram-desktop" in requested and "telegram-desktop" not in before_services:
+        states = {item.component_id: item for item in context.processes.list_states()}
+        if any(item.status == "running" for item in states.values()):
+            try:
+                context.processes.start_component("tg-ws-proxy")
+            except Exception:
+                pass
+    if not has_zapret_services:
+        states = {item.component_id: item for item in context.processes.list_states()}
+        if states.get("zapret") and states["zapret"].status == "running":
+            context.processes.stop_component("zapret")
+    zapret_was_running = _stop_zapret_for_reconfiguration(context)
+    settings_changes = {
+        "selected_service_ids": ordered,
+        "enabled_component_ids": sorted(enabled_components),
+        "autostart_component_ids": sorted(autostart_components),
+    }
+    if "fortnite" in requested:
+        settings_changes.update(_fortnite_zapret_settings(context))
+    context.settings.update(**settings_changes)
+    zapret_restarted = _finish_zapret_reconfiguration(context, restart=zapret_was_running)
+    result = {"selected_service_ids": ordered, "client_revision": client_revision, "zapret_restarted": zapret_restarted}
+    result.update(_snapshot(context))
+    result.update(_mods_payload(context))
+    result["general_options"] = list(context.processes.list_zapret_generals())
+    _attach_telegram_proxy_info(context, result)
+    return result
 
-    if action == "select_general":
-        selected = str(payload.get("selected", "")).strip()
-        if not selected:
-            return {}
-        zapret_was_running = _stop_zapret_for_reconfiguration(context)
-        settings = context.settings.get()
-        settings.selected_zapret_general = selected
-        context.settings.save()
-        zapret_restarted = _finish_zapret_reconfiguration(context, restart=zapret_was_running)
-        result = {"selected": selected, "zapret_restarted": zapret_restarted}
-        result.update(_snapshot(context))
-        return result
 
-    if action == "set_selected_services":
-        raw_ids = payload.get("service_ids", []) or []
-        try:
-            client_revision = int(payload.get("client_revision", 0) or 0)
-        except (TypeError, ValueError):
-            client_revision = 0
-        requested = {str(item).strip() for item in raw_ids if str(item).strip() in SERVICE_PRESET_IDS}
-        ordered = [preset.id for preset in SERVICE_PRESETS if preset.id in requested]
-        settings = context.settings.get()
-        before_services = set(settings.selected_service_ids or [])
-        enabled_components = set(settings.enabled_component_ids or [])
-        autostart_components = set(settings.autostart_component_ids or [])
-        has_zapret_services = bool(requested - {"telegram-desktop"})
-        if has_zapret_services:
-            enabled_components.add("zapret")
-        else:
-            enabled_components.discard("zapret")
-            autostart_components.discard("zapret")
-        if "telegram-desktop" in requested:
-            enabled_components.add("tg-ws-proxy")
-            autostart_components.add("tg-ws-proxy")
-        else:
-            enabled_components.discard("tg-ws-proxy")
-            autostart_components.discard("tg-ws-proxy")
-        if "telegram-desktop" in before_services and "telegram-desktop" not in requested:
-            states = {item.component_id: item for item in context.processes.list_states()}
-            if states.get("tg-ws-proxy") and states["tg-ws-proxy"].status == "running":
-                context.processes.stop_component("tg-ws-proxy")
-        elif "telegram-desktop" in requested and "telegram-desktop" not in before_services:
-            states = {item.component_id: item for item in context.processes.list_states()}
-            if any(item.status == "running" for item in states.values()):
-                try:
-                    context.processes.start_component("tg-ws-proxy")
-                except Exception:
-                    pass
-        if not has_zapret_services:
-            states = {item.component_id: item for item in context.processes.list_states()}
-            if states.get("zapret") and states["zapret"].status == "running":
-                context.processes.stop_component("zapret")
-        zapret_was_running = _stop_zapret_for_reconfiguration(context)
-        settings_changes = {
-            "selected_service_ids": ordered,
-            "enabled_component_ids": sorted(enabled_components),
-            "autostart_component_ids": sorted(autostart_components),
-        }
-        if "fortnite" in requested:
-            settings_changes.update(_fortnite_zapret_settings(context))
-        context.settings.update(**settings_changes)
-        zapret_restarted = _finish_zapret_reconfiguration(context, restart=zapret_was_running)
-        result = {"selected_service_ids": ordered, "client_revision": client_revision, "zapret_restarted": zapret_restarted}
-        result.update(_snapshot(context))
-        result.update(_mods_payload(context))
-        result["general_options"] = list(context.processes.list_zapret_generals())
-        _attach_telegram_proxy_info(context, result)
-        return result
-
-    if action == "toggle_component_enabled":
-        component_id = str(payload.get("component_id", "")).strip()
-        if component_id:
-            if component_id == "zapret":
-                result = _set_zapret_enabled_from_components(
-                    context,
-                    "zapret" not in {str(item) for item in list(context.settings.get().enabled_component_ids or [])},
-                )
-                result["component"] = next(
-                    (asdict(item) for item in context.processes.list_components() if item.id == "zapret"),
-                    {},
-                )
-                return result
-            component = context.processes.toggle_component_enabled(component_id)
-            if component_id == "tg-ws-proxy":
-                settings = context.settings.get()
-                selected = {str(item) for item in list(settings.selected_service_ids or [])}
-                autostart = {str(item) for item in list(settings.autostart_component_ids or [])}
-                if component.enabled:
-                    selected.add("telegram-desktop")
-                    autostart.add("tg-ws-proxy")
-                else:
-                    selected.discard("telegram-desktop")
-                    autostart.discard("tg-ws-proxy")
-                    states = {item.component_id: item for item in context.processes.list_states()}
-                    if states.get("tg-ws-proxy") and states["tg-ws-proxy"].status == "running":
-                        context.processes.stop_component("tg-ws-proxy")
-                ordered = [preset.id for preset in SERVICE_PRESETS if preset.id in selected]
-                context.settings.update(
-                    selected_service_ids=ordered,
-                    autostart_component_ids=sorted(autostart),
-                )
-            result = {"component": asdict(component)}
-            result.update(_snapshot(context))
+@_register_action("toggle_component_enabled")
+def _handle_toggle_component_enabled(context, payload, emit_progress):
+    component_id = str(payload.get("component_id", "")).strip()
+    if component_id:
+        if component_id == "zapret":
+            result = _set_zapret_enabled_from_components(
+                context,
+                "zapret" not in {str(item) for item in list(context.settings.get().enabled_component_ids or [])},
+            )
+            result["component"] = next(
+                (asdict(item) for item in context.processes.list_components() if item.id == "zapret"),
+                {},
+            )
             return result
-        return {}
+        component = context.processes.toggle_component_enabled(component_id)
+        if component_id == "tg-ws-proxy":
+            settings = context.settings.get()
+            selected = {str(item) for item in list(settings.selected_service_ids or [])}
+            autostart = {str(item) for item in list(settings.autostart_component_ids or [])}
+            if component.enabled:
+                selected.add("telegram-desktop")
+                autostart.add("tg-ws-proxy")
+            else:
+                selected.discard("telegram-desktop")
+                autostart.discard("tg-ws-proxy")
+                states = {item.component_id: item for item in context.processes.list_states()}
+                if states.get("tg-ws-proxy") and states["tg-ws-proxy"].status == "running":
+                    context.processes.stop_component("tg-ws-proxy")
+            ordered = [preset.id for preset in SERVICE_PRESETS if preset.id in selected]
+            context.settings.update(
+                selected_service_ids=ordered,
+                autostart_component_ids=sorted(autostart),
+            )
+        result = {"component": asdict(component)}
+        result.update(_snapshot(context))
+        return result
+    return {}
 
-    if action == "toggle_component_autostart":
-        component_id = str(payload.get("component_id", "")).strip()
-        if component_id:
-            component = context.processes.toggle_component_autostart(component_id)
-            result = {"component": asdict(component)}
-            result.update(_snapshot(context))
-            return result
-        return {}
 
-    if action == "toggle_mod":
-        mod_id = str(payload.get("mod_id", "")).strip()
-        if not mod_id:
-            return {}
-        zapret_was_running = _stop_zapret_for_reconfiguration(context)
+@_register_action("toggle_component_autostart")
+def _handle_toggle_component_autostart(context, payload, emit_progress):
+    component_id = str(payload.get("component_id", "")).strip()
+    if component_id:
+        component = context.processes.toggle_component_autostart(component_id)
+        result = {"component": asdict(component)}
+        result.update(_snapshot(context))
+        return result
+    return {}
+
+
+@_register_action("toggle_mod")
+def _handle_toggle_mod(context, payload, emit_progress):
+    mod_id = str(payload.get("mod_id", "")).strip()
+    if not mod_id:
+        return {}
+    with _reconfigure_zapret(context):
         installed = {item.id: item for item in context.mods.list_installed()}
         if mod_id not in installed:
             context.mods.install(mod_id)
             installed = {item.id: item for item in context.mods.list_installed()}
         if mod_id in installed:
             context.mods.set_enabled(mod_id, not installed[mod_id].enabled)
-        zapret_restarted = _finish_zapret_reconfiguration(context, restart=zapret_was_running)
-        result = {"mod_id": mod_id, "zapret_restarted": zapret_restarted}
-        result.update(_snapshot(context))
-        result.update(_mods_payload(context))
-        return result
+    result = {"mod_id": mod_id}
+    result.update(_snapshot(context))
+    result.update(_mods_payload(context))
+    return result
 
-    if action == "install_mod":
-        mod_id = str(payload.get("mod_id", "")).strip()
-        if mod_id:
-            context.mods.install(mod_id)
-        result = {"mod_id": mod_id}
-        result.update(_snapshot(context))
-        result.update(_mods_payload(context))
-        return result
 
-    if action == "remove_mod":
-        mod_id = str(payload.get("mod_id", "")).strip()
-        zapret_was_running = _stop_zapret_for_reconfiguration(context) if mod_id else False
-        zapret_restarted = False
+@_register_action("install_mod")
+def _handle_install_mod(context, payload, emit_progress):
+    mod_id = str(payload.get("mod_id", "")).strip()
+    if mod_id:
+        context.mods.install(mod_id)
+    result = {"mod_id": mod_id}
+    result.update(_snapshot(context))
+    result.update(_mods_payload(context))
+    return result
+
+
+@_register_action("remove_mod")
+def _handle_remove_mod(context, payload, emit_progress):
+    mod_id = str(payload.get("mod_id", "")).strip()
+    with _reconfigure_zapret(context):
         if mod_id:
             context.mods.remove(mod_id)
-            zapret_restarted = _finish_zapret_reconfiguration(context, restart=zapret_was_running)
-        result = {"mod_id": mod_id, "zapret_restarted": zapret_restarted}
-        result.update(_snapshot(context))
-        result.update(_mods_payload(context))
-        return result
+    result = {"mod_id": mod_id}
+    result.update(_snapshot(context))
+    result.update(_mods_payload(context))
+    return result
 
-    if action == "create_mod":
-        name = str(payload.get("name", "")).strip()
-        description = str(payload.get("description", "") or "")
-        author = str(payload.get("author", "") or "")
-        entry = context.mods.create_empty(name=name or "Custom mod", description=description, author=author)
-        result = {"mod_id": entry.id}
-        result.update(_snapshot(context))
-        result.update(_mods_payload(context))
-        return result
 
-    if action == "update_mod_metadata":
-        mod_id = str(payload.get("mod_id", "")).strip()
-        context.mods.update_metadata(
-            mod_id,
-            name=str(payload.get("name", "") or ""),
-            description=str(payload.get("description", "") or ""),
-            author=str(payload.get("author", "") or ""),
-            version=str(payload.get("version", "") or ""),
-        )
-        result = {"mod_id": mod_id, "files": context.mods.list_files(mod_id)}
-        result.update(_snapshot(context))
-        result.update(_mods_payload(context))
-        return result
+@_register_action("create_mod")
+def _handle_create_mod(context, payload, emit_progress):
+    name = str(payload.get("name", "")).strip()
+    description = str(payload.get("description", "") or "")
+    author = str(payload.get("author", "") or "")
+    entry = context.mods.create_empty(name=name or "Custom mod", description=description, author=author)
+    result = {"mod_id": entry.id}
+    result.update(_snapshot(context))
+    result.update(_mods_payload(context))
+    return result
 
-    if action == "load_mod_editor":
-        mod_id = str(payload.get("mod_id", "")).strip()
-        installed = {item.id: item for item in context.mods.list_installed()}
-        entry = installed[mod_id]
-        return {"mod": asdict(entry), "files": context.mods.list_files(mod_id)}
 
-    if action == "read_mod_file":
-        mod_id = str(payload.get("mod_id", "")).strip()
-        path = str(payload.get("path", "") or "")
-        return {"mod_id": mod_id, "path": path, "content": context.mods.read_file(mod_id, path)}
+@_register_action("update_mod_metadata")
+def _handle_update_mod_metadata(context, payload, emit_progress):
+    mod_id = str(payload.get("mod_id", "")).strip()
+    context.mods.update_metadata(
+        mod_id,
+        name=str(payload.get("name", "") or ""),
+        description=str(payload.get("description", "") or ""),
+        author=str(payload.get("author", "") or ""),
+        version=str(payload.get("version", "") or ""),
+    )
+    result = {"mod_id": mod_id, "files": context.mods.list_files(mod_id)}
+    result.update(_snapshot(context))
+    result.update(_mods_payload(context))
+    return result
 
-    if action == "write_mod_file":
-        mod_id = str(payload.get("mod_id", "")).strip()
-        path = str(payload.get("path", "") or "")
-        content = str(payload.get("content", "") or "")
-        zapret_was_running = _stop_zapret_for_reconfiguration(context)
+
+@_register_action("load_mod_editor")
+def _handle_load_mod_editor(context, payload, emit_progress):
+    mod_id = str(payload.get("mod_id", "")).strip()
+    installed = {item.id: item for item in context.mods.list_installed()}
+    entry = installed[mod_id]
+    return {"mod": asdict(entry), "files": context.mods.list_files(mod_id)}
+
+
+@_register_action("read_mod_file")
+def _handle_read_mod_file(context, payload, emit_progress):
+    mod_id = str(payload.get("mod_id", "")).strip()
+    path = str(payload.get("path", "") or "")
+    return {"mod_id": mod_id, "path": path, "content": context.mods.read_file(mod_id, path)}
+
+
+@_register_action("write_mod_file")
+def _handle_write_mod_file(context, payload, emit_progress):
+    mod_id = str(payload.get("mod_id", "")).strip()
+    path = str(payload.get("path", "") or "")
+    content = str(payload.get("content", "") or "")
+    with _reconfigure_zapret(context):
         context.mods.write_file(mod_id, path, content)
-        zapret_restarted = _finish_zapret_reconfiguration(context, restart=zapret_was_running)
-        result = {"mod_id": mod_id, "path": path, "files": context.mods.list_files(mod_id), "zapret_restarted": zapret_restarted}
-        result.update(_snapshot(context))
-        result.update(_mods_payload(context))
-        result["general_options"] = list(context.processes.list_zapret_generals())
-        return result
+    result = {"mod_id": mod_id, "path": path, "files": context.mods.list_files(mod_id)}
+    result.update(_snapshot(context))
+    result.update(_mods_payload(context))
+    result["general_options"] = list(context.processes.list_zapret_generals())
+    return result
 
-    if action == "delete_mod_file":
-        mod_id = str(payload.get("mod_id", "")).strip()
-        path = str(payload.get("path", "") or "")
-        zapret_was_running = _stop_zapret_for_reconfiguration(context)
+
+@_register_action("delete_mod_file")
+def _handle_delete_mod_file(context, payload, emit_progress):
+    mod_id = str(payload.get("mod_id", "")).strip()
+    path = str(payload.get("path", "") or "")
+    with _reconfigure_zapret(context):
         context.mods.delete_file(mod_id, path)
-        zapret_restarted = _finish_zapret_reconfiguration(context, restart=zapret_was_running)
-        result = {"mod_id": mod_id, "files": context.mods.list_files(mod_id), "zapret_restarted": zapret_restarted}
-        result.update(_snapshot(context))
-        result.update(_mods_payload(context))
-        result["general_options"] = list(context.processes.list_zapret_generals())
-        return result
+    result = {"mod_id": mod_id, "files": context.mods.list_files(mod_id)}
+    result.update(_snapshot(context))
+    result.update(_mods_payload(context))
+    result["general_options"] = list(context.processes.list_zapret_generals())
+    return result
 
-    if action == "import_mod_from_github":
-        repo_url = str(payload.get("repo_url", "")).strip()
-        previous_selected_general = str(payload.get("previous_selected_general", "")).strip()
-        zapret_was_running = _stop_zapret_for_reconfiguration(context) if repo_url else False
-        zapret_restarted = False
+
+@_register_action("import_mod_from_github")
+def _handle_import_mod_from_github(context, payload, emit_progress):
+    repo_url = str(payload.get("repo_url", "")).strip()
+    previous_selected_general = str(payload.get("previous_selected_general", "")).strip()
+    with _reconfigure_zapret(context):
         if repo_url:
             context.mods.import_from_github(repo_url)
             if previous_selected_general:
                 context.settings.update(selected_zapret_general=previous_selected_general)
-            zapret_restarted = _finish_zapret_reconfiguration(context, restart=zapret_was_running)
-        result = {"repo_url": repo_url, "zapret_restarted": zapret_restarted}
-        result.update(_snapshot(context))
-        result.update(_mods_payload(context))
-        result["general_options"] = list(context.processes.list_zapret_generals())
-        return result
+    result = {"repo_url": repo_url}
+    result.update(_snapshot(context))
+    result.update(_mods_payload(context))
+    result["general_options"] = list(context.processes.list_zapret_generals())
+    return result
 
-    if action == "import_mod_from_paths":
-        raw_paths = payload.get("paths", []) or []
-        paths = [str(item).strip() for item in raw_paths if str(item).strip()]
-        previous_selected_general = str(payload.get("previous_selected_general", "")).strip()
-        zapret_was_running = _stop_zapret_for_reconfiguration(context) if paths else False
-        zapret_restarted = False
+
+@_register_action("import_mod_from_paths")
+def _handle_import_mod_from_paths(context, payload, emit_progress):
+    raw_paths = payload.get("paths", []) or []
+    paths = [str(item).strip() for item in raw_paths if str(item).strip()]
+    previous_selected_general = str(payload.get("previous_selected_general", "")).strip()
+    with _reconfigure_zapret(context):
         if paths:
             context.mods.import_from_paths(paths)
             if previous_selected_general:
                 context.settings.update(selected_zapret_general=previous_selected_general)
-            zapret_restarted = _finish_zapret_reconfiguration(context, restart=zapret_was_running)
-        result = {"paths": paths, "zapret_restarted": zapret_restarted}
-        result.update(_snapshot(context))
-        result.update(_mods_payload(context))
-        result["general_options"] = list(context.processes.list_zapret_generals())
-        return result
+    result = {"paths": paths}
+    result.update(_snapshot(context))
+    result.update(_mods_payload(context))
+    result["general_options"] = list(context.processes.list_zapret_generals())
+    return result
 
-    if action == "import_mod_from_path":
-        path = str(payload.get("path", "")).strip()
-        previous_selected_general = str(payload.get("previous_selected_general", "")).strip()
-        zapret_was_running = _stop_zapret_for_reconfiguration(context) if path else False
-        zapret_restarted = False
+
+@_register_action("import_mod_from_path")
+def _handle_import_mod_from_path(context, payload, emit_progress):
+    path = str(payload.get("path", "")).strip()
+    previous_selected_general = str(payload.get("previous_selected_general", "")).strip()
+    with _reconfigure_zapret(context):
         if path:
             context.mods.import_from_path(path)
             if previous_selected_general:
                 context.settings.update(selected_zapret_general=previous_selected_general)
-            zapret_restarted = _finish_zapret_reconfiguration(context, restart=zapret_was_running)
-        result = {"path": path, "zapret_restarted": zapret_restarted}
-        result.update(_snapshot(context))
-        result.update(_mods_payload(context))
-        result["general_options"] = list(context.processes.list_zapret_generals())
-        return result
+    result = {"path": path}
+    result.update(_snapshot(context))
+    result.update(_mods_payload(context))
+    result["general_options"] = list(context.processes.list_zapret_generals())
+    return result
 
-    if action == "move_mod":
-        mod_id = str(payload.get("mod_id", "")).strip()
-        direction = int(payload.get("direction", 0) or 0)
-        zapret_was_running = _stop_zapret_for_reconfiguration(context) if mod_id and direction else False
-        zapret_restarted = False
+
+@_register_action("move_mod")
+def _handle_move_mod(context, payload, emit_progress):
+    mod_id = str(payload.get("mod_id", "")).strip()
+    direction = int(payload.get("direction", 0) or 0)
+    with _reconfigure_zapret(context):
         if mod_id and direction:
             context.mods.move(mod_id, direction)
-            zapret_restarted = _finish_zapret_reconfiguration(context, restart=zapret_was_running)
-        result = _snapshot(context)
-        result["zapret_restarted"] = zapret_restarted
-        result.update(_mods_payload(context))
-        return result
+    result = _snapshot(context)
+    result.update(_mods_payload(context))
+    return result
 
-    if action == "set_mod_emoji":
-        mod_id = str(payload.get("mod_id", "")).strip()
-        emoji = str(payload.get("emoji", "")).strip()
-        if mod_id and emoji:
-            context.mods.set_emoji(mod_id, emoji)
-        result = _snapshot(context)
-        result.update(_mods_payload(context))
-        return result
 
-    if action == "restart_zapret_if_running":
-        zapret_restarted = _restart_zapret_if_running(context)
-        result = _snapshot(context)
-        result["zapret_restarted"] = zapret_restarted
-        return result
+@_register_action("set_mod_emoji")
+def _handle_set_mod_emoji(context, payload, emit_progress):
+    mod_id = str(payload.get("mod_id", "")).strip()
+    emoji = str(payload.get("emoji", "")).strip()
+    if mod_id and emoji:
+        context.mods.set_emoji(mod_id, emoji)
+    result = _snapshot(context)
+    result.update(_mods_payload(context))
+    return result
 
-    if action == "add_collection_values":
-        collection_id = str(payload.get("collection_id", "")).strip()
-        raw = str(payload.get("raw", "") or "")
-        zapret_was_running = _stop_zapret_for_reconfiguration(context)
+
+@_register_action("restart_zapret_if_running")
+def _handle_restart_zapret_if_running(context, payload, emit_progress):
+    zapret_restarted = _restart_zapret_if_running(context)
+    result = _snapshot(context)
+    result["zapret_restarted"] = zapret_restarted
+    return result
+
+
+@_register_action("add_collection_values")
+def _handle_add_collection_values(context, payload, emit_progress):
+    collection_id = str(payload.get("collection_id", "")).strip()
+    raw = str(payload.get("raw", "") or "")
+    with _reconfigure_zapret(context):
         values = context.files.add_collection_values(collection_id, raw)
-        zapret_restarted = _finish_zapret_reconfiguration(context, restart=zapret_was_running)
-        result = _snapshot(context)
-        result["zapret_restarted"] = zapret_restarted
-        result["files_payload"] = {
-            "mode_index": 1,
-            "collection_id": collection_id,
-            "collection_values": list(values),
-        }
-        return result
+    result = _snapshot(context)
+    result["files_payload"] = {
+        "mode_index": 1,
+        "collection_id": collection_id,
+        "collection_values": list(values),
+    }
+    return result
 
-    if action == "remove_collection_value":
-        collection_id = str(payload.get("collection_id", "")).strip()
-        value = str(payload.get("value", "") or "")
-        zapret_was_running = _stop_zapret_for_reconfiguration(context)
+
+@_register_action("remove_collection_value")
+def _handle_remove_collection_value(context, payload, emit_progress):
+    collection_id = str(payload.get("collection_id", "")).strip()
+    value = str(payload.get("value", "") or "")
+    with _reconfigure_zapret(context):
         values = context.files.remove_collection_value(collection_id, value)
-        zapret_restarted = _finish_zapret_reconfiguration(context, restart=zapret_was_running)
-        result = _snapshot(context)
-        result["zapret_restarted"] = zapret_restarted
-        result["files_payload"] = {
-            "mode_index": 1,
-            "collection_id": collection_id,
-            "collection_values": list(values),
-        }
-        return result
+    result = _snapshot(context)
+    result["files_payload"] = {
+        "mode_index": 1,
+        "collection_id": collection_id,
+        "collection_values": list(values),
+    }
+    return result
 
-    if action == "reset_user_overrides":
-        collection_id = str(payload.get("collection_id", "")).strip()
-        zapret_was_running = _stop_zapret_for_reconfiguration(context)
+
+@_register_action("reset_user_overrides")
+def _handle_reset_user_overrides(context, payload, emit_progress):
+    collection_id = str(payload.get("collection_id", "")).strip()
+    with _reconfigure_zapret(context):
         context.files.reset_user_overrides()
-        zapret_restarted = _finish_zapret_reconfiguration(context, restart=zapret_was_running)
-        values = context.files.read_collection(collection_id) if collection_id else []
-        result = _snapshot(context)
-        result["zapret_restarted"] = zapret_restarted
-        result["files_payload"] = {
-            "mode_index": 1,
+    values = context.files.read_collection(collection_id) if collection_id else []
+    result = _snapshot(context)
+    result["files_payload"] = {
+        "mode_index": 1,
+        "collection_id": collection_id,
+        "collection_values": list(values),
+    }
+    return result
+
+
+@_register_action("load_files_payload")
+def _handle_load_files_payload(context, payload, emit_progress):
+    mode_index = int(payload.get("mode_index", 0) or 0)
+    collection_id = str(payload.get("collection_id", "")).strip()
+    file_filter = str(payload.get("file_filter", "all") or "all")
+    records = None
+    if mode_index == 2:
+        if file_filter == "generals":
+            records = _general_file_records(context)
+        elif file_filter == "hosts":
+            records = _host_file_records(context)
+        else:
+            records = context.files.list_files()
+    return {
+        "files_payload": {
+            "mode_index": mode_index,
             "collection_id": collection_id,
-            "collection_values": list(values),
+            "file_filter": file_filter,
+            "records": records,
+            "collection_values": context.files.read_collection(collection_id) if mode_index == 1 else None,
         }
-        return result
+    }
 
-    if action == "load_files_payload":
-        mode_index = int(payload.get("mode_index", 0) or 0)
-        collection_id = str(payload.get("collection_id", "")).strip()
-        file_filter = str(payload.get("file_filter", "all") or "all")
-        records = None
-        if mode_index == 2:
-            if file_filter == "generals":
-                records = _general_file_records(context)
-            elif file_filter == "hosts":
-                records = _host_file_records(context)
-            else:
-                records = context.files.list_files()
-        return {
-            "files_payload": {
-                "mode_index": mode_index,
-                "collection_id": collection_id,
-                "file_filter": file_filter,
-                "records": records,
-                "collection_values": context.files.read_collection(collection_id) if mode_index == 1 else None,
-            }
-        }
 
-    if action == "write_file_text":
-        full_path = str(payload.get("path", "")).strip()
-        content = str(payload.get("content", "") or "")
-        zapret_was_running = _stop_zapret_for_reconfiguration(context) if full_path else False
-        zapret_restarted = False
+@_register_action("write_file_text")
+def _handle_write_file_text(context, payload, emit_progress):
+    full_path = str(payload.get("path", "")).strip()
+    content = str(payload.get("content", "") or "")
+    with _reconfigure_zapret(context):
         if full_path:
             context.files.write_text(full_path, content)
-            zapret_restarted = _finish_zapret_reconfiguration(context, restart=zapret_was_running)
-        result = _snapshot(context)
-        result["zapret_restarted"] = zapret_restarted
-        result["path"] = full_path
-        return result
+    result = _snapshot(context)
+    result["path"] = full_path
+    return result
 
-    if action == "rebuild_merge_runtime":
-        zapret_was_running = _stop_zapret_for_reconfiguration(context)
-        zapret_restarted = _finish_zapret_reconfiguration(context, restart=zapret_was_running)
-        result = _snapshot(context)
-        result["zapret_restarted"] = zapret_restarted
-        result.update(_mods_payload(context))
-        return result
 
-    if action == "set_favorite_generals":
-        favorites = [str(item).strip() for item in (payload.get("favorites", []) or []) if str(item).strip()]
-        current = context.settings.get()
-        current.favorite_zapret_generals = favorites
-        context.settings.save()
-        return _snapshot(context)
+@_register_action("rebuild_merge_runtime")
+def _handle_rebuild_merge_runtime(context, payload, emit_progress):
+    with _reconfigure_zapret(context):
+        pass
+    result = _snapshot(context)
+    result.update(_mods_payload(context))
+    return result
 
-    if action == "set_general_autotest_done":
-        done = bool(payload.get("done", True))
-        current = context.settings.get()
-        current.general_autotest_done = done
-        context.settings.save()
-        return _snapshot(context)
 
-    if action == "run_general_diagnostics":
-        cancel_path = str(payload.get("cancel_path", "") or "")
-        results = context.processes.run_general_diagnostics(
-            progress_callback=(
-                lambda current, total, name: emit_progress(
-                    {
-                        "current": current,
-                        "total": total,
-                        "name": name,
-                    }
-                )
-                if emit_progress is not None
-                else None
-            ),
-            stop_callback=(lambda: bool(cancel_path) and os.path.exists(cancel_path)),
-        )
-        return {"results": results}
+@_register_action("set_favorite_generals")
+def _handle_set_favorite_generals(context, payload, emit_progress):
+    favorites = [str(item).strip() for item in (payload.get("favorites", []) or []) if str(item).strip()]
+    current = context.settings.get()
+    current.favorite_zapret_generals = favorites
+    context.settings.save()
+    return _snapshot(context)
 
-    if action == "run_general_diagnostic_single":
-        general_id = str(payload.get("general_id", "")).strip()
-        cancel_path = str(payload.get("cancel_path", "") or "")
-        ipset_mode = str(payload.get("ipset_mode", "loaded") or "loaded").strip()
-        game_mode = str(payload.get("game_mode", "tcpudp") or "tcpudp").strip()
-        result = context.processes.run_single_general_diagnostic(
-            general_id,
-            ipset_mode=ipset_mode,
-            game_mode=game_mode,
-            progress_callback=(
-                lambda current, total, name: emit_progress(
-                    {"current": current, "total": total, "name": name}
-                )
-                if emit_progress is not None
-                else None
-            ),
-            stop_callback=(lambda: bool(cancel_path) and os.path.exists(cancel_path)),
-        )
-        return result
 
-    if action == "run_settings_diagnostics":
-        cancel_path = str(payload.get("cancel_path", "") or "")
-        result = context.processes.run_settings_diagnostics(
-            progress_callback=(
-                lambda current, total, name: emit_progress(
-                    {"current": current, "total": total, "name": name}
-                )
-                if emit_progress is not None
-                else None
-            ),
-            stop_callback=(lambda: bool(cancel_path) and os.path.exists(cancel_path)),
-        )
-        return result
+@_register_action("set_general_autotest_done")
+def _handle_set_general_autotest_done(context, payload, emit_progress):
+    done = bool(payload.get("done", True))
+    current = context.settings.get()
+    current.general_autotest_done = done
+    context.settings.save()
+    return _snapshot(context)
 
-    if action == "update_zapret_runtime":
-        result = context.processes.update_zapret_runtime()
-        result.update(_snapshot(context))
-        return result
 
-    if action == "update_tg_ws_proxy_runtime":
-        result = context.processes.update_tg_ws_proxy_runtime()
-        result.update(_snapshot(context))
-        return result
+@_register_action("run_general_diagnostics")
+def _handle_run_general_diagnostics(context, payload, emit_progress):
+    cancel_path = str(payload.get("cancel_path", "") or "")
+    results = context.processes.run_general_diagnostics(
+        progress_callback=(
+            lambda current, total, name: emit_progress(
+                {"current": current, "total": total, "name": name}
+            )
+            if emit_progress is not None
+            else None
+        ),
+        stop_callback=(lambda: bool(cancel_path) and os.path.exists(cancel_path)),
+    )
+    return {"results": results}
 
-    return {}
+
+@_register_action("run_general_diagnostic_single")
+def _handle_run_general_diagnostic_single(context, payload, emit_progress):
+    general_id = str(payload.get("general_id", "")).strip()
+    cancel_path = str(payload.get("cancel_path", "") or "")
+    ipset_mode = str(payload.get("ipset_mode", "loaded") or "loaded").strip()
+    game_mode = str(payload.get("game_mode", "tcpudp") or "tcpudp").strip()
+    return context.processes.run_single_general_diagnostic(
+        general_id,
+        ipset_mode=ipset_mode,
+        game_mode=game_mode,
+        progress_callback=(
+            lambda current, total, name: emit_progress(
+                {"current": current, "total": total, "name": name}
+            )
+            if emit_progress is not None
+            else None
+        ),
+        stop_callback=(lambda: bool(cancel_path) and os.path.exists(cancel_path)),
+    )
+
+
+@_register_action("run_settings_diagnostics")
+def _handle_run_settings_diagnostics(context, payload, emit_progress):
+    cancel_path = str(payload.get("cancel_path", "") or "")
+    return context.processes.run_settings_diagnostics(
+        progress_callback=(
+            lambda current, total, name: emit_progress(
+                {"current": current, "total": total, "name": name}
+            )
+            if emit_progress is not None
+            else None
+        ),
+        stop_callback=(lambda: bool(cancel_path) and os.path.exists(cancel_path)),
+    )
+
+
+@_register_action("update_zapret_runtime")
+def _handle_update_zapret_runtime(context, payload, emit_progress):
+    result = context.processes.update_zapret_runtime()
+    result.update(_snapshot(context))
+    return result
+
+
+@_register_action("update_tg_ws_proxy_runtime")
+def _handle_update_tg_ws_proxy_runtime(context, payload, emit_progress):
+    result = context.processes.update_tg_ws_proxy_runtime()
+    result.update(_snapshot(context))
+    return result
 
 class BackendWorkerClient(QObject):
     task_finished = Signal(dict)
