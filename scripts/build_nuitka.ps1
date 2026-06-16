@@ -49,16 +49,6 @@ foreach ($pattern in $excludeFilePatterns) {
         Remove-Item -Force -ErrorAction SilentlyContinue
 }
 
-# Runtime-конфигурация содержит пользовательскую подписку и создаётся заново при запуске.
-$vpnGeneratedConfig = Join-Path $runtimeStage "v2rayN\peshk0v-vpn"
-if (Test-Path $vpnGeneratedConfig) {
-    Remove-Item $vpnGeneratedConfig -Recurse -Force
-}
-$vpnSubscriptionHint = Join-Path $runtimeStage "v2rayN\peshk0v-vpn-subscription.txt"
-if (Test-Path $vpnSubscriptionHint) {
-    Remove-Item $vpnSubscriptionHint -Force
-}
-
 $nuitkaArgs = @(
   "-m", "nuitka",
   "--standalone",

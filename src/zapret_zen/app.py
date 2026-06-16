@@ -9,39 +9,13 @@ import tempfile
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QThread, QTimer, Qt, Signal, Slot
+from PySide6.QtCore import QObject, QTimer, Qt, Slot
 from PySide6.QtGui import QCloseEvent, QIcon, QImage, QPixmap
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import QApplication, QMessageBox
 
 from zapret_zen.runtime_env import development_install_root, is_packaged_runtime, packaged_install_root, packaged_resource_root
 from zapret_zen.workers import run_tg_ws_proxy_worker
-
-class _BootstrapThread(QThread):
-    ready = Signal(object)
-    failed = Signal(str)
-
-    def run(self) -> None:
-        try:
-            from zapret_zen.bootstrap import bootstrap_application, build_startup_snapshot
-
-            context = bootstrap_application()
-            startup_snapshot = build_startup_snapshot(context)
-            startup_show_onboarding = _preload_startup_onboarding(
-                context,
-                launch_hidden=False,
-                startup_snapshot=startup_snapshot,
-            )
-            self.ready.emit(
-                {
-                    "context": context,
-                    "startup_snapshot": startup_snapshot,
-                    "startup_show_onboarding": startup_show_onboarding,
-                }
-            )
-        except Exception as error:
-            self.failed.emit(str(error))
-
 
 def _startup_trace(message: str) -> None:
     try:

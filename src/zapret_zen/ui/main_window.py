@@ -3650,8 +3650,6 @@ class MainWindow(QMainWindow):
         self._min_btn: QToolButton | None = None
         self._close_btn: QToolButton | None = None
         self._toggle_in_progress = False
-        self._vpn_mode_switch_in_progress = False
-        self._vpn_switch_power_transition = False
         self._loading_frame = 0
         self._loading_timer = QTimer(self)
         self._loading_timer.setInterval(220)
@@ -3804,7 +3802,6 @@ class MainWindow(QMainWindow):
         self._mods_subtitle_label: QLabel | None = None
         self._mods_add_btn: QPushButton | None = None
         self.power_aura: PowerAuraWidget | None = None
-        self.power_vpn_btn: QToolButton | None = None
         self._files_title_label: QLabel | None = None
         self._editor_title_label: QLabel | None = None
         self._logs_title_label: QLabel | None = None
@@ -4134,9 +4131,6 @@ class MainWindow(QMainWindow):
         self._icon_cache[cache_key] = icon
         return icon
 
-    def _vpn_icon_name(self) -> str:
-        return "vpn.png" if (self._icons_dir / "vpn.png").exists() else "vpn.svg"
-
     def _component_defs(self) -> dict[str, ComponentDefinition]:
         if self._component_defs_cache:
             return dict(self._component_defs_cache)
@@ -4150,7 +4144,6 @@ class MainWindow(QMainWindow):
             "components": payload.get("components", []),
             "states": payload.get("states", []),
             "general_options": payload.get("general_options", []),
-            "peshk0v_vpn": payload.get("peshk0v_vpn", {}),
         }
         if "index" in payload or "installed" in payload:
             self._page_payload_cache["mods"] = {
@@ -5022,7 +5015,7 @@ class MainWindow(QMainWindow):
         )
 
     def _component_display_name(self, component_id: str) -> str:
-        return {"zapret": "Zapret", "tg-ws-proxy": "TG WS Proxy", "peshk0v-vpn": "peshk0v vpn"}.get(component_id, component_id)
+        return {"zapret": "Zapret", "tg-ws-proxy": "TG WS Proxy"}.get(component_id, component_id)
 
     def _translate_component_error(self, error: str) -> str:
         text = str(error or "").strip()
@@ -7801,7 +7794,7 @@ class MainWindow(QMainWindow):
         if target == "zapret":
             QTimer.singleShot(0, self._show_logs_files_dialog)
             return
-        if target not in {"tg-ws-proxy", "peshk0v-vpn"}:
+        if target != "tg-ws-proxy":
             return
         QTimer.singleShot(0, lambda t=target: self._open_settings_dialog(t))
 
@@ -11046,16 +11039,8 @@ class MainWindow(QMainWindow):
         enabled_mods = list(settings.enabled_mod_ids or [])
 
         self._set_badge("app", self._t("Работает", "Running") if fully_running else (self._t("Частично", "Partial") if any_running else self._t("Ожидание", "Idle")), "status_ok.svg" if fully_running else ("status_warn.svg" if any_running else "status_off.svg"))
-        vpn_state = states.get("peshk0v-vpn")
-        vpn_running = bool(vpn_state and str(getattr(vpn_state, "status", "") or "") == "running")
-        vpn_enabled = "peshk0v-vpn" in {str(item) for item in list(settings.enabled_component_ids or [])}
-        show_vpn_badge = vpn_enabled or vpn_running
-        if show_vpn_badge:
-            zapret_text, zapret_icon = self._component_badge_state(components.get("peshk0v-vpn"), vpn_state, any_running)
-            self._set_badge_title("zapret", self._t("VPN", "VPN"))
-        else:
-            zapret_text, zapret_icon = self._component_badge_state(components.get("zapret"), zapret_state, any_running)
-            self._set_badge_title("zapret", "Zapret")
+        zapret_text, zapret_icon = self._component_badge_state(components.get("zapret"), zapret_state, any_running)
+        self._set_badge_title("zapret", "Zapret")
         tg_text, tg_icon = self._component_badge_state(components.get("tg-ws-proxy"), tg_state, any_running)
         self._set_badge("zapret", zapret_text, zapret_icon)
         self._set_badge("tg", tg_text, tg_icon)
@@ -11080,138 +11065,11 @@ class MainWindow(QMainWindow):
         fill.setAlpha(alpha)
         return text_color, border, fill
 
-    def _sync_power_vpn_button_style(self) -> None:
-        button = self.power_vpn_btn
-        if button is None:
-            return
-        settings = self.context.settings.get()
-        selected = "peshk0v-vpn" in {str(item) for item in list(settings.enabled_component_ids or [])}
-        running = False
-        try:
-            states = self._component_states()
-            vpn_state = states.get("peshk0v-vpn")
-            running = bool(vpn_state and str(getattr(vpn_state, "status", "") or "") == "running")
-            selected = selected or running
-        except Exception:
-            pass
-        if selected:
-            text = "#d9ffe9" if not is_light_theme(settings.theme) else "#06391d"
-            border = QColor("#22c55e")
-            border.setAlpha(120)
-            fill = QColor("#22c55e")
-            fill.setAlpha((64 if running else 42) if not is_light_theme(settings.theme) else (54 if running else 34))
-        else:
-            text, border, fill = self._inactive_control_style_values()
-        hover = QColor(fill)
-        hover.setAlpha(min(255, fill.alpha() + 18))
-        button.setEnabled(not self._vpn_mode_switch_in_progress)
-        button.setIcon(
-            self._build_tinted_icon(
-                self._icons_dir / self._vpn_icon_name(),
-                QColor(text),
-                fill_ratio=0.72,
-                offset_x=-0.2,
-                offset_y=0.6,
-            )
-        )
-        button.setIconSize(QSize(16, 16))
-        button.setStyleSheet(
-            "QToolButton#PowerVpnButton {"
-            f"background: {fill.name(QColor.NameFormat.HexArgb)};"
-            f"border: 1px solid {border.name(QColor.NameFormat.HexArgb)};"
-            f"color: {text};"
-            "border-radius: 15px;"
-            "padding: 0px;"
-            "margin: 0px;"
-            "}"
-            "QToolButton#PowerVpnButton:hover {"
-            f"background: {hover.name(QColor.NameFormat.HexArgb)};"
-            "}"
-            "QToolButton#PowerVpnButton:disabled {"
-            "opacity: 0.72;"
-            "}"
-        )
-
-    def _handle_power_vpn_button(self) -> None:
-        if self._vpn_mode_switch_in_progress:
-            return
-        vpn_state = {}
-        try:
-            vpn_state = self.context.vpn.state() if getattr(self.context, "vpn", None) is not None else {}
-        except Exception:
-            vpn_state = {}
-        configured = str(vpn_state.get("subscription_state", "") or "") == "valid"
-        if not configured:
-            self._open_peshk0v_vpn_component()
-            return
-        settings = self.context.settings.get()
-        enabled = {str(item) for item in list(settings.enabled_component_ids or [])}
-        target_enabled = "peshk0v-vpn" not in enabled
-        zapret_enabled_before = "zapret" in enabled
-        if target_enabled:
-            enabled.add("peshk0v-vpn")
-            enabled.discard("zapret")
-        else:
-            enabled.discard("peshk0v-vpn")
-            if zapret_enabled_before:
-                enabled.add("zapret")
-        self.context.settings.update(enabled_component_ids=sorted(enabled))
-        self._set_power_vpn_switch_pending(True)
-        if self._master_runtime_has_running_components():
-            self._begin_vpn_mode_power_transition()
-        self._mark_dirty("dashboard", "components", "tray")
-        self._submit_backend_task(
-            "toggle_peshk0v_vpn_mode",
-            {"enabled": target_enabled, "zapret_enabled_before": zapret_enabled_before},
-            action_id="peshk0v-vpn",
-        )
-
-    def _set_power_vpn_switch_pending(self, pending: bool) -> None:
-        self._vpn_mode_switch_in_progress = bool(pending)
-        if self.power_vpn_btn is not None:
-            self.power_vpn_btn.setEnabled(not pending)
-        self._sync_power_vpn_button_style()
-
     def _master_runtime_has_running_components(self) -> bool:
         try:
             return any(str(state.status or "") == "running" for state in self._component_states().values())
         except Exception:
             return False
-
-    def _begin_vpn_mode_power_transition(self) -> None:
-        if self._toggle_in_progress:
-            return
-        self._vpn_switch_power_transition = True
-        self._loading_action = "connect"
-        self._toggle_in_progress = True
-        self.power_button.setEnabled(False)
-        self._loading_frame = 0
-        self._loading_timer.start()
-        self._advance_loading_caption()
-
-    def _finish_vpn_mode_power_transition(self) -> None:
-        if not self._vpn_switch_power_transition:
-            return
-        self._vpn_switch_power_transition = False
-        self._loading_timer.stop()
-        self._toggle_in_progress = False
-        self.power_button.setEnabled(bool(self._startup_snapshot_ready))
-        self._update_power_icon()
-
-    def _open_peshk0v_vpn_component(self) -> None:
-        self._components_scroll_target_component_id = ""
-        try:
-            self._switch_page(2)
-        except Exception:
-            self.pages.setCurrentIndex(2)
-        self._mark_dirty("components")
-        QTimer.singleShot(0, self.refresh_components)
-        if self._components_scroll is not None:
-            QTimer.singleShot(0, lambda: self._components_scroll.verticalScrollBar().setValue(0))
-            QTimer.singleShot(120, lambda: self._components_scroll.verticalScrollBar().setValue(0))
-
-    def _scroll_to_peshk0v_vpn_component(self) -> None:
-        self._ensure_components_scroll_target_visible()
 
     def _ensure_components_scroll_target_visible(self) -> None:
         target_id = self._components_scroll_target_component_id
@@ -12258,10 +12116,6 @@ class MainWindow(QMainWindow):
         self._ui_signals.toggle_done.emit()
 
     def _on_component_action_done(self, action_id: str) -> None:
-        if action_id == "peshk0v-vpn":
-            self._set_power_vpn_switch_pending(False)
-            self._finish_vpn_mode_power_transition()
-
         if action_id == "__settings__":
             self._hide_loading_overlay()
             self._mark_dirty("dashboard", "components", "files", "tray")
@@ -12851,7 +12705,7 @@ class MainWindow(QMainWindow):
             components = list(self._component_defs().values())
         if not states and not explicit_payload:
             states = self._component_states()
-        order = {"zapret": 0, "peshk0v-vpn": 1, "tg-ws-proxy": 2}
+        order = {"zapret": 0, "tg-ws-proxy": 2}
         components = sorted(components, key=lambda item: order.get(item.id, 99))
         self.components_list.clear()
         self._components_card_by_id = {}
@@ -12923,26 +12777,14 @@ class MainWindow(QMainWindow):
                 "Локальный Telegram Proxy. Позволяет подключаться к Telegram в обход блокировок, маскируясь под обычный https-трафик.",
                 "Local Telegram Proxy. Lets Telegram connect through restrictions by blending in with regular HTTPS traffic.",
             ),
-            "peshk0v-vpn": self._t(
-                "Авторская VPN-подписка без ограничений по трафику и количеству устройств. Доступна на смартфонах, ПК, ноутбуках и других устройствах. Первые 10 дней подписки бесплатно.",
-                "Author VPN subscription with no traffic or device limits. Available on phones, PCs, laptops, and other devices. The first 10 days are free.",
-            ),
         }
-        icons = {"zapret": "component_zapret.svg", "tg-ws-proxy": "component_tg.svg", "peshk0v-vpn": self._vpn_icon_name()}
-        vpn_state = {}
-        if isinstance(payload, dict) and isinstance(payload.get("peshk0v_vpn"), dict):
-            vpn_state = dict(payload.get("peshk0v_vpn") or {})
-        elif getattr(self.context, "vpn", None) is not None:
-            try:
-                vpn_state = self.context.vpn.state()
-            except Exception:
-                vpn_state = {}
+        icons = {"zapret": "component_zapret.svg", "tg-ws-proxy": "component_tg.svg"}
         component_cards: list[QFrame] = []
 
         for index, component in enumerate(components):
             state = states.get(component.id)
             status_text, _status_icon = self._component_badge_state(component, state, any_running=False)
-            display_name = {"zapret": "Zapret", "tg-ws-proxy": "Tg-Ws-Proxy", "peshk0v-vpn": "peshk0v vpn"}.get(component.id, component.name)
+            display_name = {"zapret": "Zapret", "tg-ws-proxy": "Tg-Ws-Proxy"}.get(component.id, component.name)
             card, card_layout = self._card()
             card.setMinimumWidth(360)
             card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
@@ -12950,11 +12792,9 @@ class MainWindow(QMainWindow):
             icon = QLabel()
             if component.id == "tg-ws-proxy":
                 icon_size = 38
-            elif component.id == "peshk0v-vpn":
-                icon_size = 29
             else:
                 icon_size = 36
-            icon_slot = QSize(icon_size, icon_size + (4 if component.id == "peshk0v-vpn" else 0))
+            icon_slot = QSize(icon_size, icon_size)
             icon.setFixedSize(icon_slot)
             raw_icon_pixmap = self._icon(icons.get(component.id, "components.svg")).pixmap(icon_size, icon_size)
             icon.setPixmap(
@@ -12963,7 +12803,7 @@ class MainWindow(QMainWindow):
                     icon_slot,
                     1.0,
                     0.0,
-                    3.0 if component.id == "peshk0v-vpn" else 0.0,
+                    0.0,
                 )
             )
             icon_row = QHBoxLayout()
@@ -12971,7 +12811,7 @@ class MainWindow(QMainWindow):
             icon_row.setSpacing(8)
             icon_row.addWidget(icon, 0, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
             icon_row.addStretch(1)
-            if component.id in {"tg-ws-proxy"} or (component.id == "peshk0v-vpn" and str(vpn_state.get("subscription_state", "") or "") == "valid"):
+            if component.id in {"tg-ws-proxy"}:
                 settings_icon_btn = QToolButton()
                 settings_icon_btn.setProperty("class", "action")
                 settings_icon_btn.setIcon(self._icon("settings.svg"))
@@ -12979,14 +12819,12 @@ class MainWindow(QMainWindow):
                 settings_icon_btn.setFixedSize(30, 30)
                 settings_icon_btn.setToolTip(
                     self._t("Настройки TG WS Proxy", "TG WS Proxy settings")
-                    if component.id == "tg-ws-proxy"
-                    else self._t("Настройки peshk0v vpn", "peshk0v vpn settings")
                 )
                 settings_icon_btn.setEnabled(True)
                 settings_icon_btn.clicked.connect(lambda _=False, cid=component.id: self._open_component_settings(cid))
                 self._attach_button_animations(settings_icon_btn)
                 icon_row.addWidget(settings_icon_btn, 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop)
-            if component.id in {"zapret", "tg-ws-proxy", "peshk0v-vpn"}:
+            if component.id in {"zapret", "tg-ws-proxy"}:
                 source_icon_btn = QToolButton()
                 source_icon_btn.setProperty("class", "action")
                 source_icon_btn.setIcon(self._icon("external.svg"))
@@ -12996,22 +12834,21 @@ class MainWindow(QMainWindow):
                 source_icon_btn.clicked.connect(lambda _=False, url=component.source: self._open_update_link(url))
                 self._attach_button_animations(source_icon_btn)
                 icon_row.addWidget(source_icon_btn, 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop)
-                if component.id != "peshk0v-vpn":
-                    update_icon_btn = QToolButton()
-                    update_icon_btn.setProperty("class", "action")
-                    update_icon_btn.setIcon(self._icon("refresh.svg"))
-                    update_icon_btn.setIconSize(QSize(16, 16))
-                    update_icon_btn.setFixedSize(30, 30)
-                    update_icon_btn.setToolTip(
-                        self._t("Обновить Zapret", "Update Zapret")
-                        if component.id == "zapret"
-                        else self._t("Обновить TG WS Proxy", "Update TG WS Proxy")
-                    )
-                    update_icon_btn.clicked.connect(
-                        self._update_zapret_runtime if component.id == "zapret" else self._update_tg_ws_proxy_runtime
-                    )
-                    self._attach_button_animations(update_icon_btn)
-                    icon_row.addWidget(update_icon_btn, 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop)
+                update_icon_btn = QToolButton()
+                update_icon_btn.setProperty("class", "action")
+                update_icon_btn.setIcon(self._icon("refresh.svg"))
+                update_icon_btn.setIconSize(QSize(16, 16))
+                update_icon_btn.setFixedSize(30, 30)
+                update_icon_btn.setToolTip(
+                    self._t("Обновить Zapret", "Update Zapret")
+                    if component.id == "zapret"
+                    else self._t("Обновить TG WS Proxy", "Update TG WS Proxy")
+                )
+                update_icon_btn.clicked.connect(
+                    self._update_zapret_runtime if component.id == "zapret" else self._update_tg_ws_proxy_runtime
+                )
+                self._attach_button_animations(update_icon_btn)
+                icon_row.addWidget(update_icon_btn, 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop)
             card_layout.addLayout(icon_row)
 
             title = QLabel(display_name)
@@ -13020,18 +12857,13 @@ class MainWindow(QMainWindow):
             card_layout.addWidget(title)
 
             description_text = descriptions.get(component.id, component.description)
-            if component.id == "peshk0v-vpn" and str(vpn_state.get("subscription_state", "") or "") == "valid":
-                description_text = self._t(
-                    "Авторский VPN без ограничений по трафику и количеству устройств.",
-                    "Author VPN with no traffic or device limits.",
-                )
             desc = QLabel(description_text)
             desc.setProperty("class", "muted")
             desc.setWordWrap(True)
             card_layout.addWidget(desc)
 
             details = QLabel(
-                f"{self._t('Автор', 'Author')}: {'peshk0v' if component.id == 'peshk0v-vpn' else 'Flowseal'}\n"
+                f"{self._t('Автор', 'Author')}: Flowseal\n"
                 f"{self._t('Статус', 'Status')}: {status_text}\n"
                 f"{self._t('Версия', 'Version')}: {component.version}"
             )
@@ -13118,25 +12950,21 @@ class MainWindow(QMainWindow):
                 connect_btn.clicked.connect(self._prompt_tg_proxy_connect)
                 self._attach_button_animations(connect_btn)
                 card_layout.addWidget(connect_btn)
-            if component.id == "peshk0v-vpn":
-                self._add_peshk0v_vpn_controls(card_layout, vpn_state, state)
             if state is not None and getattr(state, "last_error", ""):
                 error_label = QLabel(str(getattr(state, "last_error", "")))
                 error_label.setProperty("class", "muted")
                 error_label.setWordWrap(True)
                 card_layout.addWidget(error_label)
 
-            vpn_configured = str(vpn_state.get("subscription_state", "") or "") == "valid"
-            if component.id != "peshk0v-vpn" or vpn_configured:
-                toggle_btn = QPushButton(
-                    self._t("Выключить компонент", "Disable component")
-                    if component.enabled
-                    else self._t("Включить компонент", "Enable component")
-                )
-                toggle_btn.setProperty("class", "danger" if component.enabled else "primary")
-                toggle_btn.clicked.connect(lambda _=False, cid=component.id, btn=toggle_btn: self._toggle_component_card(cid, btn))
-                self._attach_button_animations(toggle_btn)
-                card_layout.addWidget(toggle_btn)
+            toggle_btn = QPushButton(
+                self._t("Выключить компонент", "Disable component")
+                if component.enabled
+                else self._t("Включить компонент", "Enable component")
+            )
+            toggle_btn.setProperty("class", "danger" if component.enabled else "primary")
+            toggle_btn.clicked.connect(lambda _=False, cid=component.id, btn=toggle_btn: self._toggle_component_card(cid, btn))
+            self._attach_button_animations(toggle_btn)
+            card_layout.addWidget(toggle_btn)
             component_cards.append(card)
             self._components_cards_layout.addWidget(
                 card,
@@ -13148,75 +12976,6 @@ class MainWindow(QMainWindow):
         if self._components_scroll_target_component_id:
             QTimer.singleShot(0, self._ensure_components_scroll_target_visible)
             QTimer.singleShot(120, self._ensure_components_scroll_target_visible)
-
-    def _add_peshk0v_vpn_controls(
-        self,
-        layout: QVBoxLayout,
-        vpn_state: dict[str, object],
-        component_state: ComponentState | None = None,
-    ) -> None:
-        subscription_state = str(vpn_state.get("subscription_state", "empty") or "empty")
-        running = bool(component_state is not None and str(getattr(component_state, "status", "") or "") == "running")
-        configured = subscription_state == "valid" or running
-        invalid = subscription_state == "invalid"
-
-        if not configured:
-            access_btn = QPushButton(self._t("10 дней бесплатно", "10 days free"))
-            access_btn.setProperty("class", "primary")
-            access_btn.clicked.connect(lambda: self._open_external_url("https://vpn.peshk0v.ru"))
-            self._attach_button_animations(access_btn)
-            layout.addWidget(access_btn)
-
-        if not configured:
-            sub_row = QHBoxLayout()
-            sub_row.setContentsMargins(0, 0, 0, 0)
-            sub_row.setSpacing(8)
-            sub_input = QLineEdit()
-            sub_input.setPlaceholderText("https://vpn.peshk0v.ru/sub/...")
-            sub_input.setText(str(vpn_state.get("subscription_url", "") or ""))
-            import_btn = QPushButton(self._t("Импорт", "Import"))
-            import_btn.clicked.connect(lambda _=False, field=sub_input: self._import_peshk0v_vpn_subscription(field.text()))
-            self._attach_button_animations(import_btn)
-            sub_row.addWidget(sub_input, 1)
-            sub_row.addWidget(import_btn, 0)
-            layout.addLayout(sub_row)
-
-        if invalid:
-            invalid_label = QLabel(str(vpn_state.get("last_error", "") or self._t("Ссылка подписки невалидна.", "Subscription link is invalid.")))
-            invalid_label.setProperty("class", "muted")
-            invalid_label.setWordWrap(True)
-            layout.addWidget(invalid_label)
-
-        if not configured:
-            return
-
-        servers = [item for item in list(vpn_state.get("servers", []) or []) if isinstance(item, dict)]
-        server_combo = ClickSelectComboBox()
-        selected_server = str(vpn_state.get("selected_server_id", "") or "")
-        if servers:
-            for server in servers:
-                server_combo.addItem(self._display_peshk0v_vpn_server_name(server), str(server.get("id", "") or ""))
-            for index in range(server_combo.count()):
-                if str(server_combo.itemData(index) or "") == selected_server:
-                    server_combo.setCurrentIndex(index)
-                    break
-            server_combo.currentIndexChanged.connect(
-                lambda _=0, combo=server_combo: self._update_peshk0v_vpn_settings({"selected_server_id": str(combo.currentData() or "")})
-            )
-        else:
-            server_combo.addItem(self._t("Добавьте подписку, чтобы увидеть локации", "Add a subscription to see locations"), "")
-            server_combo.setEnabled(False)
-        layout.addWidget(server_combo)
-
-    def _display_peshk0v_vpn_server_name(self, server: dict[str, object]) -> str:
-        raw_name = str(server.get("name", "") or server.get("host", "") or "peshk0v vpn")
-        cleaned = raw_name
-        for token in ("🇫🇮", "🇳🇱", "🇩🇪", "🇷🇺", "🇺🇸", "🇨🇦", "🇸🇪", "🇳🇴", "🇩🇰", "🇵🇱", "🇫🇷", "🇨🇿", "🇸🇰"):
-            cleaned = cleaned.replace(token, "")
-        cleaned = cleaned.replace(" - ", " ").replace(" #", " ").replace("#", "")
-        cleaned = cleaned.replace("обход ", "обход ")
-        cleaned = " ".join(cleaned.split()).strip(" -–—")
-        return cleaned or str(server.get("host", "") or "peshk0v vpn")
 
     def _format_bytes(self, value: int) -> str:
         size = float(max(0, int(value)))
@@ -13231,12 +12990,6 @@ class MainWindow(QMainWindow):
             if str(combo.itemData(index) or "") == value:
                 combo.setCurrentIndex(index)
                 return
-
-    def _import_peshk0v_vpn_subscription(self, url: str) -> None:
-        self._submit_backend_task("import_peshk0v_vpn_subscription", {"url": url})
-
-    def _update_peshk0v_vpn_settings(self, payload: dict[str, object]) -> None:
-        self._submit_backend_task("update_peshk0v_vpn_settings", payload)
 
     def _prompt_tg_proxy_connect(self) -> None:
         try:
@@ -14006,7 +13759,6 @@ class MainWindow(QMainWindow):
             ("app", self._t("Приложение", "App")),
             ("zapret", "Zapret"),
             ("tg-ws-proxy", "TG WS Proxy"),
-            ("peshk0v-vpn", self._t("VPN", "VPN")),
             ("all", self._t("Все логи", "All logs")),
         ]
         current = self._current_log_source
