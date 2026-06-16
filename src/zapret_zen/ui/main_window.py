@@ -2669,6 +2669,9 @@ class ContentGlowWidget(QWidget):
         c = self._accent_color
         light = c.lightnessF() > 0.5
         base_alpha = 0.06 if light else 0.10
+        path = QPainterPath()
+        path.addRoundedRect(QRectF(self.rect()).adjusted(6, 6, -6, -6), 16, 16)
+        painter.setClipPath(path)
         glow = QRadialGradient(
             rect.left() + rect.width() * self._glow_x,
             rect.top() + rect.height() * self._glow_y,
