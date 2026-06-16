@@ -3346,28 +3346,6 @@ class SettingsDialog(AppDialog):
         self.tray_checkbox = QCheckBox(self._t("Стартовать в трее", "Start in tray"))
         self.auto_components_checkbox = QCheckBox(self._t("Автозапуск компонентов", "Auto-run components"))
         self.check_updates_checkbox = QCheckBox(self._t("Проверять наличие обновлений", "Check for updates"))
-        self.vpn_subscription_input = QLineEdit()
-        self.vpn_subscription_input.setPlaceholderText("https://vpn.peshk0v.ru/sub/...")
-        self.vpn_tun_checkbox = QCheckBox(self._t("Использовать TUN-режим", "Use TUN mode"))
-        self.vpn_routing_combo = ClickSelectComboBox()
-        self.vpn_routing_combo.addItem(self._t("Глобальная", "Global"), "global")
-        self.vpn_routing_combo.addItem(self._t("RU чёрный список", "RU blacklist"), "blacklist")
-        self.vpn_routing_combo.addItem(self._t("RU белый список", "RU whitelist"), "whitelist")
-        self.vpn_proxy_combo = ClickSelectComboBox()
-        self.vpn_proxy_combo.addItem(self._t("Очистить системный прокси", "Clear system proxy"), "clear")
-        self.vpn_proxy_combo.addItem(self._t("Установить системный прокси", "Set system proxy"), "set")
-        self.vpn_proxy_combo.addItem(self._t("Не менять системный прокси", "Do not change system proxy"), "unchanged")
-        self.vpn_proxy_combo.addItem(self._t("PAC-режим", "PAC mode"), "pac")
-        self.vpn_processes_input = QLineEdit()
-        self.vpn_processes_input.setPlaceholderText(
-            self._t(
-                "Список процессов через запятую",
-                "Comma-separated process list",
-            )
-        )
-        self.vpn_refresh_btn = QPushButton(self._t("Обновить подписку", "Refresh subscription"))
-        self.vpn_refresh_btn.clicked.connect(self._refresh_vpn_subscription)
-        self._vpn_refresh_default_text = self.vpn_refresh_btn.text()
 
         scroll = QScrollArea()
         scroll.setObjectName("SettingsScroll")
@@ -3397,15 +3375,6 @@ class SettingsDialog(AppDialog):
         app_form.addRow("", self.tray_checkbox)
         app_form.addRow("", self.auto_components_checkbox)
         app_form.addRow("", self.check_updates_checkbox)
-
-        vpn_form = self._settings_section(canvas_layout, "peshk0v vpn", "peshk0v-vpn")
-        self.vpn_section_frame = vpn_form.parentWidget()
-        vpn_form.addRow(self._t("Ссылка подписки", "Subscription URL"), self.vpn_subscription_input)
-        vpn_form.addRow("", self.vpn_refresh_btn)
-        vpn_form.addRow("", self.vpn_tun_checkbox)
-        vpn_form.addRow(self._t("Маршрутизация", "Routing"), self.vpn_routing_combo)
-        vpn_form.addRow(self._t("Системный прокси", "System proxy"), self.vpn_proxy_combo)
-        vpn_form.addRow(self._t("Проксировать процессы", "Proxy processes"), self.vpn_processes_input)
 
         zapret_form = self._settings_section(canvas_layout, "Zapret", "zapret")
         zapret_form.addRow("IPSet mode", self.ipset_mode_combo)
@@ -3527,7 +3496,6 @@ class SettingsDialog(AppDialog):
 
     def _load(self) -> None:
         settings = self.context.settings.get()
-        vpn_state = self.context.vpn.state()
         theme_index = self.theme_combo.findData(settings.theme)
         self.theme_combo.setCurrentIndex(theme_index if theme_index >= 0 else 0)
         self._select_combo_value(self.language_combo, settings.language)
@@ -3551,23 +3519,6 @@ class SettingsDialog(AppDialog):
         self.tray_checkbox.setChecked(settings.start_in_tray)
         self.auto_components_checkbox.setChecked(settings.auto_run_components)
         self.check_updates_checkbox.setChecked(settings.check_updates_on_start)
-        self.vpn_subscription_input.setText(
-            str(vpn_state.get("subscription_url", "") or settings.peshk0v_vpn_subscription_url)
-        )
-        self.vpn_tun_checkbox.setChecked(bool(vpn_state.get("tun_enabled", settings.peshk0v_vpn_tun_enabled)))
-        self._select_combo_value(
-            self.vpn_routing_combo,
-            str(vpn_state.get("routing_mode", settings.peshk0v_vpn_routing_mode) or "global"),
-        )
-        self._select_combo_value(
-            self.vpn_proxy_combo,
-            str(vpn_state.get("system_proxy_mode", settings.peshk0v_vpn_system_proxy_mode) or "pac"),
-        )
-        self.vpn_processes_input.setText(
-            str(vpn_state.get("processes", settings.peshk0v_vpn_processes) or "")
-        )
-        if self.vpn_section_frame is not None:
-            self.vpn_section_frame.setVisible(str(vpn_state.get("subscription_state", "") or "") == "valid")
 
     def load_from_payload(self, payload: dict[str, object]) -> None:
         self._load()
@@ -3597,23 +3548,6 @@ class SettingsDialog(AppDialog):
         self.tray_checkbox.setChecked(bool(payload.get("start_in_tray", self.context.settings.get().start_in_tray)))
         self.auto_components_checkbox.setChecked(bool(payload.get("auto_run_components", self.context.settings.get().auto_run_components)))
         self.check_updates_checkbox.setChecked(bool(payload.get("check_updates_on_start", self.context.settings.get().check_updates_on_start)))
-        self.vpn_subscription_input.setText(
-            str(payload.get("peshk0v_vpn_subscription_url", self.vpn_subscription_input.text()))
-        )
-        self.vpn_tun_checkbox.setChecked(
-            bool(payload.get("peshk0v_vpn_tun_enabled", self.vpn_tun_checkbox.isChecked()))
-        )
-        self._select_combo_value(
-            self.vpn_routing_combo,
-            str(payload.get("peshk0v_vpn_routing_mode", self.vpn_routing_combo.currentData() or "global")),
-        )
-        self._select_combo_value(
-            self.vpn_proxy_combo,
-            str(payload.get("peshk0v_vpn_system_proxy_mode", self.vpn_proxy_combo.currentData() or "pac")),
-        )
-        self.vpn_processes_input.setText(
-            str(payload.get("peshk0v_vpn_processes", self.vpn_processes_input.text()))
-        )
 
     def payload(self) -> dict[str, object]:
         try:
@@ -3650,37 +3584,12 @@ class SettingsDialog(AppDialog):
             "start_in_tray": self.tray_checkbox.isChecked(),
             "auto_run_components": self.auto_components_checkbox.isChecked(),
             "check_updates_on_start": self.check_updates_checkbox.isChecked(),
-            "peshk0v_vpn_subscription_url": self.vpn_subscription_input.text().strip(),
-            "peshk0v_vpn_tun_enabled": self.vpn_tun_checkbox.isChecked(),
-            "peshk0v_vpn_routing_mode": self.vpn_routing_combo.currentData() or "global",
-            "peshk0v_vpn_system_proxy_mode": self.vpn_proxy_combo.currentData() or "pac",
-            "peshk0v_vpn_processes": self.vpn_processes_input.text().strip(),
         }
 
     def _select_combo_value(self, combo: QComboBox, value: str) -> None:
         index = combo.findData(value)
         if index >= 0:
             combo.setCurrentIndex(index)
-
-    def _refresh_vpn_subscription(self) -> None:
-        parent = self.parent()
-        if parent is None or not hasattr(parent, "_refresh_peshk0v_vpn_subscription_from_settings"):
-            return
-        self.set_vpn_refresh_state("loading")
-        getattr(parent, "_refresh_peshk0v_vpn_subscription_from_settings")(self.vpn_subscription_input.text().strip())
-
-    def set_vpn_refresh_state(self, state: str) -> None:
-        if state == "loading":
-            self.vpn_refresh_btn.setEnabled(False)
-            self.vpn_refresh_btn.setText(self._t("Обновление...", "Refreshing..."))
-            return
-        if state == "done":
-            self.vpn_refresh_btn.setEnabled(False)
-            self.vpn_refresh_btn.setText(self._t("Обновлено", "Updated"))
-            QTimer.singleShot(2000, lambda: self.set_vpn_refresh_state("idle"))
-            return
-        self.vpn_refresh_btn.setText(self._t("Обновить подписку", "Refresh subscription"))
-        self.vpn_refresh_btn.setEnabled(True)
 
     def _sync_tg_media_mode_from_dc_ip(self, value: str) -> None:
         normalized = "\n".join(line.strip() for line in str(value or "").splitlines() if line.strip())
@@ -7893,21 +7802,6 @@ class MainWindow(QMainWindow):
             return
         QTimer.singleShot(0, lambda t=target: self._open_settings_dialog(t))
 
-    def _refresh_peshk0v_vpn_subscription_from_settings(self, url: str) -> None:
-        current_url = str(self.context.vpn.state().get("subscription_url", "") or "")
-        normalized = str(url or "").strip()
-        if normalized and normalized != current_url:
-            self._submit_backend_task(
-                "import_peshk0v_vpn_subscription",
-                {"url": normalized},
-                action_id="__settings_vpn_refresh__",
-            )
-            return
-        self._submit_backend_task(
-            "refresh_peshk0v_vpn_subscription",
-            action_id="__settings_vpn_refresh__",
-        )
-
     def _apply_settings_payload(self, before, payload: dict[str, object]) -> None:
         effective_payload = dict(payload)
         if "fortnite" in {str(item) for item in list(self.context.settings.get().selected_service_ids or [])}:
@@ -8092,14 +7986,14 @@ class MainWindow(QMainWindow):
         self._update_runtime_snapshot_from_payload(payload)
         self._update_mods_cache_from_payload(payload)
         self._update_general_options_from_payload(payload)
-        if action in {"toggle_master_runtime", "start_enabled_components", "start_component", "select_general", "apply_settings", "load_startup_snapshot", "load_components_payload", "select_runtime_mode", "toggle_peshk0v_vpn_mode", "import_peshk0v_vpn_subscription", "refresh_peshk0v_vpn_subscription", "update_peshk0v_vpn_settings", "reset_peshk0v_vpn_traffic"}:
+        if action in {"toggle_master_runtime", "start_enabled_components", "start_component", "select_general", "apply_settings", "load_startup_snapshot", "load_components_payload", "select_runtime_mode"}:
             self._notify_component_errors_from_payload(payload)
         self._notify_telegram_proxy_status_from_payload(payload)
         self._notify_zapret_restart_from_payload(payload)
         if action in {"update_zapret_runtime", "update_tg_ws_proxy_runtime"}:
             self._invalidate_general_options_cache()
             self._page_payload_cache.clear()
-        elif action in {"toggle_mod", "toggle_component_enabled", "move_mod", "set_mod_emoji", "install_mod", "remove_mod", "import_mod_from_github", "import_mod_from_paths", "import_mod_from_path", "rebuild_merge_runtime", "set_selected_services", "select_runtime_mode", "toggle_peshk0v_vpn_mode", "import_peshk0v_vpn_subscription", "refresh_peshk0v_vpn_subscription", "update_peshk0v_vpn_settings", "reset_peshk0v_vpn_traffic"}:
+        elif action in {"toggle_mod", "toggle_component_enabled", "move_mod", "set_mod_emoji", "install_mod", "remove_mod", "import_mod_from_github", "import_mod_from_paths", "import_mod_from_path", "rebuild_merge_runtime", "set_selected_services", "select_runtime_mode"}:
             self._page_payload_cache.clear()
         if action == "load_startup_snapshot":
             self._startup_snapshot_ready = True
@@ -8107,7 +8001,6 @@ class MainWindow(QMainWindow):
                 "components": payload.get("components", []),
                 "states": payload.get("states", []),
                 "general_options": payload.get("general_options", []),
-                "peshk0v_vpn": payload.get("peshk0v_vpn", {}),
             }
             self._page_payload_cache["mods"] = {
                 "index": payload.get("index", []),
@@ -8149,10 +8042,8 @@ class MainWindow(QMainWindow):
             self._mark_dirty("dashboard", "components", "tray")
             self._ui_signals.component_action_done.emit(action_id)
             return
-        if action in {"select_runtime_mode", "toggle_peshk0v_vpn_mode", "import_peshk0v_vpn_subscription", "refresh_peshk0v_vpn_subscription", "update_peshk0v_vpn_settings", "reset_peshk0v_vpn_traffic"}:
+        if action in {"select_runtime_mode"}:
             self._mark_dirty("dashboard", "components", "tray")
-            if action_id == "__settings_vpn_refresh__":
-                self._finish_settings_vpn_refresh(success=True)
             self._ui_signals.component_action_done.emit(action_id)
             return
         if action == "prepare_general_autotest_runtime":
@@ -8274,10 +8165,8 @@ class MainWindow(QMainWindow):
                 self._ui_signals.component_action_done.emit("__general__")
         if action == "apply_settings":
             self._ui_signals.component_action_done.emit("__settings__")
-        if action in {"toggle_component_enabled", "toggle_component_autostart", "start_component", "stop_component", "toggle_peshk0v_vpn_mode"}:
+        if action in {"toggle_component_enabled", "toggle_component_autostart", "start_component", "stop_component"}:
             self._ui_signals.component_action_done.emit(action_id)
-        if action_id == "__settings_vpn_refresh__":
-            self._finish_settings_vpn_refresh(success=False)
         if action == "prepare_general_autotest_runtime":
             self._general_test_waiting_runtime_prepare = False
             if self._general_test_running and not self._general_test_cancelled:
@@ -8329,8 +8218,6 @@ class MainWindow(QMainWindow):
         normalized = (action or "").strip().lower()
         if "tg_ws_proxy" in normalized or "tg-ws-proxy" in normalized or "telegram" in normalized:
             return "tg-ws-proxy"
-        if "peshk0v_vpn" in normalized or "peshk0v-vpn" in normalized or "vpn" in normalized:
-            return "peshk0v-vpn"
         if "zapret" in normalized or "general" in normalized or "merge" in normalized:
             return "zapret"
         if "mod" in normalized:
@@ -8348,7 +8235,6 @@ class MainWindow(QMainWindow):
     def _backend_source_label(self, source: str) -> str:
         labels = {
             "tg-ws-proxy": "TG WS Proxy",
-            "peshk0v-vpn": "peshk0v vpn",
             "zapret": "Zapret",
             "mods": self._t("Модификации", "Mods"),
             "settings": self._t("Настройки", "Settings"),
@@ -8367,15 +8253,6 @@ class MainWindow(QMainWindow):
                 f"{source_label}: an empty or corrupted JSON response was received. Local data is protected; try again. If it repeats, open logs - backend action is: {action or 'unknown'}.",
             )
         return text
-
-    def _finish_settings_vpn_refresh(self, *, success: bool) -> None:
-        dialog = self._settings_dialog
-        if dialog is None:
-            return
-        if success:
-            dialog.set_vpn_refresh_state("done")
-            return
-        dialog.set_vpn_refresh_state("idle")
 
     def _prepare_general_test_runtime_before_run(self) -> None:
         self._general_test_waiting_runtime_prepare = True
