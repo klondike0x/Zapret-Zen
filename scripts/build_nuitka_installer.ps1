@@ -2,7 +2,7 @@
     [string]$Python = ".\.venv\Scripts\python.exe",
     [string]$PayloadDir = "installer_payload",
     [string]$OutputDir = "dist_installer",
-    [string]$ReleaseDir = "release_2.0.0",
+    [string]$ReleaseDir = "release_2.1.0",
     [string]$X64Source = "",
     [string]$Arm64Source = "",
     [switch]$SkipPrepareRelease
@@ -37,19 +37,19 @@ if (-not $SkipPrepareRelease) {
   --onefile `
   --assume-yes-for-downloads `
   --no-deployment-flag=self-execution `
-  --msvc=latest `
+  --mingw64 `
   --enable-plugin=pyside6 `
   --windows-console-mode=disable `
   --windows-uac-admin `
   --windows-icon-from-ico=ui_assets\icons\app_shell.ico `
   --company-name="peshk0v" `
   --product-name="Zapret-Zen Installer" `
-  --file-version="2.0.0.0" `
-  --product-version="2.0.0.0" `
+  --file-version="2.1.0.0" `
+  --product-version="2.1.0.0" `
   --file-description="Zapret-Zen Installer" `
   --copyright="peshk0v" `
   --output-dir=$OutputDir `
-  --output-filename="install_zapretzen_2.0.0_universal.exe" `
+  --output-filename="install_zapretzen_2.1d_universal.exe" `
   --include-data-dir=$PayloadDir=installer_payload `
   --include-data-dir=ui_assets=ui_assets `
   --nofollow-import-to=tkinter `
