@@ -37,7 +37,9 @@ def _snapshot(context) -> dict[str, Any]:
             "selected_runtime_mode": getattr(settings, "selected_runtime_mode", "zapret"),
             "autostart_windows": bool(settings.autostart_windows),
             "apply_update_on_next_launch": bool(getattr(settings, "apply_update_on_next_launch", False)),
+            "selected_dns_preset": settings.selected_dns_preset,
         },
+        "dns_presets": context.processes.list_dns_presets(),
     }
 
 def _mods_payload(context) -> dict[str, Any]:
@@ -112,6 +114,16 @@ def _sync_telegram_component_from_services(context) -> None:
             enabled_component_ids=sorted(enabled),
             autostart_component_ids=sorted(autostart),
         )
+
+def _sync_dns_manager_component_from_services(context) -> None:
+    settings = context.settings.get()
+    selected = {str(item) for item in list(settings.selected_service_ids or [])}
+    enabled = {str(item) for item in list(settings.enabled_component_ids or [])}
+
+    if "ai" in selected:
+        enabled.add("dns-manager")
+    if enabled != set(settings.enabled_component_ids or []):
+        context.settings.update(enabled_component_ids=sorted(enabled))
 
 def _runtime_running_states(context) -> tuple[dict[str, Any], bool, bool]:
     states = {item.component_id: item for item in context.processes.list_states()}
@@ -302,6 +314,7 @@ def _run_action(context, action: str, payload: dict[str, Any], emit_progress: ca
 @_register_action("toggle_master_runtime")
 def _handle_toggle_master_runtime(context, payload, emit_progress):
     _sync_telegram_component_from_services(context)
+    _sync_dns_manager_component_from_services(context)
     components = context.processes.list_components()
     states = {item.component_id: item for item in context.processes.list_states()}
     active_ids = [c.id for c in components if c.enabled]
@@ -327,6 +340,7 @@ def _handle_toggle_master_runtime(context, payload, emit_progress):
 @_register_action("load_startup_snapshot")
 def _handle_load_startup_snapshot(context, payload, emit_progress):
     _sync_telegram_component_from_services(context)
+    _sync_dns_manager_component_from_services(context)
     current = context.settings.get()
     if not str(current.selected_zapret_general or "").strip():
         options = context.processes.list_zapret_generals()
@@ -341,6 +355,7 @@ def _handle_load_startup_snapshot(context, payload, emit_progress):
 @_register_action("load_components_payload")
 def _handle_load_components_payload(context, payload, emit_progress):
     _sync_telegram_component_from_services(context)
+    _sync_dns_manager_component_from_services(context)
     current = context.settings.get()
     options = context.processes.list_zapret_generals()
     if not str(current.selected_zapret_general or "").strip() and options:
@@ -353,6 +368,7 @@ def _handle_load_components_payload(context, payload, emit_progress):
 @_register_action("start_enabled_components")
 def _handle_start_enabled_components(context, payload, emit_progress):
     _sync_telegram_component_from_services(context)
+    _sync_dns_manager_component_from_services(context)
     autostart_only = bool(payload.get("autostart_only", False)) if isinstance(payload, dict) else False
     components = context.processes.list_components()
     if autostart_only:
@@ -516,7 +532,7 @@ def _handle_set_selected_services(context, payload, emit_progress):
     before_services = set(settings.selected_service_ids or [])
     enabled_components = set(settings.enabled_component_ids or [])
     autostart_components = set(settings.autostart_component_ids or [])
-    has_zapret_services = bool(requested - {"telegram-desktop"})
+    has_zapret_services = bool(requested - {"telegram-desktop", "ai"})
     if has_zapret_services:
         enabled_components.add("zapret")
     else:
@@ -539,6 +555,15 @@ def _handle_set_selected_services(context, payload, emit_progress):
                 context.processes.start_component("tg-ws-proxy")
             except Exception:
                 pass
+    if "ai" in requested:
+        enabled_components.add("dns-manager")
+    if "ai" in requested and "ai" not in before_services:
+        states = {item.component_id: item for item in context.processes.list_states()}
+        if any(item.status == "running" for item in states.values()):
+            try:
+                context.processes.start_component("dns-manager")
+            except Exception:
+                pass
     if not has_zapret_services:
         states = {item.component_id: item for item in context.processes.list_states()}
         if states.get("zapret") and states["zapret"].status == "running":
@@ -549,6 +574,8 @@ def _handle_set_selected_services(context, payload, emit_progress):
         "enabled_component_ids": sorted(enabled_components),
         "autostart_component_ids": sorted(autostart_components),
     }
+    if "ai" in requested:
+        settings_changes["selected_dns_preset"] = "xbox-dns"
     if "fortnite" in requested:
         settings_changes.update(_fortnite_zapret_settings(context))
     context.settings.update(**settings_changes)
@@ -973,6 +1000,19 @@ def _handle_update_zapret_runtime(context, payload, emit_progress):
 def _handle_update_tg_ws_proxy_runtime(context, payload, emit_progress):
     result = context.processes.update_tg_ws_proxy_runtime()
     result.update(_snapshot(context))
+    return result
+
+
+@_register_action("apply_dns_preset")
+def _handle_apply_dns_preset(context, payload, emit_progress):
+    preset = str(payload.get("preset", "")).strip()
+    context.settings.update(selected_dns_preset=preset)
+    states = {item.component_id: item for item in context.processes.list_states()}
+    if states.get("dns-manager") and states["dns-manager"].status == "running":
+        context.processes.stop_component("dns-manager")
+        context.processes.start_component("dns-manager")
+    result = _snapshot(context)
+    result["dns_presets"] = context.processes.list_dns_presets()
     return result
 
 class BackendWorkerClient(QObject):

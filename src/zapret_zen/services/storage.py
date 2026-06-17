@@ -42,11 +42,21 @@ class StorageManager:
             {
                 "id": "tg-ws-proxy",
                 "name": "Tg-Ws-Proxy",
-                "description": "РџСЂРѕРєСЃРё РґР»СЏ Telegram С‡РµСЂРµР· Р»РѕРєР°Р»СЊРЅС‹Р№ РїРѕСЂС‚.",
+                "description": "Прокси для Telegram через локальный порт.",
                 "version": tg_version,
                 "source": "https://github.com/Flowseal/tg-ws-proxy",
                 "command": ["TgWsProxy_windows.exe"],
                 "enabled": True,
+                "autostart": False,
+            },
+            {
+                "id": "dns-manager",
+                "name": "DNS Manager",
+                "description": "Управление DNS-серверами Windows.",
+                "version": "1.0",
+                "source": "https://github.com/peshk0v/Zapret-Zen",
+                "command": [],
+                "enabled": False,
                 "autostart": False,
             },
         ]

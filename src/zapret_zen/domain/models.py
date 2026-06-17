@@ -51,6 +51,7 @@ class AppSettings:
     zapret_ipset_mode: str = "loaded"
     zapret_game_filter_mode: str = "disabled"
     zapret_udp_exclude_ports: str = "51820"
+    selected_dns_preset: str = ""
     apply_update_on_next_launch: bool = False
 
 

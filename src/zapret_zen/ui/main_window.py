@@ -2754,29 +2754,44 @@ class SmoothScrollController(QObject):
         super().__init__(scrollable)
         self._scrollable = scrollable
         self._angle_divisor = max(1.0, float(angle_divisor))
-        self._target_value = scrollable.verticalScrollBar().value()
-        self._animation = QPropertyAnimation(scrollable.verticalScrollBar(), b"value", self)
-        self._animation.setDuration(max(80, int(duration)))
-        self._animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._v_target = scrollable.verticalScrollBar().value()
+        self._h_target = scrollable.horizontalScrollBar().value()
+        self._v_anim = QPropertyAnimation(scrollable.verticalScrollBar(), b"value", self)
+        self._v_anim.setDuration(max(80, int(duration)))
+        self._v_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._h_anim = QPropertyAnimation(scrollable.horizontalScrollBar(), b"value", self)
+        self._h_anim.setDuration(max(80, int(duration)))
+        self._h_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
         scrollable.viewport().installEventFilter(self)
 
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:
         if watched is self._scrollable.viewport() and event.type() == QEvent.Type.Wheel:
             wheel = event  # type: ignore[assignment]
-            delta = 0
-            if hasattr(wheel, "pixelDelta") and wheel.pixelDelta().y() != 0:  # type: ignore[attr-defined]
-                delta = int(wheel.pixelDelta().y())  # type: ignore[attr-defined]
+            dy = 0
+            px = getattr(wheel, "pixelDelta", None)
+            if px is not None and px().y() != 0:
+                dy = int(px().y())
             elif hasattr(wheel, "angleDelta"):
-                delta = int(wheel.angleDelta().y() / self._angle_divisor)  # type: ignore[attr-defined]
-            if delta != 0:
-                bar = self._scrollable.verticalScrollBar()
-                self._target_value = max(bar.minimum(), min(bar.maximum(), self._target_value - delta))
-                self._animation.stop()
-                self._animation.setStartValue(bar.value())
-                self._animation.setEndValue(self._target_value)
-                self._animation.start()
-                event.accept()
-                return True
+                dy = int(wheel.angleDelta().y() / self._angle_divisor)  # type: ignore[attr-defined]
+            if dy != 0:
+                vbar = self._scrollable.verticalScrollBar()
+                if vbar.maximum() > 0:
+                    self._v_target = max(vbar.minimum(), min(vbar.maximum(), self._v_target - dy))
+                    self._v_anim.stop()
+                    self._v_anim.setStartValue(vbar.value())
+                    self._v_anim.setEndValue(self._v_target)
+                    self._v_anim.start()
+                    event.accept()
+                    return True
+                hbar = self._scrollable.horizontalScrollBar()
+                if hbar.maximum() > 0:
+                    self._h_target = max(hbar.minimum(), min(hbar.maximum(), self._h_target - dy))
+                    self._h_anim.stop()
+                    self._h_anim.setStartValue(hbar.value())
+                    self._h_anim.setEndValue(self._h_target)
+                    self._h_anim.start()
+                    event.accept()
+                    return True
         return super().eventFilter(watched, event)
 
 
@@ -3351,7 +3366,7 @@ class MainWindow(QMainWindow):
         self._updating_general_combo = False
         self._pending_info_message: tuple[str, str] | None = None
         self._components_cards_root: QWidget | None = None
-        self._components_cards_layout: QGridLayout | None = None
+        self._components_cards_layout: QHBoxLayout | None = None
         self._components_scroll: QScrollArea | None = None
         self._components_card_by_id: dict[str, QFrame] = {}
         self._components_scroll_target_component_id = ""
@@ -3530,6 +3545,7 @@ class MainWindow(QMainWindow):
         self._favorite_general_buttons: dict[str, QToolButton] = {}
         self._general_options_cache: list[dict[str, str]] | None = None
         self._general_options_refresh_in_progress = False
+        self._dns_presets_cache: list[dict[str, str]] = []
         self._refresh_dirty_sections = {"dashboard", "services", "components", "mods", "files", "logs", "tray"}
         self._refresh_scheduled = False
         self._initial_refresh_pending = False
@@ -3827,6 +3843,7 @@ class MainWindow(QMainWindow):
             "components": payload.get("components", []),
             "states": payload.get("states", []),
             "general_options": payload.get("general_options", []),
+            "dns_presets": payload.get("dns_presets", []),
         }
         if "index" in payload or "installed" in payload:
             self._page_payload_cache["mods"] = {
@@ -4153,6 +4170,10 @@ class MainWindow(QMainWindow):
         if isinstance(raw_options, list):
             normalized = [item for item in raw_options if isinstance(item, dict) and item.get("id")]
             self._general_options_cache = normalized
+        raw_dns = payload.get("dns_presets")
+        if isinstance(raw_dns, list):
+            self._dns_presets_cache = [item for item in raw_dns if isinstance(item, dict) and item.get("id")]
+
     def showEvent(self, event: QEvent) -> None:
         super().showEvent(event)
         self._sync_window_icon()
@@ -4698,7 +4719,7 @@ class MainWindow(QMainWindow):
         )
 
     def _component_display_name(self, component_id: str) -> str:
-        return {"zapret": "Zapret", "tg-ws-proxy": "TG WS Proxy"}.get(component_id, component_id)
+        return {"zapret": "Zapret", "dns-manager": "DNS Manager", "tg-ws-proxy": "TG WS Proxy"}.get(component_id, component_id)
 
     def _translate_component_error(self, error: str) -> str:
         text = str(error or "").strip()
@@ -10765,6 +10786,12 @@ class MainWindow(QMainWindow):
         self._advance_component_loading()
         self._submit_backend_task("select_general", {"selected": selected}, action_id="__general__")
 
+    def _on_dns_preset_selected(self, preset: str) -> None:
+        current = self.context.settings.get().selected_dns_preset
+        if preset == current:
+            return
+        self._submit_backend_task("apply_dns_preset", {"preset": preset})
+
     def _apply_general_selection_worker(self, selected: str) -> None:
         self.context.settings.get().selected_zapret_general = selected
         self.context.settings.save()
@@ -11534,6 +11561,8 @@ class MainWindow(QMainWindow):
             self.context.settings.update(selected_service_ids=normalized)
             if "fortnite" in normalized:
                 self._apply_fortnite_service_preferences_locally()
+            if "ai" in normalized:
+                self.context.settings.update(selected_dns_preset="xbox-dns")
 
     def _flush_selected_services_backend_sync(self) -> None:
         pending = list(self._pending_selected_service_ids or [])
@@ -12221,6 +12250,9 @@ class MainWindow(QMainWindow):
                 ]
                 if general_options_from_payload:
                     self._general_options_cache = general_options_from_payload
+            raw_dns = payload.get("dns_presets")
+            if isinstance(raw_dns, list):
+                self._dns_presets_cache = [item for item in raw_dns if isinstance(item, dict) and item.get("id")]
             raw_components = payload.get("components", [])
             raw_states = payload.get("states", {})
             if isinstance(raw_components, list):
@@ -12255,7 +12287,7 @@ class MainWindow(QMainWindow):
             components = list(self._component_defs().values())
         if not states and not explicit_payload:
             states = self._component_states()
-        order = {"zapret": 0, "tg-ws-proxy": 2}
+        order = {"zapret": 0, "dns-manager": 1, "tg-ws-proxy": 2}
         components = sorted(components, key=lambda item: order.get(item.id, 99))
         self.components_list.clear()
         self._components_card_by_id = {}
@@ -12280,14 +12312,14 @@ class MainWindow(QMainWindow):
             loading_text.setWordWrap(True)
             loading_layout.addWidget(loading_title)
             loading_layout.addWidget(loading_text)
-            self._components_cards_layout.addWidget(loading, 0, 0, Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+            self._components_cards_layout.addWidget(loading)
             return
         for component in components:
             state = states.get(component.id)
             status_text = state.status if state else "stopped"
             subtitle = f"{self._t('Версия', 'Version')}: {component.version} | {self._t('Включен', 'Enabled')}: {self._t('да', 'yes') if component.enabled else self._t('нет', 'no')} | {self._t('Автозапуск', 'Autostart')}: {self._t('да', 'yes') if component.autostart else self._t('нет', 'no')} | {self._t('Статус', 'Status')}: {status_text}"
             source = f"{self._t('Источник', 'Source')}: {component.source}"
-            display_name = {"zapret": "Zapret", "tg-ws-proxy": "Tg-Ws-Proxy"}.get(component.id, component.name)
+            display_name = {"zapret": "Zapret", "dns-manager": "DNS Manager", "tg-ws-proxy": "Tg-Ws-Proxy"}.get(component.id, component.name)
             item = QListWidgetItem(f"{display_name}\n{subtitle}\n{source}")
             item.setData(Qt.ItemDataRole.UserRole, component.id)
             item.setSizeHint(QSize(200, 70))
@@ -12315,7 +12347,7 @@ class MainWindow(QMainWindow):
             empty_text.setWordWrap(True)
             empty_layout.addWidget(empty_title)
             empty_layout.addWidget(empty_text)
-            self._components_cards_layout.addWidget(empty, 0, 0, Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+            self._components_cards_layout.addWidget(empty)
             return
 
         descriptions = {
@@ -12323,24 +12355,28 @@ class MainWindow(QMainWindow):
                 "Классический способ обхода блокировок через DPI.",
                 "A classic DPI-based bypass method for blocked services.",
             ),
+            "dns-manager": self._t(
+                "Управление DNS-серверами Windows. Позволяет выбрать DNS-провайдера для стабильного доступа к сайтам.",
+                "Manage Windows DNS servers. Select a DNS provider for stable access to websites.",
+            ),
             "tg-ws-proxy": self._t(
                 "Локальный Telegram Proxy. Позволяет подключаться к Telegram в обход блокировок, маскируясь под обычный https-трафик.",
                 "Local Telegram Proxy. Lets Telegram connect through restrictions by blending in with regular HTTPS traffic.",
             ),
         }
-        icons = {"zapret": "component_zapret.svg", "tg-ws-proxy": "component_tg.svg"}
+        icons = {"zapret": "component_zapret.svg", "dns-manager": "component_dns.svg", "tg-ws-proxy": "component_tg.svg"}
         component_cards: list[QFrame] = []
 
         for index, component in enumerate(components):
             state = states.get(component.id)
             status_text, _status_icon = self._component_badge_state(component, state, any_running=False)
-            display_name = {"zapret": "Zapret", "tg-ws-proxy": "Tg-Ws-Proxy"}.get(component.id, component.name)
+            display_name = {"zapret": "Zapret", "dns-manager": "DNS Manager", "tg-ws-proxy": "Tg-Ws-Proxy"}.get(component.id, component.name)
             card, card_layout = self._card()
             card.setMinimumWidth(360)
             card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
             self._components_card_by_id[component.id] = card
             icon = QLabel()
-            if component.id == "tg-ws-proxy":
+            if component.id in {"tg-ws-proxy", "dns-manager"}:
                 icon_size = 38
             else:
                 icon_size = 36
@@ -12412,8 +12448,9 @@ class MainWindow(QMainWindow):
             desc.setWordWrap(True)
             card_layout.addWidget(desc)
 
+            source_author = "Flowseal" if component.id in {"zapret", "tg-ws-proxy"} else (component.source.rstrip("/").split("/")[-1] if "/" in component.source else component.source)
             details = QLabel(
-                f"{self._t('Автор', 'Author')}: Flowseal\n"
+                f"{self._t('Автор', 'Author')}: {source_author}\n"
                 f"{self._t('Статус', 'Status')}: {status_text}\n"
                 f"{self._t('Версия', 'Version')}: {component.version}"
             )
@@ -12500,6 +12537,35 @@ class MainWindow(QMainWindow):
                 connect_btn.clicked.connect(self._prompt_tg_proxy_connect)
                 self._attach_button_animations(connect_btn)
                 card_layout.addWidget(connect_btn)
+
+            if component.id == "dns-manager":
+                dns_presets = self._dns_presets_cache
+                config_label = QLabel(self._t("DNS сервер", "DNS Server"))
+                config_label.setProperty("class", "muted")
+                card_layout.addWidget(config_label)
+                dns_combo = ClickSelectComboBox()
+                config_status = QLabel("")
+                config_status.setProperty("class", "muted")
+                config_status.hide()
+                selected = self.context.settings.get().selected_dns_preset
+                dns_combo.addItem(self._t("Не выбран", "Not selected"), "")
+                for preset in dns_presets:
+                    name = str(preset.get("name", preset.get("id", "")))
+                    pid = str(preset.get("id", ""))
+                    dns_combo.addItem(name, pid)
+                if dns_combo.count() > 0:
+                    picked_index = 0
+                    for i in range(dns_combo.count()):
+                        if dns_combo.itemData(i) == selected:
+                            picked_index = i
+                            break
+                    dns_combo.setCurrentIndex(picked_index)
+                dns_combo.currentIndexChanged.connect(
+                    lambda _=0, combo=dns_combo: self._on_dns_preset_selected(str(combo.currentData() or ""))
+                )
+                card_layout.addWidget(dns_combo)
+                card_layout.addWidget(config_status)
+
             if state is not None and getattr(state, "last_error", ""):
                 error_label = QLabel(str(getattr(state, "last_error", "")))
                 error_label.setProperty("class", "muted")
@@ -12516,12 +12582,7 @@ class MainWindow(QMainWindow):
             self._attach_button_animations(toggle_btn)
             card_layout.addWidget(toggle_btn)
             component_cards.append(card)
-            self._components_cards_layout.addWidget(
-                card,
-                index // 2,
-                index % 2,
-                Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft,
-            )
+            self._components_cards_layout.addWidget(card)
         self._sync_component_card_layout(component_cards)
         if self._components_scroll_target_component_id:
             QTimer.singleShot(0, self._ensure_components_scroll_target_visible)
@@ -12631,29 +12692,25 @@ class MainWindow(QMainWindow):
         if viewport.height() <= 0:
             QTimer.singleShot(0, self._sync_component_card_layout)
             return
-        row_groups: dict[int, list[QFrame]] = {}
-        for index, widget in enumerate(widgets):
+        target_height = 0
+        for widget in widgets:
             widget.setMinimumHeight(0)
             widget.setMaximumHeight(16777215)
-            widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
-            row_groups.setdefault(index // 2, []).append(widget)
-        for row_widgets in row_groups.values():
-            target_height = 0
-            for widget in row_widgets:
-                try:
-                    if widget.layout() is not None:
-                        widget.layout().activate()
-                except Exception:
-                    pass
-                widget.adjustSize()
-                target_height = max(
-                    target_height,
-                    widget.minimumSizeHint().height(),
-                    widget.sizeHint().height(),
-                )
-            for widget in row_widgets:
-                widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-                widget.setFixedHeight(target_height)
+            widget.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Preferred)
+            try:
+                if widget.layout() is not None:
+                    widget.layout().activate()
+            except Exception:
+                pass
+            widget.adjustSize()
+            target_height = max(
+                target_height,
+                widget.minimumSizeHint().height(),
+                widget.sizeHint().height(),
+            )
+        for widget in widgets:
+            widget.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+            widget.setFixedHeight(target_height)
         self._components_cards_root.updateGeometry()
 
     def _sync_mod_card_layout(self) -> None:

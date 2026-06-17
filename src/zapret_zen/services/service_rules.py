@@ -285,4 +285,5 @@ SERVICE_RULES: dict[str, ServiceRule] = {
         ),
         test_targets=(("FaceTime", "https://facetime.apple.com"),),
     ),
+    "ai": ServiceRule(),
 }

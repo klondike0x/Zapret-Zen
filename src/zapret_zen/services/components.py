@@ -303,6 +303,9 @@ class ProcessManager:
                 else:
                     state.status = "stopped"
                     state.pid = None
+            elif component.id == "dns-manager":
+                state.status = "running" if self._dns_manager_is_active() else "stopped"
+                state.pid = None
             else:
                 process = self._processes.get(component.id)
                 if process and process.poll() is None:
@@ -330,6 +333,10 @@ class ProcessManager:
             return state
         if component.id == "tg-ws-proxy":
             state = self._start_tg_ws_proxy(component_id)
+            self._invalidate_state_cache()
+            return state
+        if component.id == "dns-manager":
+            state = self._start_dns_manager(component_id)
             self._invalidate_state_cache()
             return state
         current = self._processes.get(component_id)
@@ -397,6 +404,12 @@ class ProcessManager:
             self.logging.log("info", "TG WS Proxy stopped")
             self._invalidate_state_cache()
             return state
+
+        if component_id == "dns-manager":
+            state = self._stop_dns_manager(component_id)
+            self._invalidate_state_cache()
+            return state
+
         process = self._processes.get(component_id)
         if process and process.poll() is None:
             process.terminate()
@@ -1034,6 +1047,129 @@ Get-NetAdapter -ErrorAction SilentlyContinue | ForEach-Object {
             )
             self.settings.update(tg_proxy_link_prompt_signature=signature)
         return state
+
+    def _import_dns_manager(self):
+        script_path = self.storage.paths.runtime_dir / "dns_manager.py"
+        if not script_path.exists():
+            raise FileNotFoundError(f"dns_manager.py not found at {script_path}")
+        import importlib.util
+        spec = importlib.util.spec_from_file_location("dns_manager", str(script_path))
+        if spec is None or spec.loader is None:
+            raise ImportError(f"Could not load dns_manager.py from {script_path}")
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+
+    def _dns_manager_state_file(self) -> Path:
+        return self.storage.paths.data_dir / "dns_manager_state.json"
+
+    def _dns_manager_is_active(self) -> bool:
+        state_file = self._dns_manager_state_file()
+        if not state_file.exists():
+            return False
+        try:
+            data = json.loads(state_file.read_text(encoding="utf-8"))
+            return bool(data.get("active", False))
+        except (json.JSONDecodeError, OSError):
+            return False
+
+    def _start_dns_manager(self, component_id: str) -> ComponentState:
+        settings = self.settings.get()
+        preset = (settings.selected_dns_preset or "").strip()
+        if not preset:
+            state = ComponentState(
+                component_id=component_id,
+                status="error",
+                last_error="No DNS preset selected.",
+            )
+            self._states[component_id] = state
+            return state
+        try:
+            dns = self._import_dns_manager()
+            state_file = self._dns_manager_state_file()
+
+            if self._dns_manager_is_active():
+                state = dns.read_state(state_file)
+                adapters = state.get("previous_adapters")
+                if adapters:
+                    try:
+                        dns.restore_windows_dns(adapters)
+                    except RuntimeError:
+                        pass
+                dns.reset_windows_dns()
+                dns.write_state(state_file, {"active": False})
+
+            p = dns.PRESETS.get(preset)
+            if p is None:
+                raise ValueError(f"Unknown DNS preset: {preset}")
+
+            adapters = dns.snapshot_windows_dns()
+            if not adapters:
+                raise RuntimeError("No active network adapters found for DNS snapshot")
+
+            dns.apply_windows_dns(adapters, list(p["ipv4"]), list(p.get("ipv6", [])))
+            dns.write_state(state_file, {
+                "active": True,
+                "servers": {"ipv4": list(p["ipv4"]), "ipv6": list(p.get("ipv6", [])), "source": preset},
+                "previous_adapters": adapters,
+                "snapshot_at": datetime.utcnow().isoformat(),
+                "updated_at": datetime.utcnow().isoformat(),
+                "last_error": "",
+            })
+
+            state = ComponentState(component_id=component_id, status="running")
+            self._states[component_id] = state
+            self.logging.log("info", "DNS Manager applied preset", preset=preset)
+            return state
+        except Exception as error:
+            state = ComponentState(
+                component_id=component_id,
+                status="error",
+                last_error=str(error),
+            )
+            self._states[component_id] = state
+            self.logging.log("error", "DNS Manager failed to apply preset", preset=preset, error=str(error))
+            return state
+
+    def _stop_dns_manager(self, component_id: str) -> ComponentState:
+        state = ComponentState(component_id=component_id, status="stopped")
+        try:
+            dns = self._import_dns_manager()
+            state_file = self._dns_manager_state_file()
+
+            s = dns.read_state(state_file)
+            adapters = s.get("previous_adapters")
+            if adapters:
+                try:
+                    dns.restore_windows_dns(adapters)
+                except RuntimeError:
+                    pass
+
+            dns.reset_windows_dns()
+            dns.write_state(state_file, {"active": False, "reset_at": datetime.utcnow().isoformat()})
+            self.logging.log("info", "DNS Manager stopped (DNS reset)")
+        except Exception as error:
+            state.last_error = str(error)
+            self.logging.log("warning", "DNS Manager reset had issues", error=str(error))
+        self._states[component_id] = state
+        return state
+
+    def list_dns_presets(self) -> list[dict[str, str]]:
+        try:
+            dns = self._import_dns_manager()
+            presets = []
+            for key, p in dns.PRESETS.items():
+                presets.append({
+                    "id": key,
+                    "name": p.get("name", key),
+                    "ipv4": ", ".join(p.get("ipv4", [])),
+                    "ipv6": ", ".join(p.get("ipv6", [])),
+                    "doh": p.get("doh", ""),
+                })
+            return presets
+        except Exception as error:
+            self.logging.log("warning", "Failed to list DNS presets", error=str(error))
+            return []
 
     def _build_worker_command(self, worker: str, **kwargs: Any) -> list[str]:
         cmd: list[str]

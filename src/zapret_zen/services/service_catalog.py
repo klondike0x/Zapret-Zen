@@ -50,10 +50,10 @@ SERVICE_CATEGORIES: tuple[ServiceCategory, ...] = (
         id="workplace",
         title_ru="Workplace",
         title_en="Workplace",
-        description_ru="Среды разработки, дизайн и хостинг кода",
-        description_en="Dev environments, design, and code hosting",
+        description_ru="Среды разработки, дизайн, нейросети и хостинг кода",
+        description_en="Dev environments, design, neural networks, and code hosting",
         icon_file="workplace.svg",
-        member_ids=("github", "figma"),
+        member_ids=("github", "figma", "ai"),
     ),
 )
 
@@ -94,6 +94,7 @@ SERVICE_PRESETS: tuple[ServicePreset, ...] = (
     ServicePreset("riot-games", "Riot Games", "Riot Games", "Клиент Riot, авторизация и игровые сервисы", "Riot client, authentication, and game services", "riotgames.svg", "#d32936", "Клиент, авторизация и игровые сервисы", "Client, auth, and game services"),
     ServicePreset("league-of-legends", "LOL", "LOL", "Клиент League и игровые серверы Riot", "League client and Riot game servers", "leagueoflegends.svg", "#c89b3c"),
     ServicePreset("figma", "Figma", "Figma", "Файлы, макеты и CDN Figma", "Files, projects, and Figma CDN", "figma.svg", "#a259ff"),
+    ServicePreset("ai", "AI", "AI", "Нейросети и AI-сервисы", "Neural networks and AI services", "ai.svg", "#7c3aed", "Нейросети и AI-сервисы", "Neural networks and AI services"),
     ServicePreset("netflix", "Netflix", "Netflix", "Стриминг, постеры и CDN Netflix", "Streaming, artwork, and Netflix CDN", "netflix.svg", "#e50914"),
     ServicePreset("facebook", "Facebook", "Facebook", "Лента, вход, медиа и CDN Facebook", "Feed, login, media, and Facebook CDN", "facebook.svg", "#1877f2"),
     ServicePreset("wplace", "WPlace", "WPlace", "Виртуальные рабочие пространства", "Virtual workspaces", "wplace.svg", "#4f73d9"),
