@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import base64
 import ctypes
@@ -32,6 +32,12 @@ from zapret_zen.services.service_catalog import ALWAYS_APPLY_SERVICE_IDS, priori
 from zapret_zen.services.service_rules import SERVICE_RULES
 from zapret_zen.services.settings import SettingsManager
 from zapret_zen.services.storage import StorageManager
+from zapret_zen.services.vpn_detector import VpnDetector
+from zapret_zen.services.github_recovery import GitHubRecovery
+from zapret_zen.services.tg_proxy_manager import TelegramProxyManager
+from zapret_zen.services.runtime_diagnostics import RuntimeDiagnostics
+from zapret_zen.services.runtime_updates import RuntimeUpdateManager
+from zapret_zen.services.zapret_runtime import ZapretRuntimeBuilder
 
 _VPN_PROCESS_PATTERNS = (
     "nekobox",
@@ -177,6 +183,33 @@ class ProcessManager:
             startup.dwFlags |= subprocess.STARTF_USESHOWWINDOW
             startup.wShowWindow = 0
             self._startupinfo = startup
+
+        self.vpn_detector = VpnDetector(logging)
+        self.runtime_builder = ZapretRuntimeBuilder(storage, logging, settings)
+        self.tg_proxy_manager = TelegramProxyManager(storage, logging, settings)
+        self.github_recovery = GitHubRecovery(
+            logging, settings,
+            start_component=self.start_component,
+            stop_component=self.stop_component,
+            is_image_running=self._is_image_running,
+            list_zapret_generals=self.list_zapret_generals,
+        )
+        self.diagnostics = RuntimeDiagnostics(
+            logging, settings,
+            stop_component=self.stop_component,
+            start_component=self.start_component,
+            is_image_running=self._is_image_running,
+            list_zapret_generals=self.list_zapret_generals,
+            build_zapret_args=self._build_zapret_args,
+            load_standard_test_targets=self._load_standard_test_targets,
+        )
+        self.updates = RuntimeUpdateManager(
+            storage, logging, self.github,
+            stop_component=self.stop_component,
+            start_component=self.start_component,
+            is_image_running=self._is_image_running,
+            rebuild_snapshot=self.rebuild_zapret_runtime_snapshot,
+        )
 
     def list_components(self) -> list[ComponentDefinition]:
         raw_items = self.storage.read_json(self.storage.paths.data_dir / "components.json", default=[])
@@ -618,14 +651,14 @@ class ProcessManager:
         if not command or not sys.platform.startswith("win"):
             return command
         try:
-            vpn_data = self._detect_vpn_priority_context()
+            vpn_data = self.vpn_detector.detect_vpn_priority_context()
         except Exception as error:
             self.logging.log("warning", "Failed to detect VPN priority context", error=str(error))
             return command
 
         adapter_indexes = [int(item) for item in vpn_data.get("adapter_indexes", []) if str(item).isdigit()]
         remote_ips = [str(item).strip() for item in vpn_data.get("remote_ips", []) if str(item).strip()]
-        excluded_udp_ports = self._parse_port_ranges(self.settings.get().zapret_udp_exclude_ports)
+        excluded_udp_ports = self.vpn_detector.parse_port_ranges(self.settings.get().zapret_udp_exclude_ports)
         if excluded_udp_ports:
             command = self._exclude_udp_ports_from_command(command, excluded_udp_ports)
         if not adapter_indexes and not remote_ips:
@@ -660,10 +693,10 @@ class ProcessManager:
         for arg in command:
             if arg.startswith("--wf-udp=") or arg.startswith("--filter-udp="):
                 key, value = arg.split("=", 1)
-                ranges = self._parse_port_ranges(value)
+                ranges = self.vpn_detector.parse_port_ranges(value)
                 if ranges:
-                    filtered = self._subtract_port_ranges(ranges, excluded_ranges)
-                    value = self._format_port_ranges(filtered) or "12"
+                    filtered = self.vpn_detector.subtract_port_ranges(ranges, excluded_ranges)
+                    value = self.vpn_detector.format_port_ranges(filtered) or "12"
                     arg = f"{key}={value}"
             updated.append(arg)
         return updated
@@ -1057,46 +1090,10 @@ Get-NetAdapter -ErrorAction SilentlyContinue | ForEach-Object {
         return sys.executable
 
     def _get_zapret_bundles(self, enabled_only: bool, *, include_hidden_generals: bool = False) -> list[dict[str, Any]]:
-        bundles: list[dict[str, Any]] = []
-        base = self.storage.paths.runtime_dir / "zapret-discord-youtube"
-        unified_root = self.storage.paths.mods_dir / "unified-by-peshk0v"
-        index_map = {
-            str(item.get("id", "")): str(item.get("name", "")).strip()
-            for item in (self.storage.read_json(self.storage.paths.cache_dir / "mods_index.json", default=[]) or [])
-            if isinstance(item, dict)
-        }
-        installed_raw = self.storage.read_json(self.storage.paths.data_dir / "installed_mods.json", default=[]) or []
-        for raw in installed_raw:
-            if raw.get("source_type") != "zapret_bundle":
-                continue
-            if enabled_only and not raw.get("enabled"):
-                continue
-            path = Path(raw.get("path", ""))
-            if not path.exists():
-                continue
-            mod_id = str(raw.get("id", "bundle"))
-            if mod_id == "unified-by-peshk0v":
-                continue
-            title = str(raw.get("name") or "").strip() or index_map.get(mod_id) or mod_id
-            bundles.append({"id": mod_id, "title": title, "path": path})
-        if include_hidden_generals and unified_root.exists():
-            bundles.insert(0, {"id": "unified-general", "title": "Hub", "path": unified_root})
-        if base.exists():
-            bundles.append({"id": "base", "title": "", "path": base})
-        return bundles
+        return self.runtime_builder.get_zapret_bundles(enabled_only, include_hidden_generals=include_hidden_generals)
 
     def _general_option_sort_key(self, item: dict[str, str]) -> tuple[int, int, str]:
-        bundle_id = str(item.get("bundle_id", ""))
-        name = str(item.get("name", ""))
-        lowered = name.lower()
-        number = -1
-        match = re.search(r"alt\s*(\d+)", lowered)
-        if match:
-            number = int(match.group(1))
-        elif lowered == "general.bat":
-            number = 0
-        modified_rank = 0 if bundle_id == "unified-general" else 1 if bundle_id != "base" else 2
-        return (modified_rank, -number, lowered)
+        return self.runtime_builder.general_option_sort_key(item)
 
     def _resolve_selected_general_option(self) -> dict[str, str] | None:
         options = self.list_zapret_generals()
@@ -1113,45 +1110,7 @@ Get-NetAdapter -ErrorAction SilentlyContinue | ForEach-Object {
         return picked
 
     def _prepare_active_zapret_runtime(self, selected_bundle_root: Path, selected_bundle_id: str, selected_script_name: str) -> Path:
-        self._cleanup_inactive_zapret_runtimes()
-        active_root = self._next_active_runtime_dir()
-        base_root = self.storage.paths.runtime_dir / "zapret-discord-youtube"
-        if base_root.exists():
-            shutil.copytree(base_root, active_root, dirs_exist_ok=True, ignore=self._runtime_copy_ignore)
-        else:
-            shutil.copytree(selected_bundle_root, active_root, dirs_exist_ok=True, ignore=self._runtime_copy_ignore)
-
-        lists_target = active_root / "lists"
-        bin_target = active_root / "bin"
-        utils_target = active_root / "utils"
-        lists_target.mkdir(parents=True, exist_ok=True)
-        bin_target.mkdir(parents=True, exist_ok=True)
-        utils_target.mkdir(parents=True, exist_ok=True)
-
-        layered_bundles = self._get_zapret_bundles(enabled_only=True)
-        for bundle in layered_bundles:
-            bundle_id = bundle["id"]
-            bundle_root = Path(bundle["path"])
-            if bundle_id != "base":
-                self._overlay_zapret_bundle_runtime(active_root, bundle_root)
-            lists_source = bundle_root / "lists"
-            if not lists_source.exists():
-                continue
-            self._merge_lists_into_target(lists_target, lists_source)
-
-        self._apply_selected_service_rules(active_root)
-
-        selected_script = selected_bundle_root / selected_script_name
-        if selected_script.exists():
-            shutil.copy2(selected_script, active_root / selected_script.name)
-        if selected_bundle_id == "unified-general":
-            self._overlay_zapret_bundle_runtime(active_root, selected_bundle_root)
-            if selected_script.exists():
-                shutil.copy2(selected_script, active_root / selected_script.name)
-
-        self._apply_user_collection_overrides(lists_target)
-        self._materialize_visible_merged_runtime(active_root)
-        return active_root
+        return self.runtime_builder.prepare_active_zapret_runtime(selected_bundle_root, selected_bundle_id, selected_script_name)
 
     def _overlay_zapret_bundle_runtime(self, active_root: Path, bundle_root: Path) -> None:
         for script in bundle_root.glob("*.bat"):
@@ -1363,35 +1322,7 @@ Get-NetAdapter -ErrorAction SilentlyContinue | ForEach-Object {
         return lines
 
     def auto_select_working_general(self) -> dict[str, object] | None:
-        options = self.list_zapret_generals()
-        if not options:
-            return None
-        original = self.settings.get().selected_zapret_general
-        best_result: dict[str, object] | None = None
-        for option in options:
-            outcome = self._run_general_connectivity_check(option["id"])
-            if best_result is None or int(outcome.get("passed_targets", 0)) > int(best_result.get("passed_targets", 0)):
-                best_result = {
-                    "id": option["id"],
-                    "status": outcome["status"],
-                    "passed_targets": outcome.get("passed_targets", 0),
-                    "total_targets": outcome.get("total_targets", 0),
-                }
-            if outcome["status"] == "ok":
-                self.stop_component("zapret")
-                self.logging.log("info", "Auto-selected zapret general", general=option["id"])
-                return {
-                    "id": option["id"],
-                    "status": "ok",
-                    "passed_targets": outcome.get("passed_targets", 0),
-                    "total_targets": outcome.get("total_targets", 0),
-                }
-            self.stop_component("zapret")
-        if best_result is not None and best_result.get("id"):
-            self.settings.update(selected_zapret_general=str(best_result["id"]))
-            return best_result
-        self.settings.update(selected_zapret_general=original)
-        return None
+        return self.diagnostics.auto_select_working_general()
 
     def _capture_diagnostic_settings(self) -> dict[str, object]:
         settings = self.settings.get()
@@ -1430,176 +1361,105 @@ Get-NetAdapter -ErrorAction SilentlyContinue | ForEach-Object {
         progress_callback: callable | None = None,
         stop_callback: callable | None = None,
     ) -> dict[str, object]:
-        options = {item["id"]: item for item in self.list_zapret_generals()}
-        option = options.get(general_id)
-        if option is None:
-            return {"status": "error", "error": "general not found", "passed_targets": 0, "total_targets": 0}
-        settings_snapshot = self._capture_diagnostic_settings()
-        self._diagnostic_runtime_override = True
-        original_running = self._prepare_diagnostic_runtime(
-            general_id=general_id,
-            ipset_mode=ipset_mode,
-            game_mode=game_mode,
+        return self.diagnostics.run_single_general_diagnostic(
+            general_id, ipset_mode=ipset_mode, game_mode=game_mode,
+            progress_callback=progress_callback, stop_callback=stop_callback,
         )
-        try:
-            outcome = self._run_general_connectivity_check(
-                general_id,
-                stop_callback=stop_callback,
-                targets=self._load_standard_test_targets(),
-                progress_callback=progress_callback,
-            )
-            return {
-                "id": option["id"],
-                "name": option["name"],
-                "bundle": option["bundle"],
-                "status": str(outcome["status"]),
-                "error": str(outcome.get("error", "")),
-                "passed_targets": int(outcome.get("passed_targets", 0)),
-                "total_targets": int(outcome.get("total_targets", 0)),
-                "failed_targets": list(outcome.get("failed_targets", []) or []),
-                "ipset_mode": ipset_mode,
-                "game_mode": game_mode,
-            }
-        finally:
-            self.stop_component("zapret")
-            self._restore_diagnostic_settings(settings_snapshot)
-            self._diagnostic_runtime_override = False
-            if original_running and str(settings_snapshot.get("selected_zapret_general", "")):
-                self.start_component("zapret")
 
     def run_general_diagnostics(
         self,
         progress_callback: callable | None = None,
         stop_callback: callable | None = None,
     ) -> list[dict[str, str]]:
-        options = self.list_zapret_generals()
-        options = prioritize_generals_for_services(options, self.settings.get().selected_service_ids)
-        if not options:
-            return []
-
-        settings_snapshot = self._capture_diagnostic_settings()
-        original_running = self._is_image_running("winws.exe")
-        results: list[dict[str, str]] = []
-        targets = self._load_standard_test_targets()
-        per_general_steps = max(2, len(targets) + 1)
-        total_steps = len(options) * per_general_steps
-
-        try:
-            self._diagnostic_runtime_override = True
-            if original_running:
-                self.stop_component("zapret")
-            for index, option in enumerate(options, start=1):
-                if stop_callback is not None and stop_callback():
-                    break
-                self.settings.update(
-                    selected_zapret_general=option["id"],
-                    zapret_ipset_mode=str(option.get("ipset_mode", "loaded") or "loaded"),
-                    zapret_game_filter_mode=str(option.get("game_mode", "tcpudp") or "tcpudp"),
-                )
-                base_step = (index - 1) * per_general_steps
-                if progress_callback is not None:
-                    progress_callback(base_step + 1, total_steps, option["name"])
-                outcome = self._run_general_connectivity_check(
-                    option["id"],
-                    stop_callback=stop_callback,
-                    targets=targets,
-                    progress_callback=(
-                        lambda completed, total, target_name, *, _base=base_step, _steps=per_general_steps, _option=option: (
-                            progress_callback(
-                                min(_base + 1 + completed, _base + _steps),
-                                total_steps,
-                                f"{_option['name']} - {target_name} ({completed}/{total})",
-                            )
-                            if progress_callback is not None
-                            else None
-                        )
-                    ),
-                )
-                if progress_callback is not None:
-                    progress_callback(base_step + per_general_steps, total_steps, option["name"])
-                results.append(
-                    {
-                        "id": option["id"],
-                        "name": option["name"],
-                        "bundle": option["bundle"],
-                        "status": str(outcome["status"]),
-                        "error": str(outcome.get("error", "")),
-                        "passed_targets": str(outcome.get("passed_targets", 0)),
-                        "total_targets": str(outcome.get("total_targets", 0)),
-                        "failed_targets": list(outcome.get("failed_targets", []) or []),
-                        "ipset_mode": str(option.get("ipset_mode", "loaded") or "loaded"),
-                        "game_mode": str(option.get("game_mode", "tcpudp") or "tcpudp"),
-                    }
-                )
-                self.stop_component("zapret")
-        finally:
-            self._diagnostic_runtime_override = False
-            self._restore_diagnostic_settings(settings_snapshot)
-            if original_running and str(settings_snapshot.get("selected_zapret_general", "")):
-                self.start_component("zapret")
-
-        return results
+        return self.diagnostics.run_general_diagnostics(progress_callback=progress_callback, stop_callback=stop_callback)
 
     def run_settings_diagnostics(
         self,
         progress_callback: callable | None = None,
         stop_callback: callable | None = None,
     ) -> dict[str, object]:
-        original = self.settings.get()
-        general_id = str(original.selected_zapret_general or "").strip()
-        if not general_id:
-            return {"results": [], "status": "error", "error": "No selected general"}
-        ipset_modes = ["loaded", "none", "any"]
-        game_modes = ["disabled", "tcpudp", "tcp", "udp"]
-        combinations = [(ipset, game) for ipset in ipset_modes for game in game_modes]
-        targets = self._load_standard_test_targets()
-        results: list[dict[str, object]] = []
-        total = max(1, len(combinations))
-        original_running = self._is_image_running("winws.exe")
-        try:
-            if original_running:
-                self.stop_component("zapret")
-            for index, (ipset_mode, game_mode) in enumerate(combinations, start=1):
-                if stop_callback is not None and stop_callback():
-                    break
-                self.settings.update(
-                    selected_zapret_general=general_id,
-                    zapret_ipset_mode=ipset_mode,
-                    zapret_game_filter_mode=game_mode,
-                )
-                started_at = time.time()
-                outcome = self._run_general_connectivity_check(general_id, stop_callback=stop_callback, targets=targets)
-                elapsed = round(time.time() - started_at, 2)
-                passed = int(outcome.get("passed_targets", 0))
-                total_targets = int(outcome.get("total_targets", 0))
-                results.append(
-                    {
-                        "ipset_mode": ipset_mode,
-                        "game_mode": game_mode,
-                        "status": str(outcome.get("status", "error")),
-                        "passed_targets": passed,
-                        "total_targets": total_targets,
-                        "elapsed": elapsed,
-                    }
-                )
-                if progress_callback is not None:
-                    progress_callback(index, total, f"{ipset_mode} / {game_mode}")
-                self.stop_component("zapret")
-        finally:
-            self.settings.update(
-                selected_zapret_general=original.selected_zapret_general,
-                zapret_ipset_mode=original.zapret_ipset_mode,
-                zapret_game_filter_mode=original.zapret_game_filter_mode,
-            )
-            if original_running and general_id:
-                self.start_component("zapret")
+        return self.diagnostics.run_settings_diagnostics(progress_callback=progress_callback, stop_callback=stop_callback)
 
-        ranked = sorted(
-            results,
-            key=lambda item: (-int(item.get("passed_targets", 0)), float(item.get("elapsed", 999999.0))),
-        )
-        best = ranked[0] if ranked else None
-        return {"results": ranked, "best": best, "status": "ok" if ranked else "error"}
+    def _run_general_connectivity_check(
+        self,
+        general_id: str,
+        stop_callback: callable | None = None,
+        targets: list[dict[str, str]] | None = None,
+        progress_callback: callable | None = None,
+    ) -> dict[str, object]:
+        self.settings.update(selected_zapret_general=general_id)
+        state = self._start_zapret("zapret")
+        if state.status != "running":
+            return {
+                "status": "error",
+                "error": state.last_error or "failed to start",
+                "passed_targets": 0,
+                "total_targets": 0,
+                "failed_targets": [],
+            }
+
+        targets = list(targets or self._load_standard_test_targets())
+        if not targets:
+            return {
+                "status": "ok",
+                "error": "",
+                "passed_targets": 0,
+                "total_targets": 0,
+                "failed_targets": [],
+            }
+
+        if stop_callback is not None and stop_callback():
+            return {
+                "status": "cancelled",
+                "error": "cancelled",
+                "passed_targets": 0,
+                "total_targets": len(targets),
+                "failed_targets": [str(target.get("name", "")) for target in targets],
+            }
+
+        passed_targets = 0
+        failed_names: list[str] = []
+        completed_targets = 0
+        with ThreadPoolExecutor(max_workers=min(8, max(1, len(targets)))) as executor:
+            future_map = {executor.submit(self._target_is_reachable, target): target for target in targets}
+            for future in as_completed(future_map):
+                if stop_callback is not None and stop_callback():
+                    executor.shutdown(wait=False, cancel_futures=True)
+                    return {
+                        "status": "cancelled",
+                        "error": "cancelled",
+                        "passed_targets": passed_targets,
+                        "total_targets": len(targets),
+                        "failed_targets": failed_names,
+                    }
+                target = future_map[future]
+                try:
+                    ok = future.result()
+                except Exception:
+                    ok = False
+                if ok:
+                    passed_targets += 1
+                else:
+                    failed_names.append(str(target["name"]))
+                completed_targets += 1
+                if progress_callback is not None:
+                    progress_callback(completed_targets, len(targets), str(target.get("name", "")))
+
+        if failed_names:
+            return {
+                "status": "error",
+                "error": f"failed targets: {', '.join(failed_names[:6])}",
+                "passed_targets": passed_targets,
+                "total_targets": len(targets),
+                "failed_targets": failed_names,
+            }
+        return {
+            "status": "ok",
+            "error": "",
+            "passed_targets": passed_targets,
+            "total_targets": len(targets),
+            "failed_targets": [],
+        }
 
     def with_github_connectivity_recovery(self, operation: Callable[[], Any], purpose: str) -> Any:
         snapshot = self._capture_github_recovery_snapshot()
@@ -1721,347 +1581,6 @@ Get-NetAdapter -ErrorAction SilentlyContinue | ForEach-Object {
                 }
             )
         return candidates
-
-    def fetch_latest_zapret_release(self) -> dict[str, str]:
-        api_url = "https://api.github.com/repos/Flowseal/zapret-discord-youtube/releases/latest"
-        try:
-            payload = self.github.github_json(api_url, timeout=20, purpose="zapret-release-metadata")
-            if not isinstance(payload, dict):
-                raise ValueError("Invalid zapret release metadata")
-        except Exception as error:
-            self.logging.log("warning", "Zapret release metadata fallback", error=str(error))
-            return {
-                "latest_version": "",
-                "asset_url": "",
-                "asset_name": "",
-                "zipball_url": "https://codeload.github.com/Flowseal/zapret-discord-youtube/zip/refs/heads/main",
-            }
-        latest_version = str(payload.get("tag_name") or payload.get("name") or "").strip().lstrip("v")
-        asset = next(
-            (
-                item
-                for item in list(payload.get("assets") or [])
-                if isinstance(item, dict) and str(item.get("name", "")).lower().endswith(".zip")
-            ),
-            None,
-        )
-        return {
-            "latest_version": latest_version,
-            "asset_url": str((asset or {}).get("browser_download_url", "")),
-            "asset_name": str((asset or {}).get("name", "")),
-            "zipball_url": str(payload.get("zipball_url") or ""),
-        }
-
-    def fetch_latest_tg_ws_proxy_release(self) -> dict[str, str]:
-        api_url = "https://api.github.com/repos/Flowseal/tg-ws-proxy/releases/latest"
-        try:
-            payload = self.github.github_json(api_url, timeout=20, purpose="tg-ws-proxy-release-metadata")
-            if not isinstance(payload, dict):
-                raise ValueError("Invalid tg-ws-proxy release metadata")
-        except Exception as error:
-            self.logging.log("warning", "TG WS Proxy release metadata fallback", error=str(error))
-            return {
-                "latest_version": "",
-                "source_url": "https://codeload.github.com/Flowseal/tg-ws-proxy/zip/refs/heads/main",
-                "exe_url": "https://github.com/Flowseal/tg-ws-proxy/releases/latest/download/TgWsProxy_windows.exe",
-                "exe_name": "TgWsProxy_windows.exe",
-            }
-        latest_version = str(payload.get("tag_name") or payload.get("name") or "").strip().lstrip("v")
-        assets = [item for item in list(payload.get("assets") or []) if isinstance(item, dict)]
-        windows_asset = next(
-            (
-                item
-                for item in assets
-                if str(item.get("name", "")).strip().lower() == "tgwsproxy_windows.exe"
-            ),
-            None,
-        )
-        return {
-            "latest_version": latest_version,
-            "source_url": str(payload.get("zipball_url") or "").strip(),
-            "exe_url": str((windows_asset or {}).get("browser_download_url", "")).strip(),
-            "exe_name": str((windows_asset or {}).get("name", "")).strip() or "TgWsProxy_windows.exe",
-        }
-
-    def update_zapret_runtime(self) -> dict[str, str]:
-        release = self.fetch_latest_zapret_release()
-        latest_version = str(release.get("latest_version", "")).strip()
-        current_version = self.storage._detect_zapret_version()
-        if latest_version and current_version == latest_version:
-            return {"status": "up-to-date", "version": current_version}
-        candidates = [
-            (
-                str(release.get("asset_url", "")).strip(),
-                str(release.get("asset_name", "") or "zapret-release.zip"),
-            ),
-            (
-                str(release.get("zipball_url", "")).strip(),
-                "zapret-source.zip",
-            ),
-        ]
-        candidates = [(url, name) for url, name in candidates if url]
-        if not candidates:
-            return {"status": "error", "error": "No zapret archive URL found"}
-        return self._install_zapret_archive(version=latest_version or current_version, candidates=candidates)
-
-    def _install_zapret_archive(self, *, version: str, candidates: list[tuple[str, str]]) -> dict[str, str]:
-        current_version = self.storage._detect_zapret_version()
-        if version and current_version == version:
-            return {"status": "up-to-date", "version": current_version}
-        runtime_root = self.storage.paths.runtime_dir / "zapret-discord-youtube"
-        was_running = self._is_image_running("winws.exe")
-        temp_root = Path(tempfile.mkdtemp(prefix="zapret_zen_zapret_update_"))
-        try:
-            last_error = ""
-            source_root: Path | None = None
-            for index, (archive_url, archive_name) in enumerate(candidates):
-                try:
-                    zip_path = temp_root / f"{index}_{Path(archive_name).name or 'zapret.zip'}"
-                    self._download_to_file(archive_url, zip_path, timeout=75)
-                    extract_root = temp_root / f"extract_{index}"
-                    extract_root.mkdir(parents=True, exist_ok=True)
-                    with zipfile.ZipFile(zip_path, "r") as archive:
-                        archive.extractall(extract_root)
-                    source_root = self._find_extracted_zapret_root(extract_root)
-                    if source_root is not None:
-                        break
-                    last_error = f"Invalid zapret archive structure: {archive_name}"
-                except (HTTPError, URLError, TimeoutError, zipfile.BadZipFile, OSError) as error:
-                    last_error = str(error)
-                    self.logging.log("warning", "Zapret archive download failed", url=archive_url, error=last_error)
-            if source_root is None:
-                return {"status": "error", "error": last_error or "Invalid zapret archive"}
-            if was_running:
-                self.stop_component("zapret")
-            backup = self.storage.create_backup(runtime_root, "pre-update-zapret")
-            if runtime_root.exists():
-                shutil.rmtree(runtime_root, ignore_errors=True)
-            shutil.copytree(source_root, runtime_root, dirs_exist_ok=True)
-            if version:
-                self._patch_zapret_local_version(runtime_root, version)
-            self.storage._ensure_default_bundled_mod("unified-by-peshk0v", {
-                "name": "Hub",
-                "author": "peshk0v",
-                "description": "Bundled unified pack",
-                "version": "1.9.9a-unified3",
-                "source_url": "bundled://unified-by-peshk0v",
-            }, force_refresh=True)
-            self.storage.ensure_layout()
-            self._rebuild_visible_zapret_runtime_snapshot()
-            if was_running:
-                self.start_component("zapret")
-            self.logging.log("info", "Zapret updated", version=version, backup=str(backup or ""))
-            return {"status": "updated", "version": version or current_version}
-        finally:
-            shutil.rmtree(temp_root, ignore_errors=True)
-
-    def _download_to_file(self, url: str, destination: Path, timeout: int = 60) -> None:
-        self.github.github_download(url, destination, timeout=timeout, purpose=f"download:{Path(destination).name}", min_bytes=1024)
-
-    def _find_extracted_zapret_root(self, extract_root: Path) -> Path | None:
-        candidates = [extract_root]
-        candidates.extend(path for path in extract_root.iterdir() if path.is_dir())
-        for candidate in candidates:
-            if (candidate / "bin").exists() and (candidate / "lists").exists():
-                return candidate
-        for candidate in extract_root.rglob("*"):
-            if candidate.is_dir() and (candidate / "bin").exists() and (candidate / "lists").exists():
-                return candidate
-        return None
-
-    def _patch_zapret_local_version(self, runtime_root: Path, version: str) -> None:
-        service_bat = runtime_root / "service.bat"
-        if not service_bat.exists():
-            return
-        try:
-            content = service_bat.read_text(encoding="utf-8", errors="ignore")
-            updated = re.sub(
-                r'(?im)^(\s*set\s+"?LOCAL_VERSION\s*=\s*)[^"\r\n]+("?\s*)$',
-                rf"\g<1>{version}\2",
-                content,
-                count=1,
-            )
-            if updated != content:
-                service_bat.write_text(updated, encoding="utf-8")
-        except Exception:
-            pass
-
-    def _rebuild_visible_zapret_runtime_snapshot(self) -> None:
-        selected = self._resolve_selected_general_option()
-        if selected is not None:
-            active_root = self._prepare_active_zapret_runtime(
-                selected_bundle_root=Path(selected["path"]).parent,
-                selected_bundle_id=str(selected.get("bundle_id", "")),
-                selected_script_name=Path(selected["path"]).name,
-            )
-            self._apply_zapret_runtime_switches(active_root)
-            self._ensure_zapret_user_lists(active_root / "lists")
-            self._materialize_visible_merged_runtime(active_root)
-            self._reset_active_runtime_dir(active_root)
-            return
-        base_root = self.storage.paths.runtime_dir / "zapret-discord-youtube"
-        if base_root.exists():
-            target_root = self.storage.paths.merged_runtime_dir / "zapret"
-            if target_root.exists():
-                shutil.rmtree(target_root, ignore_errors=True)
-            shutil.copytree(base_root, target_root, dirs_exist_ok=True, ignore=self._runtime_copy_ignore)
-
-    def rebuild_zapret_runtime_snapshot(self) -> None:
-        self._rebuild_visible_zapret_runtime_snapshot()
-
-    def update_tg_ws_proxy_runtime(self) -> dict[str, str]:
-        release = self.fetch_latest_tg_ws_proxy_release()
-        latest_version = str(release.get("latest_version", "")).strip()
-        current_version = self.storage._detect_tgws_version()
-        if latest_version and current_version == latest_version:
-            return {"status": "up-to-date", "version": current_version}
-        source_url = str(release.get("source_url", "")).strip()
-        exe_url = str(release.get("exe_url", "")).strip()
-        if not source_url or not exe_url:
-            return {"status": "error", "error": "No tg-ws-proxy source or Windows asset found"}
-
-        runtime_root = self.storage.paths.runtime_dir / "tg-ws-proxy"
-        was_running = False
-        try:
-            tg_state = next((item for item in self.list_states() if item.component_id == "tg-ws-proxy"), None)
-            was_running = bool(tg_state and tg_state.status == "running")
-        except Exception:
-            was_running = False
-        temp_root = Path(tempfile.mkdtemp(prefix="zapret_zen_tgws_update_"))
-        try:
-            source_zip = temp_root / "tg-ws-proxy.zip"
-            self._download_to_file(source_url, source_zip, timeout=75)
-            extract_root = temp_root / "extract"
-            extract_root.mkdir(parents=True, exist_ok=True)
-            with zipfile.ZipFile(source_zip, "r") as archive:
-                archive.extractall(extract_root)
-            source_root = next((p for p in extract_root.iterdir() if p.is_dir() and (p / "proxy").exists()), None)
-            if source_root is None:
-                return {"status": "error", "error": "Invalid tg-ws-proxy source archive"}
-
-            windows_exe_path = temp_root / str(release.get("exe_name", "TgWsProxy_windows.exe"))
-            self._download_to_file(exe_url, windows_exe_path, timeout=75)
-
-            if was_running:
-                self.stop_component("tg-ws-proxy")
-
-            backup = self.storage.create_backup(runtime_root, "pre-update-tg-ws-proxy")
-            staging_root = temp_root / "runtime_new"
-            shutil.copytree(source_root, staging_root, dirs_exist_ok=True)
-            (staging_root / "bin").mkdir(parents=True, exist_ok=True)
-            shutil.copy2(windows_exe_path, staging_root / "bin" / "TgWsProxy_windows.exe")
-
-            if runtime_root.exists():
-                shutil.rmtree(runtime_root, ignore_errors=True)
-            shutil.copytree(staging_root, runtime_root, dirs_exist_ok=True)
-            init_py = runtime_root / "proxy" / "__init__.py"
-            if latest_version and init_py.exists():
-                try:
-                    content = init_py.read_text(encoding="utf-8", errors="ignore")
-                    content = re.sub(r'__version__\s*=\s*["\'].*?["\']', f'__version__ = "{latest_version}"', content, count=1)
-                    init_py.write_text(content, encoding="utf-8")
-                except Exception:
-                    pass
-            self.storage.ensure_layout()
-            if was_running:
-                self.start_component("tg-ws-proxy")
-            self.logging.log(
-                "info",
-                "TG WS Proxy updated",
-                version=latest_version,
-                backup=str(backup or ""),
-            )
-            return {"status": "updated", "version": latest_version or current_version}
-        finally:
-            shutil.rmtree(temp_root, ignore_errors=True)
-
-    def _cleanup_merged_runtime(self) -> None:
-        self._cleanup_inactive_zapret_runtimes()
-        current_root = self._current_zapret_runtime
-        if current_root and current_root.exists():
-            self._reset_active_runtime_dir(current_root)
-        self._current_zapret_runtime = None
-
-    def _run_general_connectivity_check(
-        self,
-        general_id: str,
-        stop_callback: callable | None = None,
-        targets: list[dict[str, str]] | None = None,
-        progress_callback: callable | None = None,
-    ) -> dict[str, object]:
-        self.settings.update(selected_zapret_general=general_id)
-        state = self._start_zapret("zapret")
-        if state.status != "running":
-            return {
-                "status": "error",
-                "error": state.last_error or "failed to start",
-                "passed_targets": 0,
-                "total_targets": 0,
-                "failed_targets": [],
-            }
-
-        targets = list(targets or self._load_standard_test_targets())
-        if not targets:
-            return {
-                "status": "ok",
-                "error": "",
-                "passed_targets": 0,
-                "total_targets": 0,
-                "failed_targets": [],
-            }
-
-        if stop_callback is not None and stop_callback():
-            return {
-                "status": "cancelled",
-                "error": "cancelled",
-                "passed_targets": 0,
-                "total_targets": len(targets),
-                "failed_targets": [str(target.get("name", "")) for target in targets],
-            }
-
-        passed_targets = 0
-        failed_names: list[str] = []
-        completed_targets = 0
-        with ThreadPoolExecutor(max_workers=min(8, max(1, len(targets)))) as executor:
-            future_map = {executor.submit(self._target_is_reachable, target): target for target in targets}
-            for future in as_completed(future_map):
-                if stop_callback is not None and stop_callback():
-                    executor.shutdown(wait=False, cancel_futures=True)
-                    return {
-                        "status": "cancelled",
-                        "error": "cancelled",
-                        "passed_targets": passed_targets,
-                        "total_targets": len(targets),
-                        "failed_targets": failed_names,
-                    }
-                target = future_map[future]
-                try:
-                    ok = future.result()
-                except Exception:
-                    ok = False
-                if ok:
-                    passed_targets += 1
-                else:
-                    failed_names.append(str(target["name"]))
-                completed_targets += 1
-                if progress_callback is not None:
-                    progress_callback(completed_targets, len(targets), str(target.get("name", "")))
-
-        if failed_names:
-            return {
-                "status": "error",
-                "error": f"failed targets: {', '.join(failed_names[:6])}",
-                "passed_targets": passed_targets,
-                "total_targets": len(targets),
-                "failed_targets": failed_names,
-            }
-        return {
-            "status": "ok",
-            "error": "",
-            "passed_targets": passed_targets,
-            "total_targets": len(targets),
-            "failed_targets": [],
-        }
 
     def _load_standard_test_targets(self) -> list[dict[str, str]]:
         targets_file = self.storage.paths.runtime_dir / "zapret-discord-youtube" / "utils" / "targets.txt"
@@ -2306,6 +1825,52 @@ Get-NetAdapter -ErrorAction SilentlyContinue | ForEach-Object {
             f"--dpi-desync-fake-unknown-udp={quic_google}",
             "--dpi-desync-cutoff=n2",
         ]
+
+    def fetch_latest_zapret_release(self) -> dict[str, str]:
+        return self.updates.fetch_latest_zapret_release()
+
+    def fetch_latest_tg_ws_proxy_release(self) -> dict[str, str]:
+        return self.updates.fetch_latest_tg_ws_proxy_release()
+
+    def update_zapret_runtime(self) -> dict[str, str]:
+        return self.updates.update_zapret_runtime()
+
+    def update_tg_ws_proxy_runtime(self) -> dict[str, str]:
+        return self.updates.update_tg_ws_proxy_runtime()
+
+    def _rebuild_visible_zapret_runtime_snapshot(self) -> None:
+        selected = self._resolve_selected_general_option()
+        if selected is not None:
+            active_root = self._prepare_active_zapret_runtime(
+                selected_bundle_root=Path(selected["path"]).parent,
+                selected_bundle_id=str(selected.get("bundle_id", "")),
+                selected_script_name=Path(selected["path"]).name,
+            )
+            self._apply_zapret_runtime_switches(active_root)
+            self._ensure_zapret_user_lists(active_root / "lists")
+            self._materialize_visible_merged_runtime(active_root)
+            self._reset_active_runtime_dir(active_root)
+            return
+        base_root = self.storage.paths.runtime_dir / "zapret-discord-youtube"
+        if base_root.exists():
+            target_root = self.storage.paths.merged_runtime_dir / "zapret"
+            if target_root.exists():
+                shutil.rmtree(target_root, ignore_errors=True)
+            shutil.copytree(base_root, target_root, dirs_exist_ok=True, ignore=self._runtime_copy_ignore)
+
+    def rebuild_zapret_runtime_snapshot(self) -> None:
+        self._rebuild_visible_zapret_runtime_snapshot()
+
+    def _cleanup_merged_runtime(self) -> None:
+        merged_root = self.storage.paths.merged_runtime_dir
+        if not merged_root.exists():
+            return
+        for entry in merged_root.iterdir():
+            if entry.is_dir():
+                try:
+                    shutil.rmtree(entry, ignore_errors=True)
+                except Exception:
+                    pass
 
     def _ensure_zapret_user_lists(self, lists_dir: Path) -> None:
         defaults = {

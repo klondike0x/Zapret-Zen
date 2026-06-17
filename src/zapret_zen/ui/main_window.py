@@ -71,6 +71,7 @@ from PySide6.QtWidgets import (
 from zapret_zen.bootstrap import ApplicationContext
 from zapret_zen.ui.theme import ACCENT_PALETTE, _get_theme, build_stylesheet, generate_palette, is_light_theme, list_available_themes, load_theme_registry
 from zapret_zen.ui.service_card_base import BaseServiceCard
+from zapret_zen.ui.pages import DashboardPage, ServicesPage, ComponentsPage, ModsPage, LogsPage
 
 
 class WindowsTaskbarIntegration:
@@ -5827,139 +5828,33 @@ class MainWindow(QMainWindow):
         return pixmap
 
     def _build_components_page(self) -> QWidget:
-        page = QWidget()
-        page.setProperty("class", "pageRoot")
-        root = QVBoxLayout(page)
-        root.setContentsMargins(1, 0, 1, 0)
-        root.setSpacing(6)
-        label = QLabel(self._t("Компоненты", "Components"))
-        label.setProperty("class", "title")
-        self._components_title_label = label
-        root.addWidget(label)
-
+        self._components_page = ComponentsPage(self)
+        self._components_title_label = self._components_page._title_label
+        self._components_scroll = self._components_page._scroll
+        self._components_cards_root = self._components_page._cards_root
+        self._components_cards_layout = self._components_page._cards_layout
+        self._components_card_by_id = self._components_page._card_by_id
+        self._components_scroll_target_component_id = self._components_page._scroll_target_component_id
         self.components_list = QListWidget()
         self.components_list.setObjectName("ComponentList")
         self.components_list.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.components_list.setVerticalScrollMode(QAbstractItemView.ScrollMode.ScrollPerPixel)
         self.components_list.setSpacing(8)
         self.components_list.hide()
-        root.addWidget(self.components_list)
-        self._components_scroll = QScrollArea()
-        self._components_scroll.setObjectName("ComponentsScroll")
-        self._components_scroll.setWidgetResizable(True)
-        self._components_scroll.setFrameShape(QFrame.Shape.NoFrame)
-        self._components_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self._components_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
-        self._components_cards_root = QWidget()
-        self._components_cards_root.setObjectName("ComponentsCanvas")
-        self._components_cards_root.setProperty("class", "pageCanvas")
-        self._components_cards_layout = QGridLayout(self._components_cards_root)
-        self._components_cards_layout.setContentsMargins(1, 0, 1, 12)
-        self._components_cards_layout.setHorizontalSpacing(12)
-        self._components_cards_layout.setVerticalSpacing(12)
-        self._components_cards_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-        self._components_cards_layout.setColumnStretch(0, 1)
-        self._components_cards_layout.setColumnStretch(1, 1)
-        self._components_scroll.setWidget(self._components_cards_root)
-        self._register_scroll_fade(self._components_scroll)
-        self._register_smooth_scroll(self._components_scroll)
-        root.addWidget(self._components_scroll, 1)
-        return page
+        return self._components_page
 
     def _build_mods_page(self) -> QWidget:
-        page = QWidget()
-        page.setProperty("class", "pageRoot")
-        root = QVBoxLayout(page)
-        root.setContentsMargins(1, 0, 1, 0)
-        root.setSpacing(12)
-
-        hero, hero_layout = self._card()
-        hero.setProperty("class", "modHero")
-        hero_layout.setContentsMargins(14, 14, 14, 14)
-
-        hero_top = QHBoxLayout()
-        hero_top.setContentsMargins(0, 0, 0, 0)
-        hero_top.setSpacing(10)
-
-        title_wrap = QVBoxLayout()
-        title_wrap.setContentsMargins(0, 0, 0, 0)
-        title_wrap.setSpacing(4)
-        label = QLabel(self._t("Модификации", "Mods"))
-        label.setProperty("class", "title")
-        self._mods_title_label = label
-        subtitle = QLabel(
-            self._t(
-                "Здесь можно аккуратно подключать свои сборки, не ломая базовую конфигурацию.",
-                "This is where you can attach your own packs without touching the base configuration.",
-            )
-        )
-        subtitle.setProperty("class", "muted")
-        subtitle.setWordWrap(True)
-        self._mods_subtitle_label = subtitle
-        title_wrap.addWidget(label)
-        title_wrap.addWidget(subtitle)
-        hero_top.addLayout(title_wrap, 1)
-
-        import_btn = QPushButton(self._t("Добавить", "Add"))
-        import_btn.setProperty("class", "primary")
-        import_btn.setIcon(self._icon("plus.svg"))
-        import_btn.setIconSize(QSize(14, 14))
-        import_btn.setMinimumHeight(38)
-        import_btn.clicked.connect(self._import_mod_any)
-        self._attach_button_animations(import_btn)
-        self._mods_add_btn = import_btn
-        create_btn = QPushButton(self._t("Создать", "Create"))
-        create_btn.setProperty("class", "primary")
-        create_btn.setMinimumHeight(38)
-        create_btn.clicked.connect(self._create_mod_dialog)
-        self._attach_button_animations(create_btn)
-        hero_top.addWidget(create_btn)
-        hero_top.addWidget(import_btn)
-        hero_layout.addLayout(hero_top)
-
-        summary_row = QHBoxLayout()
-        summary_row.setContentsMargins(0, 0, 0, 0)
-        summary_row.setSpacing(10)
-
-        self.mods_summary_chip = QLabel()
-        self.mods_summary_chip.setObjectName("ModsSummaryChip")
-        self.mods_summary_chip.setProperty("class", "modMeta")
-        summary_row.addWidget(self.mods_summary_chip)
-
-        self.mods_enabled_chip = QLabel()
-        self.mods_enabled_chip.setObjectName("ModsEnabledChip")
-        self.mods_enabled_chip.setProperty("class", "modMeta")
-        summary_row.addWidget(self.mods_enabled_chip)
-
-        self.mods_import_hint = QLabel(
-            self._t(
-                "Можно добавить папку, ZIP, отдельные файлы или целый GitHub-репозиторий. Приложение само заберет только совместимые файлы.",
-                "You can add a folder, ZIP, selected files, or a full GitHub repository. The app will keep only compatible files.",
-            )
-        )
-        self.mods_import_hint.setProperty("class", "modHint")
-        self.mods_import_hint.setWordWrap(True)
-        summary_row.addWidget(self.mods_import_hint, 1)
-        hero_layout.addLayout(summary_row)
-        root.addWidget(hero)
-
-        self.mods_scroll = QScrollArea()
-        self.mods_scroll.setObjectName("ModsScroll")
-        self.mods_scroll.setWidgetResizable(True)
-        self.mods_scroll.setFrameShape(QFrame.Shape.NoFrame)
-        self.mods_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.mods_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOn)
-        self.mods_canvas = QWidget()
-        self.mods_canvas.setObjectName("ModsCanvas")
-        self.mods_canvas.setProperty("class", "pageCanvas")
-        self.mods_cards_layout = QVBoxLayout(self.mods_canvas)
-        self.mods_cards_layout.setContentsMargins(1, 0, 1, 12)
-        self.mods_cards_layout.setSpacing(12)
-        self.mods_scroll.setWidget(self.mods_canvas)
-        self._register_scroll_fade(self.mods_scroll)
-        self._register_smooth_scroll(self.mods_scroll)
-        root.addWidget(self.mods_scroll, 1)
-        return page
+        self._mods_page = ModsPage(self)
+        self._mods_title_label = self._mods_page._title_label
+        self._mods_subtitle_label = self._mods_page._subtitle_label
+        self._mods_add_btn = self._mods_page._add_btn
+        self.mods_summary_chip = self._mods_page.summary_chip
+        self.mods_enabled_chip = self._mods_page.enabled_chip
+        self.mods_import_hint = self._mods_page.import_hint
+        self.mods_scroll = self._mods_page.scroll
+        self.mods_canvas = self._mods_page.canvas
+        self.mods_cards_layout = self._mods_page.cards_layout
+        return self._mods_page
 
     def _build_files_page(self) -> QWidget:
         page = QWidget()
@@ -6310,42 +6205,15 @@ class MainWindow(QMainWindow):
         return page
 
     def _build_logs_page(self) -> QWidget:
-        page = QWidget()
-        page.setProperty("class", "pageRoot")
-        root = QVBoxLayout(page)
-        root.setContentsMargins(1, 0, 1, 12)
-        root.setSpacing(10)
-        top = QHBoxLayout()
-        top.setContentsMargins(0, 0, 0, 0)
-        label = QLabel(self._t("Логи", "Logs"))
-        label.setProperty("class", "title")
-        self._logs_title_label = label
-        top.addWidget(label)
-        source_combo = QComboBox()
-        source_combo.setObjectName("LogsSourceCombo")
-        source_combo.setView(QListView())
-        source_combo.currentIndexChanged.connect(self._on_logs_source_changed)
-        self._logs_source_combo = source_combo
-        self._rebuild_logs_source_combo()
-        top.addWidget(source_combo)
-        top.addStretch(1)
+        self._logs_page = LogsPage(self)
+        self.logs_text = self._logs_page.logs_text
+        self._logs_title_label = self._logs_page._title_label
+        self._logs_source_combo = self._logs_page.source_combo
+        self._logs_stack = self._logs_page._logs_stack
+        self._logs_loading_label = self._logs_page._loading_label
         self._logs_refresh_btn = None
-        root.addLayout(top)
-        self.logs_text = QTextEdit()
-        self.logs_text.setReadOnly(True)
-        self.logs_text.selectionChanged.connect(self._on_logs_selection_changed)
-        self._register_scroll_fade(self.logs_text)
-        self._register_smooth_scroll(self.logs_text)
-        logs_stack = QStackedWidget()
-        logs_loading = QLabel(self._t("Загрузка логов...", "Loading logs..."))
-        logs_loading.setProperty("class", "muted")
-        logs_loading.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._logs_loading_label = logs_loading
-        self._logs_stack = logs_stack
-        logs_stack.addWidget(logs_loading)
-        logs_stack.addWidget(self.logs_text)
-        root.addWidget(logs_stack)
-        return page
+        self._current_log_source = self._logs_page.current_log_source
+        return self._logs_page
 
     def _build_settings_page(self) -> QWidget:
         from functools import partial
