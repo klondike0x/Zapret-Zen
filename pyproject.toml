@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "zapret-zen"
-version = "2.1d"
+version = "0.0.0.dev0"
 description = "Windows desktop hub for managing external network utilities and configuration packs."
 readme = "README.md"
 requires-python = ">=3.11"

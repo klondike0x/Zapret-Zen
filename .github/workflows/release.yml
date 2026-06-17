@@ -162,6 +162,15 @@ jobs:
           "version=$version" >> $env:GITHUB_OUTPUT
           "name=$name" >> $env:GITHUB_OUTPUT
 
+      - name: Inject version into pyproject.toml
+        shell: pwsh
+        run: |
+          $version = "${{ steps.meta.outputs.version }}"
+          $content = Get-Content pyproject.toml -Raw -Encoding UTF8
+          $content = $content -replace 'version = ".*"', "version = `"$version`""
+          Set-Content pyproject.toml $content -Encoding UTF8 -NoNewline
+          Write-Host "Set version to $version in pyproject.toml"
+
       - name: Prepare release payloads
         shell: pwsh
         run: |
