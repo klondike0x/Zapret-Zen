@@ -16,6 +16,10 @@ on:
         type: boolean
         required: false
         default: false
+      body:
+        description: "Release notes (Markdown). If empty, reads from release_note.md"
+        required: false
+        default: ""
 
 jobs:
   build-windows-x64:
@@ -207,15 +211,19 @@ jobs:
         shell: pwsh
         run: |
           $body = ""
-          if (Test-Path "release_note.md") {
+          $inputBody = "${{ inputs.body }}"
+          if ($inputBody.Trim()) {
+            $body = $inputBody
+          } elseif (Test-Path "release_note.md") {
             $body = Get-Content "release_note.md" -Raw -Encoding UTF8
           }
           if (-not $body.Trim()) {
             $body = "Zapret-Zen ${{ steps.meta.outputs.version }} release."
           }
-          "body<<__EOF__" >> $env:GITHUB_OUTPUT
+          $delimiter = "REL_BODY_EOF_{0}" -f [guid]::NewGuid().ToString("N")
+          "body<<$delimiter" >> $env:GITHUB_OUTPUT
           $body >> $env:GITHUB_OUTPUT
-          "__EOF__" >> $env:GITHUB_OUTPUT
+          $delimiter >> $env:GITHUB_OUTPUT
 
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
