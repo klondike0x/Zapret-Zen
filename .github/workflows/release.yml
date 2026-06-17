@@ -11,6 +11,11 @@ on:
         description: "Release title (e.g. Zapret-Zen 2.2.0)"
         required: false
         default: ""
+      prerelease:
+        description: "Mark as prerelease"
+        type: boolean
+        required: false
+        default: false
 
 jobs:
   build-windows-x64:
@@ -222,4 +227,4 @@ jobs:
             release_${{ steps.meta.outputs.version }}/*.exe
             release_${{ steps.meta.outputs.version }}/*portable*.zip
           draft: false
-          prerelease: false
+          prerelease: ${{ inputs.prerelease }}
