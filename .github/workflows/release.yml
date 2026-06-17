@@ -1,21 +1,14 @@
-﻿name: Release Build
+name: Build & Release
 
 on:
-  push:
-    tags:
-      - "v*"
   workflow_dispatch:
     inputs:
       tag:
-        description: "Git tag or release version (for example v2.0.0)"
+        description: "Version tag (e.g. v2.2.0)"
         required: true
-        default: "v2.0.0"
+        default: "v2.2.0"
       release_name:
-        description: "Release title"
-        required: true
-        default: "Zapret-Zen 2.0.0"
-      changelog:
-        description: "Release changelog"
+        description: "Release title (e.g. Zapret-Zen 2.2.0)"
         required: false
         default: ""
 
@@ -31,8 +24,6 @@ jobs:
         run: |
           Remove-Item .\dist_nuitka -Recurse -Force -ErrorAction SilentlyContinue
           Remove-Item .\.nuitka_staging -Recurse -Force -ErrorAction SilentlyContinue
-          Remove-Item .\installer_payload -Recurse -Force -ErrorAction SilentlyContinue
-          Remove-Item .\release_* -Recurse -Force -ErrorAction SilentlyContinue
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -57,7 +48,7 @@ jobs:
         run: .\scripts\build_nuitka.ps1 -Python python -OutputDir dist_nuitka -Compiler msvc
 
       - name: Upload x64 artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v4
         with:
           name: nuitka-win-x64
           path: dist_nuitka/main.dist/**
@@ -74,8 +65,6 @@ jobs:
         run: |
           Remove-Item .\dist_nuitka -Recurse -Force -ErrorAction SilentlyContinue
           Remove-Item .\.nuitka_staging -Recurse -Force -ErrorAction SilentlyContinue
-          Remove-Item .\installer_payload -Recurse -Force -ErrorAction SilentlyContinue
-          Remove-Item .\release_* -Recurse -Force -ErrorAction SilentlyContinue
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -103,13 +92,13 @@ jobs:
         run: .\scripts\build_nuitka.ps1 -Python python -OutputDir dist_nuitka -Compiler msvc
 
       - name: Upload arm64 artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v4
         with:
           name: nuitka-win-arm64
           path: dist_nuitka/main.dist/**
           if-no-files-found: error
 
-  package-release:
+  package-and-release:
     needs:
       - build-windows-x64
       - build-windows-arm64
@@ -149,30 +138,26 @@ jobs:
           arch: x64
 
       - name: Download x64 artifact
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v4
         with:
           name: nuitka-win-x64
           path: .artifacts/win_x64
 
       - name: Download arm64 artifact
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v4
         with:
           name: nuitka-win-arm64
           path: .artifacts/win_arm64
 
-      - name: Resolve release metadata
-        id: release_meta
+      - name: Resolve version
+        id: meta
         shell: pwsh
         run: |
-          $tag = "${{ inputs.tag || github.ref_name }}"
-          if (-not $tag) {
-            $tag = "v2.0.0"
-          }
+          $tag = "${{ inputs.tag }}"
+          if (-not $tag) { $tag = "v0.0.0" }
           $version = $tag.TrimStart("v")
           $name = "${{ inputs.release_name }}"
-          if (-not $name) {
-            $name = "Zapret-Zen $version"
-          }
+          if (-not $name) { $name = "Zapret-Zen $version" }
           "tag=$tag" >> $env:GITHUB_OUTPUT
           "version=$version" >> $env:GITHUB_OUTPUT
           "name=$name" >> $env:GITHUB_OUTPUT
@@ -180,7 +165,7 @@ jobs:
       - name: Prepare release payloads
         shell: pwsh
         run: |
-          $version = "${{ steps.release_meta.outputs.version }}"
+          $version = "${{ steps.meta.outputs.version }}"
           python .\scripts\prepare_nuitka_release.py `
             --x64-source .\.artifacts\win_x64 `
             --arm64-source .\.artifacts\win_arm64 `
@@ -190,39 +175,42 @@ jobs:
 
       - name: Build universal installer
         shell: pwsh
-        run: .\scripts\build_nuitka_installer.ps1 -Python python -PayloadDir installer_payload -OutputDir dist_installer -SkipPrepareRelease
+        run: |
+          $version = "${{ steps.meta.outputs.version }}"
+          .\scripts\build_nuitka_installer.ps1 -Python python -PayloadDir installer_payload -OutputDir dist_installer -SkipPrepareRelease
 
       - name: Place installer into release folder
         shell: pwsh
         run: |
-          $version = "${{ steps.release_meta.outputs.version }}"
-          Copy-Item ".\dist_installer\install_zapretzen_${version}_universal.exe" ".\release_$version\" -Force
-
-      - name: SignPath placeholder
-        shell: pwsh
-        run: .\scripts\signpath_stub.ps1 -InputPath ".\.artifacts\win_x64\zapret_zen.exe"
+          $version = "${{ steps.meta.outputs.version }}"
+          $installer = Get-ChildItem ".\dist_installer\install_zapretzen_*.exe" | Select-Object -First 1
+          if ($installer) {
+            Copy-Item $installer.FullName ".\release_$version\" -Force
+          }
 
       - name: Read release notes
-        id: release_notes
+        id: notes
         shell: pwsh
         run: |
-          $version = "${{ steps.release_meta.outputs.version }}"
-          $notesPath = ".\.github\release-notes\$version.md"
-          if (Test-Path $notesPath) {
-            $body = Get-Content $notesPath -Raw -Encoding UTF8
-          } else {
-            $body = "${{ inputs.changelog }}"
+          $body = ""
+          if (Test-Path "release_note.md") {
+            $body = Get-Content "release_note.md" -Raw -Encoding UTF8
           }
-          "body<<__zapret_zen_NOTES__" >> $env:GITHUB_OUTPUT
+          if (-not $body.Trim()) {
+            $body = "Zapret-Zen ${{ steps.meta.outputs.version }} release."
+          }
+          "body<<__EOF__" >> $env:GITHUB_OUTPUT
           $body >> $env:GITHUB_OUTPUT
-          "__zapret_zen_NOTES__" >> $env:GITHUB_OUTPUT
+          "__EOF__" >> $env:GITHUB_OUTPUT
 
-      - name: Create release
+      - name: Create GitHub release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.release_meta.outputs.tag }}
-          name: ${{ steps.release_meta.outputs.name }}
-          body: ${{ steps.release_notes.outputs.body }}
+          tag_name: ${{ steps.meta.outputs.tag }}
+          name: ${{ steps.meta.outputs.name }}
+          body: ${{ steps.notes.outputs.body }}
           files: |
-            release_${{ steps.release_meta.outputs.version }}/install_zapretzen_${{ steps.release_meta.outputs.version }}_universal.exe
-            release_${{ steps.release_meta.outputs.version }}/*portable*.zip
+            release_${{ steps.meta.outputs.version }}/*.exe
+            release_${{ steps.meta.outputs.version }}/*portable*.zip
+          draft: false
+          prerelease: false
