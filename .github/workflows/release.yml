@@ -6,7 +6,7 @@ on:
       tag:
         description: "Version tag (e.g. v2.2.0)"
         required: true
-        default: "v2.2.0"
+        default: "2.2.0"
       release_name:
         description: "Release title (e.g. Zapret-Zen 2.2.0)"
         required: false
