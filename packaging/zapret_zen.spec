@@ -62,6 +62,7 @@ datas = [
     (str(project_root / "ui_assets"), "ui_assets"),
     (str(project_root / "themes"), "themes"),
     (str(project_root / "src" / "zapret_zen" / "scripts"), "scripts"),
+    (str(project_root / "src" / "zapret_zen" / "translations"), "zapret_zen/translations"),
 ]
 crypto_hiddenimports = collect_submodules("cryptography")
 certifi_datas = collect_data_files("certifi")

@@ -18,7 +18,7 @@ class ThemeDefinition:
 class AppSettings:
     theme: str = "light"
     accent_color: str = "#7380ff"
-    language: str = "ru"
+    language: str = "en"
     start_in_tray: bool = False
     autostart_windows: bool = False
     auto_run_components: bool = False

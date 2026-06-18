@@ -18,6 +18,7 @@ from zapret_zen.services.notifications import NotificationManager
 from zapret_zen.services.profiles import ProfilesManager
 from zapret_zen.services.service_catalog import FORTNITE_GENERAL_PRIORITY
 from zapret_zen.services.settings import SettingsManager
+from zapret_zen.services import translation as _tr
 from zapret_zen.services.storage import StorageManager
 from zapret_zen.services.updates import UpdatesManager
 
@@ -92,6 +93,8 @@ def bootstrap_application() -> ApplicationContext:
     profiles = ProfilesManager(storage)
     files = FilesManager(storage, settings)
     _prime_first_run_state(settings, processes)
+
+    _tr.set_language(settings.get().language)
 
     return ApplicationContext(
         paths=paths,

@@ -73,6 +73,7 @@ from zapret_zen.ui.theme import ACCENT_PALETTE, _get_theme, build_stylesheet, ge
 from zapret_zen.ui.service_card_base import BaseServiceCard
 from zapret_zen.ui.pages import DashboardPage, ServicesPage, ComponentsPage, ModsPage, LogsPage
 
+from zapret_zen.services import translation as _tr
 
 class WindowsTaskbarIntegration:
     TBPF_NOPROGRESS = 0
@@ -2104,7 +2105,7 @@ def _theme_badge_name(theme_id: str, language: str = "en") -> str:
 
 def _language_display_name(language: str, ui_language: str = "en") -> str:
     if language == "ru":
-        return "Русский" if ui_language == "ru" else "Russian"
+        return "Russian" if ui_language == "en" else "Русский"
     if language == "en":
         return "English"
     return language
@@ -2765,7 +2766,11 @@ class SmoothScrollController(QObject):
         scrollable.viewport().installEventFilter(self)
 
     def eventFilter(self, watched: QObject, event: QEvent) -> bool:
-        if watched is self._scrollable.viewport() and event.type() == QEvent.Type.Wheel:
+        try:
+            vp = self._scrollable.viewport()
+        except RuntimeError:
+            return False
+        if watched is vp and event.type() == QEvent.Type.Wheel:
             wheel = event  # type: ignore[assignment]
             dy = 0
             px = getattr(wheel, "pixelDelta", None)
@@ -3006,7 +3011,7 @@ class SettingsDialog(AppDialog):
         self._settings_scroll: QScrollArea | None = None
         self._settings_section_frames: dict[str, QFrame] = {}
         self._pending_scroll_section = ""
-        super().__init__(parent, context, self._t("Настройки", "Settings"))
+        super().__init__(parent, context, self._t("Settings"))
         self.setMinimumWidth(520)
         self.resize(600, 980)
         layout = self.body_layout
@@ -3022,13 +3027,13 @@ class SettingsDialog(AppDialog):
         self.tg_port_input = QLineEdit()
         self.tg_secret_input = QLineEdit()
         self.tg_media_mode_combo = ClickSelectComboBox()
-        self.tg_media_mode_combo.addItem(self._t("Стандартный", "Default"), "default")
+        self.tg_media_mode_combo.addItem(self._t("Default"), "default")
         self.tg_media_mode_combo.addItem("Media fix", "media_fix")
-        self.tg_media_mode_combo.addItem(self._t("Без DC override", "No DC override"), "empty")
+        self.tg_media_mode_combo.addItem(self._t("No DC override"), "empty")
         self.tg_dc_ip_input = QTextEdit()
         self.tg_dc_ip_input.setFixedHeight(72)
-        self.tg_cfproxy_checkbox = QCheckBox(self._t("Cloudflare fallback", "Cloudflare fallback"))
-        self.tg_cfproxy_priority_checkbox = QCheckBox(self._t("Пробовать Cloudflare первым", "Try Cloudflare first"))
+        self.tg_cfproxy_checkbox = QCheckBox(self._t("Cloudflare fallback"))
+        self.tg_cfproxy_priority_checkbox = QCheckBox(self._t("Try Cloudflare first"))
         self.tg_cfproxy_domain_input = QLineEdit()
         self.tg_fake_tls_input = QLineEdit()
         self.tg_buf_input = QLineEdit()
@@ -3039,14 +3044,14 @@ class SettingsDialog(AppDialog):
         self.ipset_mode_combo.addItem("none", "none")
         self.ipset_mode_combo.addItem("any", "any")
         self.game_mode_combo = ClickSelectComboBox()
-        self.game_mode_combo.addItem(self._t("выключен", "disabled"), "disabled")
-        self.game_mode_combo.addItem(self._t("tcp + udp", "tcp + udp"), "tcpudp")
-        self.game_mode_combo.addItem(self._t("только tcp", "tcp only"), "tcp")
-        self.game_mode_combo.addItem(self._t("только udp", "udp only"), "udp")
-        self.autostart_checkbox = QCheckBox(self._t("Запускать вместе с Windows", "Run with Windows"))
-        self.tray_checkbox = QCheckBox(self._t("Стартовать в трее", "Start in tray"))
-        self.auto_components_checkbox = QCheckBox(self._t("Автозапуск компонентов", "Auto-run components"))
-        self.check_updates_checkbox = QCheckBox(self._t("Проверять наличие обновлений", "Check for updates"))
+        self.game_mode_combo.addItem(self._t("disabled"), "disabled")
+        self.game_mode_combo.addItem(self._t("tcp + udp"), "tcpudp")
+        self.game_mode_combo.addItem(self._t("tcp only"), "tcp")
+        self.game_mode_combo.addItem(self._t("udp only"), "udp")
+        self.autostart_checkbox = QCheckBox(self._t("Run with Windows"))
+        self.tray_checkbox = QCheckBox(self._t("Start in tray"))
+        self.auto_components_checkbox = QCheckBox(self._t("Auto-run components"))
+        self.check_updates_checkbox = QCheckBox(self._t("Check for updates"))
 
         scroll = QScrollArea()
         scroll.setObjectName("SettingsScroll")
@@ -3069,9 +3074,9 @@ class SettingsDialog(AppDialog):
         self._scroll_fade_overlays.append(fade)
         layout.addWidget(scroll, 1)
 
-        app_form = self._settings_section(canvas_layout, self._t("Приложение", "Application"), "app")
-        app_form.addRow(self._t("Тема", "Theme"), self.theme_combo)
-        app_form.addRow(self._t("Язык", "Language"), self.language_combo)
+        app_form = self._settings_section(canvas_layout, self._t("Application"), "app")
+        app_form.addRow(self._t("Theme"), self.theme_combo)
+        app_form.addRow(self._t("Language"), self.language_combo)
         app_form.addRow("", self.autostart_checkbox)
         app_form.addRow("", self.tray_checkbox)
         app_form.addRow("", self.auto_components_checkbox)
@@ -3079,25 +3084,25 @@ class SettingsDialog(AppDialog):
 
         zapret_form = self._settings_section(canvas_layout, "Zapret", "zapret")
         zapret_form.addRow("IPSet mode", self.ipset_mode_combo)
-        zapret_form.addRow(self._t("Gaming mode", "Gaming mode"), self.game_mode_combo)
-        zapret_form.addRow(self._t("Исключить UDP-порты", "Exclude UDP ports"), self.zapret_udp_exclude_input)
+        zapret_form.addRow(self._t("Gaming mode"), self.game_mode_combo)
+        zapret_form.addRow(self._t("Exclude UDP ports"), self.zapret_udp_exclude_input)
 
         tg_form = self._settings_section(canvas_layout, "TG WS Proxy", "tg-ws-proxy")
-        tg_form.addRow(self._t("Хост", "Host"), self.tg_host_input)
-        tg_form.addRow(self._t("Порт", "Port"), self.tg_port_input)
-        tg_form.addRow(self._t("Секрет", "Secret"), self.tg_secret_input)
-        tg_form.addRow(self._t("Media mode", "Media mode"), self.tg_media_mode_combo)
+        tg_form.addRow(self._t("Host"), self.tg_host_input)
+        tg_form.addRow(self._t("Port"), self.tg_port_input)
+        tg_form.addRow(self._t("Secret"), self.tg_secret_input)
+        tg_form.addRow(self._t("Media mode"), self.tg_media_mode_combo)
         tg_form.addRow("DC -> IP", self.tg_dc_ip_input)
         tg_form.addRow("", self.tg_cfproxy_checkbox)
         tg_form.addRow("", self.tg_cfproxy_priority_checkbox)
-        tg_form.addRow(self._t("CF domain", "CF domain"), self.tg_cfproxy_domain_input)
-        tg_form.addRow(self._t("Fake TLS domain", "Fake TLS domain"), self.tg_fake_tls_input)
-        tg_form.addRow(self._t("Буфер, КБ", "Buffer, KB"), self.tg_buf_input)
-        tg_form.addRow(self._t("Pool size", "Pool size"), self.tg_pool_input)
+        tg_form.addRow(self._t("CF domain"), self.tg_cfproxy_domain_input)
+        tg_form.addRow(self._t("Fake TLS domain"), self.tg_fake_tls_input)
+        tg_form.addRow(self._t("Buffer, KB"), self.tg_buf_input)
+        tg_form.addRow(self._t("Pool size"), self.tg_pool_input)
 
         self.tg_media_mode_combo.currentIndexChanged.connect(self._apply_tg_media_preset)
 
-        restart_onboarding_btn = QPushButton(self._t("Настроить заново", "Configure again"))
+        restart_onboarding_btn = QPushButton(self._t("Configure again"))
         restart_onboarding_btn.setObjectName("RestartOnboardingButton")
         restart_onboarding_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         restart_onboarding_btn.setMinimumHeight(38)
@@ -3135,8 +3140,8 @@ class SettingsDialog(AppDialog):
 
         buttons = QHBoxLayout()
         buttons.addStretch(1)
-        cancel_btn = QPushButton(self._t("Отмена", "Cancel"))
-        save_btn = QPushButton(self._t("Сохранить", "Save"))
+        cancel_btn = QPushButton(self._t("Cancel"))
+        save_btn = QPushButton(self._t("Save"))
         save_btn.setProperty("class", "primary")
         cancel_btn.clicked.connect(self.reject)
         save_btn.clicked.connect(self.accept)
@@ -3186,8 +3191,10 @@ class SettingsDialog(AppDialog):
         except Exception:
             pass
 
-    def _t(self, ru: str, en: str) -> str:
-        return ru if self.context.settings.get().language == "ru" else en
+    def _t(self, first: str, second: str | None = None) -> str:
+        if second is not None:
+            return first if self.context.settings.get().language == "ru" else second
+        return _tr.t(first)
 
     def _restart_onboarding(self) -> None:
         parent = self.parent()
@@ -3647,11 +3654,11 @@ class MainWindow(QMainWindow):
         self._category_cards: list[ServiceCategoryCard] = []
         self._onboarding_category_cards: list[ServiceCategoryCard] = []
         self._nav_items = [
-            NavItem("home", "home.svg", self._t("Главная", "Dashboard")),
-            NavItem("services", "services.svg", self._t("Сервисы", "Services")),
-            NavItem("components", "components.svg", self._t("Компоненты", "Components")),
-            NavItem("mods", "mods.svg", self._t("Модификации", "Mods")),
-            NavItem("settings", "settings.svg", self._t("Настройки", "Settings")),
+            NavItem("home", "home.svg", self._t("Dashboard")),
+            NavItem("services", "services.svg", self._t("Services")),
+            NavItem("components", "components.svg", self._t("Components")),
+            NavItem("mods", "mods.svg", self._t("Mods")),
+            NavItem("settings", "settings.svg", self._t("Settings")),
         ]
 
         if isinstance(startup_snapshot, dict):
@@ -3684,8 +3691,10 @@ class MainWindow(QMainWindow):
         if not self._launch_hidden:
             QTimer.singleShot(0, lambda: _bring_widget_to_front(self))
 
-    def _t(self, ru: str, en: str) -> str:
-        return ru if self.context.settings.get().language == "ru" else en
+    def _t(self, first: str, second: str | None = None) -> str:
+        if second is not None:
+            return first if self.context.settings.get().language == "ru" else second
+        return _tr.t(first)
 
     def _connect_backend_signals(self, backend) -> None:
         try:
@@ -3926,7 +3935,7 @@ class MainWindow(QMainWindow):
             self._onboarding_service_action_btn.set_selection_state(
                 len(self._selected_service_ids()),
                 self._onboarding_services_minimum,
-                text=self._t("Продолжить", "Continue"),
+                text=self._t("Continue"),
             )
 
     def _onboarding_seen_marker_path(self) -> Path:
@@ -4023,7 +4032,7 @@ class MainWindow(QMainWindow):
         if self._onboarding_service_action_btn is not None:
             self._position_onboarding_service_action()
             self._onboarding_service_action_btn.raise_()
-        if self._onboarding_back_btn is not None:
+        if getattr(self, "_onboarding_back_btn", None) is not None:
             self._onboarding_back_btn.move(18, 16)
             self._onboarding_back_btn.raise_()
 
@@ -4064,7 +4073,7 @@ class MainWindow(QMainWindow):
             return
         self._onboarding_quick_restart = False
         self._onboarding_manual_restart = False
-        if self._onboarding_back_btn is not None:
+        if getattr(self, "_onboarding_back_btn", None) is not None:
             self._onboarding_back_btn.hide()
         self._fade_out_onboarding_to_app()
 
@@ -4086,7 +4095,7 @@ class MainWindow(QMainWindow):
         if self._onboarding_services_stage_panel is not None:
             self._reset_widget_opacity(self._onboarding_services_stage_panel)
             self._onboarding_services_stage_panel.show()
-        if self._onboarding_back_btn is not None:
+        if getattr(self, "_onboarding_back_btn", None) is not None:
             show_back = self._onboarding_quick_restart or self._onboarding_manual_restart
             self._onboarding_back_btn.setVisible(show_back)
             if show_back:
@@ -4379,9 +4388,9 @@ class MainWindow(QMainWindow):
         icon = QLabel()
         icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
         icon.setPixmap(self._app_title_pixmap(58))
-        self._loading_overlay_title = QLabel(self._t("Запуск Zapret-Zen", "Launching Zapret-Zen"))
+        self._loading_overlay_title = QLabel(self._t("Launching Zapret-Zen"))
         self._loading_overlay_title.setProperty("class", "title")
-        self._loading_overlay_label = QLabel(self._t("Загрузка...", "Loading..."))
+        self._loading_overlay_label = QLabel(self._t("Loading..."))
         self._loading_overlay_label.setProperty("class", "muted")
         self._loading_overlay_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._loading_overlay_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -4454,7 +4463,7 @@ class MainWindow(QMainWindow):
         if self._onboarding_services_panel is not None:
             scroll_height = max(280, min(420, page_height - 120))
             self._onboarding_services_panel.setFixedSize(content_width, scroll_height)
-        if self._onboarding_back_btn is not None:
+        if getattr(self, "_onboarding_back_btn", None) is not None:
             self._onboarding_back_btn.move(18, 16)
             if self._onboarding_back_btn.isVisible():
                 self._onboarding_back_btn.raise_()
@@ -4548,7 +4557,7 @@ class MainWindow(QMainWindow):
         notifications_btn.setProperty("class", "action")
         notifications_btn.setIcon(self._icon("bell.svg"))
         notifications_btn.setIconSize(QSize(16, 16))
-        notifications_btn.setToolTip(self._t("Уведомления", "Notifications"))
+        notifications_btn.setToolTip(self._t("Notifications"))
         notifications_btn.clicked.connect(self._toggle_notifications_popup)
         self._notifications_btn = notifications_btn
         row.addWidget(notifications_btn)
@@ -4681,7 +4690,7 @@ class MainWindow(QMainWindow):
             self._notified_component_errors.add(signature)
             self._add_notification(
                 "error",
-                self._t("Компонент не запустился", "Component failed to start"),
+                self._t("Component failed to start"),
                 f"{self._component_display_name(state.component_id)}: {translated_error}",
                 source=state.component_id,
                 details={"dedupe_key": f"component-error:{state.component_id}:{state.last_error.strip()}"},
@@ -4695,7 +4704,7 @@ class MainWindow(QMainWindow):
             return
         self._add_notification(
             "warning",
-            self._t("Telegram Desktop не найден", "Telegram Desktop was not found"),
+            self._t("Telegram Desktop was not found"),
             self._t(
                 "Telegram Desktop не найден на компьютере. Откройте раздел компонентов, скачайте Telegram Desktop и после установки нажмите «Подключить к Telegram».",
                 "Telegram Desktop was not found on this PC. Open Components, download Telegram Desktop, and after installation press 'Connect to Telegram'.",
@@ -4709,7 +4718,7 @@ class MainWindow(QMainWindow):
             return
         self._add_notification(
             "success",
-            self._t("Zapret перезапущен", "Zapret restarted"),
+            self._t("Zapret restarted"),
             self._t(
                 "Zapret пересобран и запущен заново с вашими текущими настройками.",
                 "Zapret was rebuilt and started again with your current settings.",
@@ -4745,7 +4754,7 @@ class MainWindow(QMainWindow):
                 "Failed to parse the winws command from the selected configuration.",
             )
         if "no general script found" in lowered:
-            return self._t("Конфигурация Zapret не найдена.", "Zapret configuration was not found.")
+            return self._t("Zapret configuration was not found.")
         return text
 
     def _show_notifications_popup(self) -> None:
@@ -4778,7 +4787,7 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(12, 12, 12, 12)
         layout.setSpacing(10)
 
-        title = QLabel(self._t("Уведомления", "Notifications"))
+        title = QLabel(self._t("Notifications"))
         title.setProperty("class", "title")
         layout.addWidget(title)
 
@@ -4796,7 +4805,7 @@ class MainWindow(QMainWindow):
 
         entries = list(reversed(self.context.notifications.list()))
         if not entries:
-            empty = QLabel(self._t("Пока всё тихо. Ошибок и важных событий нет.", "Quiet for now. No errors or important events."))
+            empty = QLabel(self._t("Quiet for now. No errors or important events."))
             empty.setProperty("class", "muted")
             empty.setWordWrap(True)
             canvas_layout.addWidget(empty)
@@ -4863,7 +4872,7 @@ class MainWindow(QMainWindow):
         header = QLabel(entry.title)
         header.setProperty("class", "title")
         header.setWordWrap(True)
-        body = QLabel(entry.message or self._t("Без подробностей", "No details"))
+        body = QLabel(entry.message or self._t("No details"))
         body.setProperty("class", "muted")
         body.setWordWrap(True)
         meta = QLabel(self._format_notification_time(entry.created_at))
@@ -4883,27 +4892,27 @@ class MainWindow(QMainWindow):
 
     def _build_tools_menu(self) -> QMenu:
         menu = QMenu(self)
-        run_tests = QAction(self._t("Подобрать конфигурацию", "Find best configuration"), self)
+        run_tests = QAction(self._t("Find best configuration"), self)
         run_tests.triggered.connect(self._run_general_tests_popup)
         menu.addAction(run_tests)
 
-        tune_settings = QAction(self._t("Подобрать настройки", "Find best settings"), self)
+        tune_settings = QAction(self._t("Find best settings"), self)
         tune_settings.triggered.connect(self._run_settings_diagnostics_popup)
         menu.addAction(tune_settings)
 
-        run_diag = QAction(self._t("Запустить диагностику", "Run diagnostics"), self)
+        run_diag = QAction(self._t("Run diagnostics"), self)
         run_diag.triggered.connect(self._run_diagnostics_popup)
         menu.addAction(run_diag)
 
-        check_updates = QAction(self._t("Проверить обновления", "Check updates"), self)
+        check_updates = QAction(self._t("Check updates"), self)
         check_updates.triggered.connect(self._check_updates_popup)
         menu.addAction(check_updates)
 
-        rebuild = QAction(self._t("Пересобрать merged", "Rebuild merged"), self)
+        rebuild = QAction(self._t("Rebuild merged"), self)
         rebuild.triggered.connect(self._rebuild_runtime)
         menu.addAction(rebuild)
 
-        refresh = QAction(self._t("Обновить всё", "Refresh all"), self)
+        refresh = QAction(self._t("Refresh all"), self)
         refresh.triggered.connect(self.refresh_all)
         menu.addAction(refresh)
         return menu
@@ -4941,7 +4950,7 @@ class MainWindow(QMainWindow):
         github_btn.setIcon(self._icon("github.svg"))
         github_btn.setIconSize(QSize(22, 22))
         github_btn.set_button_theme(self.context.settings.get().theme)
-        github_btn.setToolTip(self._t("Открыть репозиторий", "Open repository"))
+        github_btn.setToolTip(self._t("Open repository"))
         github_btn.setFixedSize(44, 44)
         github_btn.setStyleSheet("QToolButton { background: transparent; border: none; }")
         github_btn.clicked.connect(lambda: webbrowser.open("https://github.com/peshk0v/Zapret-Zen/"))
@@ -5032,7 +5041,7 @@ class MainWindow(QMainWindow):
         back_btn.setIcon(self._icon("arrow_left.svg"))
         back_btn.setIconSize(QSize(17, 17))
         back_btn.setFixedSize(32, 32)
-        back_btn.setToolTip(self._t("Назад", "Back"))
+        back_btn.setToolTip(self._t("Back"))
         back_btn.clicked.connect(self._cancel_quick_onboarding)
         back_btn.hide()
         self._onboarding_back_btn = back_btn
@@ -5073,7 +5082,7 @@ class MainWindow(QMainWindow):
         self._onboarding_intro_panel = intro_panel
         stage_layout.addWidget(intro_panel)
 
-        intro_title = QLabel(self._t("Добро пожаловать", "Welcome"))
+        intro_title = QLabel(self._t("Welcome"))
         intro_title.setProperty("class", "title")
         intro_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._onboarding_intro_title_label = intro_title
@@ -5111,14 +5120,14 @@ class MainWindow(QMainWindow):
         actions_layout.setContentsMargins(0, 0, 0, 0)
         actions_layout.setSpacing(12)
 
-        primary = QPushButton(self._t("Пройти первичную настройку", "Run initial setup"))
+        primary = QPushButton(self._t("Run initial setup"))
         primary.setMinimumWidth(320)
         primary.setMinimumHeight(44)
         primary.clicked.connect(self._handle_onboarding_primary_action)
         self._onboarding_primary_btn = primary
         actions_layout.addWidget(primary, 0, Qt.AlignmentFlag.AlignCenter)
 
-        secondary = QPushButton(self._t("Пропустить", "Skip"))
+        secondary = QPushButton(self._t("Skip"))
         secondary.setFlat(True)
         secondary.setCursor(Qt.CursorShape.PointingHandCursor)
         secondary.setStyleSheet("background: transparent; border: none; padding: 6px 10px; color: rgba(255,255,255,0.62);")
@@ -5146,7 +5155,7 @@ class MainWindow(QMainWindow):
         self._onboarding_services_stage_panel = services_stage_panel
         stage_layout.addWidget(services_stage_panel)
 
-        title = QLabel(self._t("Выберите сервисы", "Choose services"))
+        title = QLabel(self._t("Choose services"))
         title.setProperty("class", "title")
         title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._onboarding_title_label = title
@@ -5183,7 +5192,7 @@ class MainWindow(QMainWindow):
         self._onboarding_running_stage_panel = running_stage_panel
         stage_layout.addWidget(running_stage_panel)
 
-        running_title = QLabel(self._t("Подбор конфигурации", "Selecting configuration"))
+        running_title = QLabel(self._t("Selecting configuration"))
         running_title.setProperty("class", "title")
         running_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._onboarding_running_title_label = running_title
@@ -5239,7 +5248,7 @@ class MainWindow(QMainWindow):
         self._onboarding_result_stage_panel = result_stage_panel
         stage_layout.addWidget(result_stage_panel)
 
-        result_title = QLabel(self._t("Настройка завершена", "Setup complete"))
+        result_title = QLabel(self._t("Setup complete"))
         result_title.setProperty("class", "title")
         result_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._onboarding_result_title_label = result_title
@@ -5261,7 +5270,7 @@ class MainWindow(QMainWindow):
         result_inner = QVBoxLayout(result_card)
         result_inner.setContentsMargins(0, 0, 0, 0)
         result_inner.setSpacing(8)
-        result_body = QLabel(self._t("Найдена подходящая конфигурация.", "A suitable configuration has been found."))
+        result_body = QLabel(self._t("A suitable configuration has been found."))
         result_body.setAlignment(Qt.AlignmentFlag.AlignCenter)
         result_body.setWordWrap(False)
         result_body.setMinimumHeight(28)
@@ -5280,7 +5289,7 @@ class MainWindow(QMainWindow):
         result_actions_layout = QVBoxLayout(result_actions)
         result_actions_layout.setContentsMargins(0, 0, 0, 0)
         result_actions_layout.setSpacing(12)
-        result_primary = QPushButton(self._t("Далее", "Next"))
+        result_primary = QPushButton(self._t("Next"))
         result_primary.setMinimumWidth(320)
         result_primary.setMinimumHeight(44)
         result_primary.clicked.connect(self._handle_onboarding_primary_action)
@@ -5291,7 +5300,7 @@ class MainWindow(QMainWindow):
 
         root.addWidget(wrap, 1)
         service_action = OnboardingServiceProgressButton(services_stage_panel)
-        service_action.setText(self._t("Продолжить", "Continue"))
+        service_action.setText(self._t("Continue"))
         service_action.clicked.connect(self._handle_onboarding_primary_action)
         service_action.hide()
         self._onboarding_service_action_btn = service_action
@@ -5314,7 +5323,7 @@ class MainWindow(QMainWindow):
 
         top, top_layout = self._card()
         top_layout.setContentsMargins(14, 14, 14, 14)
-        title = QLabel(self._t("Быстрый доступ", "Quick Access"))
+        title = QLabel(self._t("Quick Access"))
         title.setObjectName("DashboardTitle")
         title.setProperty("class", "title")
         title.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
@@ -5324,7 +5333,7 @@ class MainWindow(QMainWindow):
         top_layout.addWidget(title)
 
         # настройка general перенесена в компоненты
-        general_label = QLabel(self._t("Конфигурация", "General"))
+        general_label = QLabel(self._t("General"))
         self.general_combo = ClickSelectComboBox()
         self.general_combo.currentIndexChanged.connect(self._on_general_selected)
         self.general_combo.hide()
@@ -5379,7 +5388,7 @@ class MainWindow(QMainWindow):
         badges_row = QHBoxLayout()
         badges_row.setSpacing(10)
         for key, icon_name, title_text in [
-            ("app", "status_ok.svg", self._t("Приложение", "App")),
+            ("app", "status_ok.svg", self._t("App")),
             ("zapret", "status_warn.svg", "Zapret"),
             ("tg", "status_warn.svg", "TG Proxy"),
             ("mods", "status_mod.svg", "Mods"),
@@ -5427,7 +5436,7 @@ class MainWindow(QMainWindow):
         hero_layout.setContentsMargins(16, 16, 16, 16)
         hero_layout.setSpacing(10)
 
-        title = QLabel(self._t("Выберите сервисы", "Choose services"))
+        title = QLabel(self._t("Choose services"))
         title.setProperty("class", "title")
         self._services_title_label = title
         hero_layout.addWidget(title)
@@ -5884,7 +5893,7 @@ class MainWindow(QMainWindow):
         root.setContentsMargins(1, 0, 1, 0)
         root.setSpacing(10)
 
-        title = QLabel(self._t("Файлы", "Files"))
+        title = QLabel(self._t("Files"))
         title.setProperty("class", "title")
         self._files_title_label = title
         root.addWidget(title)
@@ -5929,32 +5938,32 @@ class MainWindow(QMainWindow):
         chooser_layout.addLayout(chooser_grid, 1)
         file_modes = [
             (
-                self._t("Домены", "Domains"),
-                self._t("Добавляйте сервисы, которые нужно направить в общий список обхода.", "Add services that should be placed into the general bypass list."),
+                self._t("Domains"),
+                self._t("Add services that should be placed into the general bypass list."),
                 "domains",
                 "files_domains.svg",
             ),
             (
-                self._t("Исключения", "Exclude domains"),
-                self._t("Отдельный список доменов, которые нужно исключить из правил.", "A separate list of domains that should be excluded from rules."),
+                self._t("Exclude domains"),
+                self._t("A separate list of domains that should be excluded from rules."),
                 "exclude_domains",
                 "files_exclude.svg",
             ),
             (
-                self._t("IP-листы", "IP lists"),
-                self._t("Ручной список IP и подсетей, которые нужно добавить в основной IPSet.", "A manual list of IPs and subnets that should be added into the main IPSet."),
+                self._t("IP lists"),
+                self._t("A manual list of IPs and subnets that should be added into the main IPSet."),
                 "all_ips",
                 "files_ip.svg",
             ),
             (
-                self._t("IP-исключения", "Exclude IPs"),
-                self._t("Ручной список IP и подсетей, которые нужно исключить из IPSet.", "A manual list of IPs and subnets to exclude from IPSet."),
+                self._t("Exclude IPs"),
+                self._t("A manual list of IPs and subnets to exclude from IPSet."),
                 "ips",
                 "files_exclude.svg",
             ),
             (
                 "General",
-                self._t("Редактировать доступные general-конфигурации Zapret.", "Edit available Zapret general configurations."),
+                self._t("Edit available Zapret general configurations."),
                 "generals",
                 "components.svg",
             ),
@@ -5968,8 +5977,8 @@ class MainWindow(QMainWindow):
                 "files.svg",
             ),
             (
-                self._t("Редактирование файлов", "Advanced editor"),
-                self._t("Открыть полноценный список файлов и текстовый редактор.", "Open the full file list and the text editor."),
+                self._t("Advanced editor"),
+                self._t("Open the full file list and the text editor."),
                 "advanced",
                 "files_editor.svg",
             ),
@@ -6016,7 +6025,7 @@ class MainWindow(QMainWindow):
         chooser_grid.setColumnStretch(1, 1)
         chooser_host_layout.addWidget(chooser)
         chooser_host_layout.addSpacing(10)
-        reset_btn = QPushButton(self._t("Сбросить все изменения", "Reset all changes"))
+        reset_btn = QPushButton(self._t("Reset all changes"))
         reset_btn.setProperty("class", "danger")
         reset_btn.setMinimumHeight(40)
         reset_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
@@ -6038,7 +6047,7 @@ class MainWindow(QMainWindow):
         back_btn.setProperty("class", "action")
         back_btn.setIcon(self._icon("back.svg"))
         back_btn.setIconSize(QSize(16, 16))
-        back_btn.setToolTip(self._t("Назад", "Back"))
+        back_btn.setToolTip(self._t("Back"))
         back_btn.clicked.connect(lambda: self._open_files_mode("home"))
         back_row.addWidget(back_btn, 0)
         tag_title = QLabel()
@@ -6053,7 +6062,7 @@ class MainWindow(QMainWindow):
         self._file_tag_subtitle = tag_subtitle
         tags_layout.addWidget(tag_subtitle)
         tag_input = QLineEdit()
-        tag_input.setPlaceholderText(self._t("Введите домен или IP и нажмите Enter", "Type a domain or IP and press Enter"))
+        tag_input.setPlaceholderText(self._t("Type a domain or IP and press Enter"))
         tag_input.returnPressed.connect(self._commit_tag_input)
         tag_input.installEventFilter(self)
         self._file_tag_input = tag_input
@@ -6080,7 +6089,7 @@ class MainWindow(QMainWindow):
         self._file_tag_canvas = tag_canvas
         self._file_tag_flow = tag_flow
         tags_stack = QStackedWidget()
-        tags_loading = QLabel(self._t("Загрузка...", "Loading..."))
+        tags_loading = QLabel(self._t("Loading..."))
         tags_loading.setProperty("class", "muted")
         tags_loading.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._files_tags_loading_label = tags_loading
@@ -6097,7 +6106,7 @@ class MainWindow(QMainWindow):
         tags_grid.addWidget(tags_stack, 0, 0)
         tag_search_shell, tag_search_panel, tag_search_toggle, tag_search_input, tag_search_prev_btn, tag_search_next_btn = self._build_file_search_variant(
             tags_shell,
-            placeholder=self._t("Найти значение", "Find value"),
+            placeholder=self._t("Find value"),
         )
         tags_grid.addWidget(tag_search_shell, 0, 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignBottom)
         tags_layout.addWidget(tags_shell, 1)
@@ -6110,7 +6119,7 @@ class MainWindow(QMainWindow):
             prev_btn=tag_search_prev_btn,
             next_btn=tag_search_next_btn,
         )
-        advanced_btn = QPushButton(self._t("Открыть редактор файлов", "Open file editor"))
+        advanced_btn = QPushButton(self._t("Open file editor"))
         advanced_btn.clicked.connect(lambda: self._open_files_mode("advanced"))
         tags_layout.addWidget(advanced_btn)
         tags_layout.addSpacing(12)
@@ -6124,7 +6133,7 @@ class MainWindow(QMainWindow):
         advanced_back.setProperty("class", "action")
         advanced_back.setIcon(self._icon("back.svg"))
         advanced_back.setIconSize(QSize(16, 16))
-        advanced_back.setToolTip(self._t("Назад", "Back"))
+        advanced_back.setToolTip(self._t("Back"))
         advanced_back.clicked.connect(lambda: self._open_files_mode("home"))
         advanced_split = QHBoxLayout()
         advanced_split.setContentsMargins(0, 0, 0, 0)
@@ -6135,7 +6144,7 @@ class MainWindow(QMainWindow):
         left_title_row.setContentsMargins(0, 0, 0, 0)
         left_title_row.setSpacing(8)
         left_title_row.addWidget(advanced_back, 0, Qt.AlignmentFlag.AlignVCenter)
-        left_title = QLabel(self._t("Список файлов", "Files list"))
+        left_title = QLabel(self._t("Files list"))
         left_title.setProperty("class", "title")
         left_title_row.addWidget(left_title, 0, Qt.AlignmentFlag.AlignVCenter)
         left_title_row.addStretch(1)
@@ -6147,7 +6156,7 @@ class MainWindow(QMainWindow):
         self.files_list.setSpacing(8)
         self.files_list.currentItemChanged.connect(self._load_selected_file)
         list_stack = QStackedWidget()
-        list_loading = QLabel(self._t("Загрузка файлов...", "Loading files..."))
+        list_loading = QLabel(self._t("Loading files..."))
         list_loading.setProperty("class", "muted")
         list_loading.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._files_list_loading_label = list_loading
@@ -6158,18 +6167,18 @@ class MainWindow(QMainWindow):
         advanced_split.addWidget(left, 1)
 
         right, right_layout = self._card()
-        right_title = QLabel(self._t("Редактор", "Editor"))
+        right_title = QLabel(self._t("Editor"))
         right_title.setProperty("class", "title")
         self._editor_title_label = right_title
         right_layout.addWidget(right_title)
-        self.file_path_label = QLabel(self._t("Выберите файл", "Select a file"))
+        self.file_path_label = QLabel(self._t("Select a file"))
         self.file_path_label.setProperty("class", "muted")
         path_row = QHBoxLayout()
         path_row.addWidget(self.file_path_label, 1)
         self.rename_file_btn = QToolButton()
         self.rename_file_btn.setProperty("class", "action")
         self.rename_file_btn.setIcon(self._icon("edit.svg"))
-        self.rename_file_btn.setToolTip(self._t("Переименовать выбранный файл", "Rename selected file"))
+        self.rename_file_btn.setToolTip(self._t("Rename selected file"))
         self.rename_file_btn.clicked.connect(self._rename_current_file)
         self._attach_button_animations(self.rename_file_btn)
         path_row.addWidget(self.rename_file_btn)
@@ -6178,7 +6187,7 @@ class MainWindow(QMainWindow):
         self.file_editor.setObjectName("FileEditor")
         self.file_editor.textChanged.connect(self._on_file_editor_text_changed)
         editor_stack = QStackedWidget()
-        editor_loading = QLabel(self._t("Загрузка файла...", "Loading file..."))
+        editor_loading = QLabel(self._t("Loading file..."))
         editor_loading.setProperty("class", "muted")
         editor_loading.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._files_editor_loading_label = editor_loading
@@ -6196,7 +6205,7 @@ class MainWindow(QMainWindow):
 
         search_shell, search_panel, search_toggle, search_input, search_prev_btn, search_next_btn = self._build_file_search_variant(
             editor_shell,
-            placeholder=self._t("Найти в файле", "Find in file"),
+            placeholder=self._t("Find in file"),
         )
         editor_grid.addWidget(search_shell, 0, 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignBottom)
         self._register_file_search_variant(
@@ -6211,7 +6220,7 @@ class MainWindow(QMainWindow):
         self._use_file_search_variant("document")
 
         right_layout.addWidget(editor_shell, 1)
-        save_btn = QPushButton(self._t("Сохранить файл", "Save file"))
+        save_btn = QPushButton(self._t("Save file"))
         save_btn.clicked.connect(self._save_current_file)
         self._attach_button_animations(save_btn)
         right_layout.addWidget(save_btn)
@@ -6298,15 +6307,15 @@ class MainWindow(QMainWindow):
         ui_language = settings.language
 
         # --- Application section ---
-        app_section = _section(self._t("Приложение", "Application"))
+        app_section = _section(self._t("Application"))
 
         mode_items = [
-            (self._t("Светлая", "Light"), "light"),
-            (self._t("Тёмная", "Dark"), "dark"),
+            (self._t("Light"), "light"),
+            (self._t("Dark"), "dark"),
             ("OLED", "oled"),
         ]
         mode_w, mode_group = _segment(mode_items, settings.theme, "theme_mode")
-        app_section.addWidget(QLabel(self._t("Тема", "Theme")))
+        app_section.addWidget(QLabel(self._t("Theme")))
         app_section.addWidget(mode_w)
 
         palette_row = QWidget()
@@ -6331,34 +6340,34 @@ class MainWindow(QMainWindow):
             palette_layout.addWidget(btn, 1)
         palette_group.setExclusive(True)
         ctrl["accent_palette"] = palette_group
-        app_section.addWidget(QLabel(self._t("Цвет", "Color")))
+        app_section.addWidget(QLabel(self._t("Color")))
         app_section.addWidget(palette_row)
         lang_items = [(_language_display_name(l, ui_language), l) for l in ("ru", "en")]
         lang_w, _ = _segment(lang_items, settings.language, "language")
         app_section.addWidget(lang_w)
-        autostart_cb = QCheckBox(self._t("Запускать вместе с Windows", "Run with Windows"))
+        autostart_cb = QCheckBox(self._t("Run with Windows"))
         autostart_cb.setChecked(settings.autostart_windows)
         ctrl["autostart"] = autostart_cb
         app_section.addWidget(autostart_cb)
-        tray_cb = QCheckBox(self._t("Стартовать в трее", "Start in tray"))
+        tray_cb = QCheckBox(self._t("Start in tray"))
         tray_cb.setChecked(settings.start_in_tray)
         ctrl["tray"] = tray_cb
         app_section.addWidget(tray_cb)
-        auto_comp_cb = QCheckBox(self._t("Автозапуск компонентов", "Auto-run components"))
+        auto_comp_cb = QCheckBox(self._t("Auto-run components"))
         auto_comp_cb.setChecked(settings.auto_run_components)
         ctrl["auto_components"] = auto_comp_cb
         app_section.addWidget(auto_comp_cb)
-        check_upd_cb = QCheckBox(self._t("Проверять наличие обновлений", "Check for updates"))
+        check_upd_cb = QCheckBox(self._t("Check for updates"))
         check_upd_cb.setChecked(settings.check_updates_on_start)
         ctrl["check_updates"] = check_upd_cb
         app_section.addWidget(check_upd_cb)
 
         branch_items = [
-            (self._t("Релиз", "Release"), "release"),
-            (self._t("Пре-релиз", "Pre-release"), "prerelease"),
+            (self._t("Release"), "release"),
+            (self._t("Pre-release"), "prerelease"),
         ]
         branch_w, _ = _segment(branch_items, settings.update_branch, "update_branch")
-        app_section.addWidget(QLabel(self._t("Ветка обновлений", "Update branch")))
+        app_section.addWidget(QLabel(self._t("Update branch")))
         app_section.addWidget(branch_w)
 
         # --- Zapret section ---
@@ -6368,18 +6377,18 @@ class MainWindow(QMainWindow):
         ipset_w, _ = _segment(ipset_items, settings.zapret_ipset_mode, "ipset_mode")
         zapret_section.addWidget(ipset_w)
         game_items = [
-            (self._t("выключен", "disabled"), "disabled"),
-            (self._t("tcp + udp", "tcp + udp"), "tcpudp"),
-            (self._t("только tcp", "tcp only"), "tcp"),
-            (self._t("только udp", "udp only"), "udp"),
+            (self._t("disabled"), "disabled"),
+            (self._t("tcp + udp"), "tcpudp"),
+            (self._t("tcp only"), "tcp"),
+            (self._t("udp only"), "udp"),
         ]
-        zapret_section.addWidget(QLabel(self._t("Gaming mode", "Gaming mode")))
+        zapret_section.addWidget(QLabel(self._t("Gaming mode")))
         game_w, _ = _segment(game_items, settings.zapret_game_filter_mode, "gaming_mode")
         zapret_section.addWidget(game_w)
         udp_excl = QLineEdit()
         udp_excl.setText(settings.zapret_udp_exclude_ports or "")
         ctrl["udp_exclude"] = udp_excl
-        zapret_section.addWidget(QLabel(self._t("Исключить UDP-порты", "Exclude UDP ports")))
+        zapret_section.addWidget(QLabel(self._t("Exclude UDP ports")))
         zapret_section.addWidget(udp_excl)
 
         # --- TG WS Proxy section ---
@@ -6387,24 +6396,24 @@ class MainWindow(QMainWindow):
         tg_host = QLineEdit()
         tg_host.setText(settings.tg_proxy_host or "")
         ctrl["tg_host"] = tg_host
-        tg_section.addWidget(QLabel(self._t("Хост", "Host")))
+        tg_section.addWidget(QLabel(self._t("Host")))
         tg_section.addWidget(tg_host)
         tg_port = QLineEdit()
         tg_port.setText(str(settings.tg_proxy_port or ""))
         ctrl["tg_port"] = tg_port
-        tg_section.addWidget(QLabel(self._t("Порт", "Port")))
+        tg_section.addWidget(QLabel(self._t("Port")))
         tg_section.addWidget(tg_port)
         tg_secret = QLineEdit()
         tg_secret.setText(settings.tg_proxy_secret or "")
         ctrl["tg_secret"] = tg_secret
-        tg_section.addWidget(QLabel(self._t("Секрет", "Secret")))
+        tg_section.addWidget(QLabel(self._t("Secret")))
         tg_section.addWidget(tg_secret)
         tg_media_items = [
-            (self._t("Стандартный", "Default"), "default"),
+            (self._t("Default"), "default"),
             ("Media fix", "media_fix"),
-            (self._t("Без DC override", "No DC override"), "empty"),
+            (self._t("No DC override"), "empty"),
         ]
-        tg_section.addWidget(QLabel(self._t("Media mode", "Media mode")))
+        tg_section.addWidget(QLabel(self._t("Media mode")))
         media_w, media_grp = _segment(tg_media_items, "default", "tg_media_mode")
         tg_section.addWidget(media_w)
         tg_dc = QTextEdit()
@@ -6427,28 +6436,28 @@ class MainWindow(QMainWindow):
         media_grp.idClicked.connect(_apply_tg_media_preset)
         tg_section.addWidget(QLabel("DC -> IP"))
         tg_section.addWidget(tg_dc)
-        tg_cf_cb = QCheckBox(self._t("Cloudflare fallback", "Cloudflare fallback"))
+        tg_cf_cb = QCheckBox(self._t("Cloudflare fallback"))
         tg_cf_cb.setChecked(settings.tg_proxy_cfproxy_enabled)
         ctrl["tg_cfproxy"] = tg_cf_cb
         tg_section.addWidget(tg_cf_cb)
-        tg_cf_prio_cb = QCheckBox(self._t("Пробовать Cloudflare первым", "Try Cloudflare first"))
+        tg_cf_prio_cb = QCheckBox(self._t("Try Cloudflare first"))
         tg_cf_prio_cb.setChecked(settings.tg_proxy_cfproxy_priority)
         ctrl["tg_cfproxy_priority"] = tg_cf_prio_cb
         tg_section.addWidget(tg_cf_prio_cb)
         tg_cf_domain = QLineEdit()
         tg_cf_domain.setText(settings.tg_proxy_cfproxy_domain or "")
         ctrl["tg_cf_domain"] = tg_cf_domain
-        tg_section.addWidget(QLabel(self._t("CF domain", "CF domain")))
+        tg_section.addWidget(QLabel(self._t("CF domain")))
         tg_section.addWidget(tg_cf_domain)
         tg_fake_tls = QLineEdit()
         tg_fake_tls.setText(settings.tg_proxy_fake_tls_domain or "")
         ctrl["tg_fake_tls"] = tg_fake_tls
-        tg_section.addWidget(QLabel(self._t("Fake TLS domain", "Fake TLS domain")))
+        tg_section.addWidget(QLabel(self._t("Fake TLS domain")))
         tg_section.addWidget(tg_fake_tls)
         tg_buf = QLineEdit()
         tg_buf.setText(str(settings.tg_proxy_buf_kb or ""))
         ctrl["tg_buf"] = tg_buf
-        tg_section.addWidget(QLabel(self._t("Буфер, КБ", "Buffer, KB")))
+        tg_section.addWidget(QLabel(self._t("Buffer, KB")))
         tg_section.addWidget(tg_buf)
         tg_pool = QLineEdit()
         tg_pool.setText(str(settings.tg_proxy_pool_size or ""))
@@ -6459,18 +6468,18 @@ class MainWindow(QMainWindow):
         layout.addStretch(1)
 
         # --- Logs and Files section ---
-        logs_files_section = _section(self._t("Логи и файлы", "Logs and Files"))
+        logs_files_section = _section(self._t("Logs and Files"))
         logs_files_tabs = QTabWidget()
         logs_files_tabs.setDocumentMode(True)
         logs_files_tabs.setObjectName("SettingsLogsFilesTabs")
         logs_files_tabs.tabBar().setUsesScrollButtons(False)
         logs_page = self._build_logs_page()
-        logs_files_tabs.addTab(logs_page, self._t("Логи", "Logs"))
+        logs_files_tabs.addTab(logs_page, self._t("Logs"))
         files_page = self._build_files_page()
-        logs_files_tabs.addTab(files_page, self._t("Файлы", "Files"))
+        logs_files_tabs.addTab(files_page, self._t("Files"))
         logs_files_section.addWidget(logs_files_tabs)
 
-        tools_section = _section(self._t("Инструменты", "Tools"))
+        tools_section = _section(self._t("Tools"))
         def _make_tool_btn(text: str, slot) -> QPushButton:
             btn = QPushButton(text)
             btn.setMinimumHeight(34)
@@ -6478,15 +6487,15 @@ class MainWindow(QMainWindow):
             return btn
 
         tools_section.addWidget(_make_tool_btn(
-            self._t("Подобрать конфигурацию", "Find best configuration"),
+            self._t("Find best configuration"),
             self._run_general_tests_popup,
         ))
         tools_section.addWidget(_make_tool_btn(
-            self._t("Подобрать настройки", "Find best settings"),
+            self._t("Find best settings"),
             self._run_settings_diagnostics_popup,
         ))
         tools_section.addWidget(_make_tool_btn(
-            self._t("Запустить диагностику", "Run diagnostics"),
+            self._t("Run diagnostics"),
             self._run_diagnostics_popup,
         ))
 
@@ -6497,28 +6506,28 @@ class MainWindow(QMainWindow):
         update_layout.setSpacing(6)
 
         check_btn = _make_tool_btn(
-            self._t("Проверить обновления", "Check updates"),
+            self._t("Check updates"),
             self._check_updates_popup,
         )
         update_layout.addWidget(check_btn, 1)
 
         file_btn = _make_tool_btn(
-            self._t("Установить из файла", "Install from file"),
+            self._t("Install from file"),
             self._update_from_file,
         )
         update_layout.addWidget(file_btn, 1)
 
         tools_section.addWidget(update_row)
         tools_section.addWidget(_make_tool_btn(
-            self._t("Пересобрать merged", "Rebuild merged"),
+            self._t("Rebuild merged"),
             self._rebuild_runtime,
         ))
         tools_section.addWidget(_make_tool_btn(
-            self._t("Обновить всё", "Refresh all"),
+            self._t("Refresh all"),
             self.refresh_all,
         ))
 
-        restart_btn = QPushButton(self._t("Настроить заново", "Configure again"))
+        restart_btn = QPushButton(self._t("Configure again"))
         restart_btn.setObjectName("RestartOnboardingButton")
         restart_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         restart_btn.setMinimumHeight(38)
@@ -6576,6 +6585,7 @@ class MainWindow(QMainWindow):
                 checked = grp.checkedButton()
                 if checked is not None and hasattr(checked, "_seg_value"):
                     self.context.settings.update(language=str(checked._seg_value))
+                    _tr.set_language(str(checked._seg_value))
                     self._retranslate_ui()
                     self._schedule_full_locale_theme_refresh()
 
@@ -6787,10 +6797,10 @@ class MainWindow(QMainWindow):
     def _setup_tray(self) -> None:
         self.tray_icon = QSystemTrayIcon(self._runtime_window_icon(), self)
         menu = QMenu(self)
-        show_action = QAction(self._t("Открыть", "Open"), self)
-        toggle_action = QAction(self._t("Компоненты", "Components"), self)
-        general_menu = QMenu(self._t("Конфигурация Zapret", "Zapret configuration"), self)
-        quit_action = QAction(self._t("Выход", "Exit"), self)
+        show_action = QAction(self._t("Open"), self)
+        toggle_action = QAction(self._t("Components"), self)
+        general_menu = QMenu(self._t("Zapret configuration"), self)
+        quit_action = QAction(self._t("Exit"), self)
         show_action.triggered.connect(self._restore_from_tray)
         toggle_action.triggered.connect(self._tray_toggle_master_runtime)
         quit_action.triggered.connect(self._exit_application)
@@ -7052,15 +7062,15 @@ class MainWindow(QMainWindow):
             partially_running = bool(running_ids) and not fully_running
             if fully_running:
                 icon_name = "status_ok.svg"
-                state_text = self._t("Включены", "Enabled")
+                state_text = self._t("Enabled")
             elif partially_running:
                 icon_name = "status_warn.svg"
-                state_text = self._t("Частично", "Partial")
+                state_text = self._t("Partial")
             else:
                 icon_name = "status_off.svg"
-                state_text = self._t("Выключены", "Disabled")
+                state_text = self._t("Disabled")
             self._tray_toggle_action.setIcon(self._icon(icon_name))
-            self._tray_toggle_action.setText(f"{self._t('Компоненты', 'Components')}: {state_text}")
+            self._tray_toggle_action.setText(f"{self._t('Components')}: {state_text}")
 
     def _should_minimize_to_tray(self) -> bool:
         # В close path используем только последний snapshot, без live runtime вызовов.
@@ -7351,7 +7361,7 @@ class MainWindow(QMainWindow):
                     self.setWindowOpacity(1.0)
                     self.hide()
                     if not self._tray_notifications_shown:
-                        self.tray_icon.showMessage("Zapret-Zen", self._t("Приложение свернуто в трей.", "Minimized to tray."), QSystemTrayIcon.MessageIcon.Information, 2200)
+                        self.tray_icon.showMessage("Zapret-Zen", self._t("Minimized to tray."), QSystemTrayIcon.MessageIcon.Information, 2200)
                         self._tray_notifications_shown = True
                 elif pending == "minimize":
                     self.showMinimized()
@@ -7443,8 +7453,9 @@ class MainWindow(QMainWindow):
         self.setUpdatesEnabled(False)
         try:
             if self._settings_dialog is not None:
-                self._settings_dialog.deleteLater()
-                self._settings_dialog = None
+                if not self._settings_dialog.isVisible():
+                    self._settings_dialog.deleteLater()
+                    self._settings_dialog = None
             self._settings_dialog_signature = None
             self._icon_cache.clear()
             self._service_icon_cache.clear()
@@ -7460,6 +7471,7 @@ class MainWindow(QMainWindow):
             self._force_repolish_widget_tree()
             self._refresh_current_page_after_theme_change()
             self._mark_dirty("dashboard", "services", "components", "mods", "files", "logs", "tray")
+            self._rebuild_settings_page()
         finally:
             self.setUpdatesEnabled(previous_updates)
             self.update()
@@ -7474,6 +7486,21 @@ class MainWindow(QMainWindow):
                 widget.update()
             except Exception:
                 continue
+
+    def _rebuild_settings_page(self) -> None:
+        if not hasattr(self, "pages"):
+            return
+        old = self.pages.widget(4)
+        if old is None:
+            return
+        was_current = self.pages.currentWidget() is old
+        self.pages.removeWidget(old)
+        old.deleteLater()
+        new_page = self._build_settings_page()
+        self.pages.insertWidget(4, new_page)
+        if was_current:
+            self.pages.setCurrentWidget(new_page)
+            self._sync_nav_highlight()
 
     def _refresh_current_page_after_theme_change(self) -> None:
         if not hasattr(self, "pages"):
@@ -7502,7 +7529,7 @@ class MainWindow(QMainWindow):
         if self._settings_diag_task_id:
             return
         self._settings_diag_cancelled = False
-        dialog = AppDialog(self, self.context, self._t("Подобрать настройки", "Find best settings"))
+        dialog = AppDialog(self, self.context, self._t("Find best settings"))
         label = QLabel(
             self._t(
                 "Сейчас приложение проверит разные комбинации IPSet mode и Gaming mode для выбранной конфигурации.",
@@ -7511,7 +7538,7 @@ class MainWindow(QMainWindow):
         )
         label.setWordWrap(True)
         dialog.body_layout.addWidget(label)
-        status = QLabel(self._t("Подготовка...", "Preparing..."))
+        status = QLabel(self._t("Preparing..."))
         status.setProperty("class", "muted")
         dialog.body_layout.addWidget(status)
         bar = QProgressBar()
@@ -7615,7 +7642,7 @@ class MainWindow(QMainWindow):
                     self.context.settings.update(autostart_windows=actual_autostart)
                     self._add_notification(
                         "error",
-                        self._t("Автозапуск Windows", "Windows autostart"),
+                        self._t("Windows autostart"),
                         self._t(
                             "Не удалось включить автозапуск. Проверьте права Windows или политики безопасности.",
                             "Could not enable autostart. Check Windows permissions or security policies.",
@@ -7719,12 +7746,12 @@ class MainWindow(QMainWindow):
             self._close_component_update_dialog()
             status = str(payload.get("status", ""))
             if status == "up-to-date":
-                self._show_info("Zapret", self._t("Уже установлена последняя версия Zapret.", "The latest Zapret version is already installed."))
+                self._show_info("Zapret", self._t("The latest Zapret version is already installed."))
             elif status == "updated":
-                self._show_info("Zapret", self._t("Zapret успешно обновлён.", "Zapret was updated successfully."))
-                self._add_notification("success", "Zapret", self._t("Zapret успешно обновлён.", "Zapret was updated successfully."), source="zapret")
+                self._show_info("Zapret", self._t("Zapret was updated successfully."))
+                self._add_notification("success", "Zapret", self._t("Zapret was updated successfully."), source="zapret")
             else:
-                message = str(payload.get("error", self._t("Не удалось обновить Zapret.", "Failed to update Zapret.")))
+                message = str(payload.get("error", self._t("Failed to update Zapret.")))
                 self._add_notification("error", "Zapret", message, source="zapret", details={"dedupe_key": f"update-error:zapret:{message}"})
                 self._show_error("Zapret", message)
             self._mark_dirty("dashboard", "components", "files", "logs")
@@ -7733,12 +7760,12 @@ class MainWindow(QMainWindow):
             self._close_component_update_dialog()
             status = str(payload.get("status", ""))
             if status == "up-to-date":
-                self._show_info("TG WS Proxy", self._t("Уже установлена последняя версия TG WS Proxy.", "The latest TG WS Proxy version is already installed."))
+                self._show_info("TG WS Proxy", self._t("The latest TG WS Proxy version is already installed."))
             elif status == "updated":
-                self._show_info("TG WS Proxy", self._t("TG WS Proxy успешно обновлён.", "TG WS Proxy was updated successfully."))
-                self._add_notification("success", "TG WS Proxy", self._t("TG WS Proxy успешно обновлён.", "TG WS Proxy was updated successfully."), source="tg-ws-proxy")
+                self._show_info("TG WS Proxy", self._t("TG WS Proxy was updated successfully."))
+                self._add_notification("success", "TG WS Proxy", self._t("TG WS Proxy was updated successfully."), source="tg-ws-proxy")
             else:
-                message = str(payload.get("error", self._t("Не удалось обновить TG WS Proxy.", "Failed to update TG WS Proxy.")))
+                message = str(payload.get("error", self._t("Failed to update TG WS Proxy.")))
                 self._add_notification("error", "TG WS Proxy", message, source="tg-ws-proxy", details={"dedupe_key": f"update-error:tg-ws-proxy:{message}"})
                 self._show_error("TG WS Proxy", message)
             self._mark_dirty("dashboard", "components", "files", "logs")
@@ -7749,7 +7776,7 @@ class MainWindow(QMainWindow):
         action = str(message.get("action", ""))
         action_id = self._backend_tasks.pop(task_id, action)
         source = self._backend_error_source(action, str(message.get("source", "") or ""))
-        raw_error = str(message.get("error", self._t("Неизвестная ошибка.", "Unknown error.")))
+        raw_error = str(message.get("error", self._t("Unknown error.")))
         error = self._friendly_backend_error(raw_error, source=source, action=action)
         if action == "load_startup_snapshot":
             self.context.logging.log("error", "startup_snapshot_failed", error=error)
@@ -7834,15 +7861,15 @@ class MainWindow(QMainWindow):
         labels = {
             "tg-ws-proxy": "TG WS Proxy",
             "zapret": "Zapret",
-            "mods": self._t("Модификации", "Mods"),
-            "settings": self._t("Настройки", "Settings"),
-            "files": self._t("Файлы", "Files"),
+            "mods": self._t("Mods"),
+            "settings": self._t("Settings"),
+            "files": self._t("Files"),
             "backend": "Backend",
         }
         return labels.get((source or "").strip().lower(), "Backend")
 
     def _friendly_backend_error(self, error: str, *, source: str, action: str = "") -> str:
-        text = str(error or "").strip() or self._t("Неизвестная ошибка.", "Unknown error.")
+        text = str(error or "").strip() or self._t("Unknown error.")
         lowered = text.lower()
         if "expecting value" in lowered and "line 1 column 1" in lowered:
             source_label = self._backend_source_label(source)
@@ -7891,19 +7918,19 @@ class MainWindow(QMainWindow):
             self._settings_diag_cancelled = False
             return
         if not isinstance(payload, dict):
-            self._show_error(self._t("Подобрать настройки", "Find best settings"), self._t("Не удалось получить результаты.", "Failed to get results."))
+            self._show_error(self._t("Find best settings"), self._t("Failed to get results."))
             return
         best = payload.get("best") if isinstance(payload.get("best"), dict) else None
         if not best or int(best.get("passed_targets", 0) or 0) <= 0:
             self._show_info(
-                self._t("Подобрать настройки", "Find best settings"),
+                self._t("Find best settings"),
                 self._t(
                     "Не удалось подобрать устойчивые настройки. Сначала запустите подбор конфигурации и выберите рабочую конфигурацию, затем повторите попытку.",
                     "Could not find stable settings. Run configuration selection first, choose a working configuration, and try again.",
                 ),
             )
             return
-        dialog = AppDialog(self, self.context, self._t("Подобрать настройки", "Find best settings"))
+        dialog = AppDialog(self, self.context, self._t("Find best settings"))
         summary = QLabel(
             self._t(
                 f"Лучшая комбинация найдена.\n\nIPSet mode: {best.get('ipset_mode')}\nGaming mode: {best.get('game_mode')}\nУспешно: {best.get('passed_targets')}/{best.get('total_targets')}\nВремя: {best.get('elapsed')} сек.\n\nПрименить эти настройки?",
@@ -7914,8 +7941,8 @@ class MainWindow(QMainWindow):
         dialog.body_layout.addWidget(summary)
         buttons = QHBoxLayout()
         buttons.addStretch(1)
-        close_btn = QPushButton(self._t("Закрыть", "Close"))
-        apply_btn = QPushButton(self._t("Применить лучшие настройки", "Apply best settings"))
+        close_btn = QPushButton(self._t("Close"))
+        apply_btn = QPushButton(self._t("Apply best settings"))
         apply_btn.setProperty("class", "primary")
         close_btn.clicked.connect(dialog.reject)
         apply_btn.clicked.connect(dialog.accept)
@@ -8015,7 +8042,7 @@ class MainWindow(QMainWindow):
             self._file_tag_canvas.setStyleSheet(f"background: {tag_surface}; border: none;")
         self._sync_nav_highlight(animated=False)
         self._apply_titlebar_icons(theme)
-        if self._notifications_btn is not None:
+        if getattr(self, "_notifications_btn", None) is not None:
             self._notifications_btn.setIcon(self._icon("bell.svg"))
 
         self._sync_onboarding_back_button_style()
@@ -8283,28 +8310,28 @@ class MainWindow(QMainWindow):
 
     def _retranslate_ui(self) -> None:
         nav_tooltips = [
-            self._t("Главная", "Dashboard"),
-            self._t("Сервисы", "Services"),
-            self._t("Компоненты", "Components"),
-            self._t("Модификации", "Mods"),
-            self._t("Файлы", "Files"),
-            self._t("Логи", "Logs"),
+            self._t("Dashboard"),
+            self._t("Services"),
+            self._t("Components"),
+            self._t("Mods"),
+            self._t("Files"),
+            self._t("Logs"),
         ]
         for index, btn in enumerate(self._nav_buttons):
             if index < len(nav_tooltips):
                 btn.setToolTip(nav_tooltips[index])
 
 
-        if self._notifications_btn is not None:
-            self._notifications_btn.setToolTip(self._t("Уведомления", "Notifications"))
-        if self._settings_btn is not None:
-            self._settings_btn.setToolTip(self._t("Настройки", "Settings"))
-        if self._onboarding_back_btn is not None:
-            self._onboarding_back_btn.setToolTip(self._t("Назад", "Back"))
+        if getattr(self, "_notifications_btn", None) is not None:
+            self._notifications_btn.setToolTip(self._t("Notifications"))
+        if getattr(self, "_settings_btn", None) is not None:
+            self._settings_btn.setToolTip(self._t("Settings"))
+        if getattr(self, "_onboarding_back_btn", None) is not None:
+            self._onboarding_back_btn.setToolTip(self._t("Back"))
         if self._dashboard_title_label is not None:
-            self._dashboard_title_label.setText(self._t("Быстрый доступ", "Quick Access"))
+            self._dashboard_title_label.setText(self._t("Quick Access"))
         if self._services_title_label is not None:
-            self._services_title_label.setText(self._t("Выберите сервисы", "Choose services"))
+            self._services_title_label.setText(self._t("Choose services"))
         if self._services_subtitle_label is not None:
             self._services_subtitle_label.setText(
                 self._t(
@@ -8320,9 +8347,9 @@ class MainWindow(QMainWindow):
                     )
                 )
         if self._components_title_label is not None:
-            self._components_title_label.setText(self._t("Компоненты", "Components"))
+            self._components_title_label.setText(self._t("Components"))
         if self._mods_title_label is not None:
-            self._mods_title_label.setText(self._t("Модификации", "Mods"))
+            self._mods_title_label.setText(self._t("Mods"))
         if self._mods_subtitle_label is not None:
             self._mods_subtitle_label.setText(
                 self._t(
@@ -8331,7 +8358,7 @@ class MainWindow(QMainWindow):
                 )
             )
         if self._mods_add_btn is not None:
-            self._mods_add_btn.setText(self._t("Добавить", "Add"))
+            self._mods_add_btn.setText(self._t("Add"))
         if hasattr(self, "mods_import_hint") and self.mods_import_hint is not None:
             self.mods_import_hint.setText(
                 self._t(
@@ -8340,7 +8367,7 @@ class MainWindow(QMainWindow):
                 )
             )
         if self._files_title_label is not None:
-            self._files_title_label.setText(self._t("Файлы", "Files"))
+            self._files_title_label.setText(self._t("Files"))
         if self._files_intro_label is not None:
             self._files_intro_label.setText(
                 self._t(
@@ -8350,35 +8377,35 @@ class MainWindow(QMainWindow):
             )
         file_mode_texts = {
             "domains": (
-                self._t("Домены", "Domains"),
+                self._t("Domains"),
                 self._t(
                     "Добавляйте сервисы, которые нужно направить в общий список обхода.",
                     "Add services that should be placed into the general bypass list.",
                 ),
             ),
             "exclude_domains": (
-                self._t("Исключения", "Exclude domains"),
+                self._t("Exclude domains"),
                 self._t(
                     "Отдельный список доменов, которые нужно исключить из правил.",
                     "A separate list of domains that should be excluded from rules.",
                 ),
             ),
             "all_ips": (
-                self._t("IP-листы", "IP lists"),
+                self._t("IP lists"),
                 self._t(
                     "Ручной список IP и подсетей, которые нужно добавить в основной IPSet.",
                     "A manual list of IPs and subnets that should be added into the main IPSet.",
                 ),
             ),
             "ips": (
-                self._t("IP-исключения", "Exclude IPs"),
+                self._t("Exclude IPs"),
                 self._t(
                     "Ручной список IP и подсетей, которые нужно исключить из IPSet.",
                     "A manual list of IPs and subnets to exclude from IPSet.",
                 ),
             ),
             "advanced": (
-                self._t("Редактирование файлов", "Advanced editor"),
+                self._t("Advanced editor"),
                 self._t(
                     "Открыть полноценный список файлов и текстовый редактор.",
                     "Open the full file list and the text editor.",
@@ -8397,9 +8424,9 @@ class MainWindow(QMainWindow):
             if isinstance(desc_label, QLabel):
                 desc_label.setText(title_desc[1])
         if self._editor_title_label is not None:
-            self._editor_title_label.setText(self._t("Редактор", "Editor"))
+            self._editor_title_label.setText(self._t("Editor"))
         if self._logs_title_label is not None:
-            self._logs_title_label.setText(self._t("Логи", "Logs"))
+            self._logs_title_label.setText(self._t("Logs"))
         if self._onboarding_stage == "intro":
             self._reset_onboarding_intro_state()
         elif self._onboarding_stage == "services":
@@ -8408,11 +8435,11 @@ class MainWindow(QMainWindow):
         self._rebuild_logs_source_combo()
 
         title_map = {
-            "app": self._t("Приложение", "App"),
+            "app": self._t("App"),
             "zapret": "Zapret",
             "tg": "TG Proxy",
             "mods": "Mods",
-            "theme": self._t("Тема", "Theme"),
+            "theme": self._t("Theme"),
         }
         for key, title in title_map.items():
             badge = self._status_badges.get(key)
@@ -8422,16 +8449,16 @@ class MainWindow(QMainWindow):
             badge.title_label.setText(title)
 
         if self._tray_show_action is not None:
-            self._tray_show_action.setText(self._t("Открыть", "Open"))
+            self._tray_show_action.setText(self._t("Open"))
         if self._tray_toggle_action is not None:
-            self._tray_toggle_action.setText(self._t("Компоненты", "Components"))
+            self._tray_toggle_action.setText(self._t("Components"))
         if self._tray_general_menu is not None:
-            self._tray_general_menu.setTitle(self._t("Конфигурация Zapret", "Zapret configuration"))
+            self._tray_general_menu.setTitle(self._t("Zapret configuration"))
         if self._tray_quit_action is not None:
-            self._tray_quit_action.setText(self._t("Выход", "Exit"))
+            self._tray_quit_action.setText(self._t("Exit"))
 
         if hasattr(self, "files_list") and self.files_list.currentItem() is None:
-            self.file_path_label.setText(self._t("Выберите файл", "Select a file"))
+            self.file_path_label.setText(self._t("Select a file"))
 
         self._rebuild_tray_menu()
 
@@ -8566,7 +8593,7 @@ class MainWindow(QMainWindow):
         try:
             self._submit_backend_task("set_mod_emoji", {"mod_id": mod_id, "emoji": emoji}, action_id=f"mod-emoji:{mod_id}")
         except Exception as error:
-            self._show_error(self._t("Модификации", "Mods"), str(error))
+            self._show_error(self._t("Mods"), str(error))
         finally:
             if popup is not None:
                 popup.close()
@@ -8582,7 +8609,7 @@ class MainWindow(QMainWindow):
         try:
             self._submit_backend_task("move_mod", {"mod_id": mod_id, "direction": direction}, action_id=f"mod-move:{mod_id}")
         except Exception as error:
-            self._show_error(self._t("Модификации", "Mods"), str(error))
+            self._show_error(self._t("Mods"), str(error))
 
     def _favorite_general_ids(self) -> list[str]:
         return list(self.context.settings.get().favorite_zapret_generals or [])
@@ -8716,7 +8743,7 @@ class MainWindow(QMainWindow):
                 continue
         if self._general_loading_label is not None:
             try:
-                self._general_loading_label.setText(f"{self._t('Применение', 'Applying')}{frame}")
+                self._general_loading_label.setText(f"{self._t('Applying')}{frame}")
             except RuntimeError:
                 self._general_loading_label = None
         if not self._component_loading_buttons and self._general_loading_label is None:
@@ -8760,9 +8787,9 @@ class MainWindow(QMainWindow):
             self._use_file_search_variant("document")
             self._file_search_mode = "document"
             self.file_path_label.setText(
-                self._t("Загрузка General...", "Loading General...")
+                self._t("Loading General...")
                 if mode == "generals"
-                else ("Hosts" if mode == "hosts" else self._t("Загрузка файлов...", "Loading files..."))
+                else ("Hosts" if mode == "hosts" else self._t("Loading files..."))
             )
             self.file_editor.clear()
             self.files_list.clear()
@@ -8893,45 +8920,45 @@ class MainWindow(QMainWindow):
     def _apply_file_collection_meta(self) -> None:
         titles = {
             "domains": (
-                self._t("Домены", "Domains"),
+                self._t("Domains"),
                 self._t(
                     "Добавляйте домены, которые нужно включить в пользовательский список обхода.",
                     "Add domains that should be included in the user bypass list.",
                 ),
             ),
             "exclude_domains": (
-                self._t("Исключения", "Exclude domains"),
+                self._t("Exclude domains"),
                 self._t(
                     "Здесь можно указать домены, которые нужно исключить из правил Zapret.",
                     "Here you can list domains that should be excluded from Zapret rules.",
                 ),
             ),
             "all_ips": (
-                self._t("IP-листы", "IP lists"),
+                self._t("IP lists"),
                 self._t(
                     "Здесь можно указать IP-адреса и подсети, которые должны попадать в основной IPSet.",
                     "Here you can list IP addresses and subnets that should be included in the main IPSet.",
                 ),
             ),
             "ips": (
-                self._t("IP-исключения", "Exclude IPs"),
+                self._t("Exclude IPs"),
                 self._t(
                     "Добавляйте IP-адреса и подсети, которые нужно исключить из IPSet.",
                     "Add IP addresses and subnets that should be excluded from IPSet.",
                 ),
             ),
         }
-        title, subtitle = titles.get(self._current_file_collection, (self._t("Файлы", "Files"), ""))
+        title, subtitle = titles.get(self._current_file_collection, (self._t("Files"), ""))
         if self._file_tag_title is not None:
             self._file_tag_title.setText(title)
         if self._file_tag_subtitle is not None:
             self._file_tag_subtitle.setText(subtitle)
         if self._file_tag_input is not None:
-            placeholder = self._t("Введите значение и нажмите Enter", "Type a value and press Enter")
+            placeholder = self._t("Type a value and press Enter")
             if self._current_file_collection in {"domains", "exclude_domains"}:
-                placeholder = self._t("Введите домен и нажмите Enter", "Type a domain and press Enter")
+                placeholder = self._t("Type a domain and press Enter")
             elif self._current_file_collection in {"all_ips", "ips"}:
-                placeholder = self._t("Введите IP или подсеть и нажмите Enter", "Type an IP or subnet and press Enter")
+                placeholder = self._t("Type an IP or subnet and press Enter")
             self._file_tag_input.setPlaceholderText(placeholder)
 
     def _cancel_file_tag_render(self) -> None:
@@ -9148,7 +9175,7 @@ class MainWindow(QMainWindow):
 
     def _reset_all_file_overrides(self) -> None:
         confirmed = self._ask_yes_no(
-            self._t("Сбросить изменения", "Reset changes"),
+            self._t("Reset changes"),
             self._t(
                 "Точно вы хотите сбросить все изменения? Это удалит все пользовательские правки, сделанные в разделе Файлы.",
                 "Are you sure you want to reset all changes? This will remove all user edits made in the Files section.",
@@ -9226,7 +9253,7 @@ class MainWindow(QMainWindow):
     def _advance_loading_caption(self) -> None:
         if not self._toggle_in_progress:
             return
-        base = self._t("Подключение", "Connecting") if self._loading_action == "connect" else self._t("Отключение", "Disconnecting")
+        base = self._t("Connecting") if self._loading_action == "connect" else self._t("Disconnecting")
         dots_frames = ["", ".", "..", "...", "..", "."]
         full_text = f"{base}{dots_frames[self._loading_frame % len(dots_frames)]}"
         self._loading_frame += 1
@@ -9278,7 +9305,7 @@ class MainWindow(QMainWindow):
             return
         installed = dict(self._mods_installed_cache)
         if mod_id not in installed:
-            self._show_info(self._t("Модификация", "Mod"), self._t("Сначала установите модификацию, затем включайте её.", "Install selected mod before enabling it."))
+            self._show_info(self._t("Mod"), self._t("Install selected mod before enabling it."))
             return
         self._submit_backend_task("toggle_mod", {"mod_id": mod_id}, action_id=f"mod:{mod_id}")
 
@@ -9289,7 +9316,7 @@ class MainWindow(QMainWindow):
 
     def _import_mod_any(self) -> None:
         previous_selected_general = str(self.context.settings.get().selected_zapret_general or "")
-        chooser = AppDialog(self, self.context, self._t("Добавить модификацию", "Add modification"))
+        chooser = AppDialog(self, self.context, self._t("Add modification"))
         chooser.setMinimumWidth(520)
         chooser_text = QLabel(
             self._t(
@@ -9304,15 +9331,15 @@ class MainWindow(QMainWindow):
         buttons = QGridLayout()
         buttons.setHorizontalSpacing(10)
         buttons.setVerticalSpacing(10)
-        folder_btn = QPushButton(self._t("Папка", "Folder"))
+        folder_btn = QPushButton(self._t("Folder"))
         folder_btn.setProperty("class", "primary")
-        zip_btn = QPushButton(self._t("ZIP-архив", "ZIP archive"))
+        zip_btn = QPushButton(self._t("ZIP archive"))
         zip_btn.setProperty("class", "primary")
-        files_btn = QPushButton(self._t("Файл(ы)", "File(s)"))
+        files_btn = QPushButton(self._t("File(s)"))
         files_btn.setProperty("class", "primary")
-        github_btn = QPushButton(self._t("GitHub", "GitHub"))
+        github_btn = QPushButton(self._t("GitHub"))
         github_btn.setProperty("class", "primary")
-        cancel_btn = QPushButton(self._t("Отмена", "Cancel"))
+        cancel_btn = QPushButton(self._t("Cancel"))
         self._attach_button_animations(folder_btn)
         self._attach_button_animations(zip_btn)
         self._attach_button_animations(files_btn)
@@ -9338,21 +9365,21 @@ class MainWindow(QMainWindow):
         path = ""
         paths: list[str] = []
         if selected_kind["kind"] == "folder":
-            path = QFileDialog.getExistingDirectory(self, self._t("Выберите папку модификации", "Select modification folder"))
+            path = QFileDialog.getExistingDirectory(self, self._t("Select modification folder"))
             if path:
                 paths = [path]
         elif selected_kind["kind"] == "zip":
             path, _ = QFileDialog.getOpenFileName(
                 self,
-                self._t("Выберите ZIP-архив модификации", "Select modification ZIP archive"),
-                filter=self._t("ZIP-архив (*.zip)", "ZIP archive (*.zip)"),
+                self._t("Select modification ZIP archive"),
+                filter=self._t("ZIP archive (*.zip)"),
             )
             if path:
                 paths = [path]
         elif selected_kind["kind"] == "files":
             paths, _ = QFileDialog.getOpenFileNames(
                 self,
-                self._t("Выберите файлы модификации", "Select modification files"),
+                self._t("Select modification files"),
                 filter=self._t(
                     "Совместимые файлы (*.txt *.ps1 *.bat);;Все файлы (*.*)",
                     "Compatible files (*.txt *.ps1 *.bat);;All files (*.*)",
@@ -9360,9 +9387,9 @@ class MainWindow(QMainWindow):
             )
         elif selected_kind["kind"] == "github":
             repo_url = self._ask_text_value(
-                self._t("GitHub-модификация", "GitHub modification"),
-                self._t("Вставьте ссылку на GitHub-репозиторий.", "Paste a GitHub repository link."),
-                self._t("Например: https://github.com/user/repo", "Example: https://github.com/user/repo"),
+                self._t("GitHub modification"),
+                self._t("Paste a GitHub repository link."),
+                self._t("Example: https://github.com/user/repo"),
             )
             if not repo_url:
                 return
@@ -9376,7 +9403,7 @@ class MainWindow(QMainWindow):
                     action_id="__mods_import__",
                 )
             except Exception as error:
-                self._show_error(self._t("Модификации", "Mods"), f"{self._t('Не удалось импортировать репозиторий', 'Failed to import repository')}:\n{error}")
+                self._show_error(self._t("Mods"), f"{self._t('Failed to import repository')}:\n{error}")
             return
 
         if not paths:
@@ -9391,28 +9418,28 @@ class MainWindow(QMainWindow):
                 action_id="__mods_import__",
             )
         except Exception as error:
-            self._show_error(self._t("Модификации", "Mods"), f"{self._t('Не удалось импортировать модификацию', 'Failed to import modification')}:\n{error}")
+            self._show_error(self._t("Mods"), f"{self._t('Failed to import modification')}:\n{error}")
 
     def _create_mod_dialog(self) -> None:
         name = self._ask_text_value(
-            self._t("Новая модификация", "New modification"),
-            self._t("Введите название модификации.", "Enter modification name."),
-            self._t("Например: My game fix", "Example: My game fix"),
+            self._t("New modification"),
+            self._t("Enter modification name."),
+            self._t("Example: My game fix"),
         )
         if not name:
             return
         author = self._ask_text_value(
-            self._t("Автор модификации", "Modification author"),
-            self._t("Кого указать автором? Если оставить пустым, будет указано «неизвестен».", "Who should be listed as author? Leave empty to use \"unknown\"."),
-            self._t("неизвестен", "unknown"),
-        ) or self._t("неизвестен", "unknown")
+            self._t("Modification author"),
+            self._t("Who should be listed as author? Leave empty to use \"unknown\"."),
+            self._t("unknown"),
+        ) or self._t("unknown")
         try:
             entry = self.context.mods.create_empty(name=name, author=author)
             self._mark_dirty("mods", "components", "files")
             self._request_page_refresh("mods")
             self._open_mod_editor(entry.id)
         except Exception as error:
-            self._show_error(self._t("Модификации", "Mods"), str(error))
+            self._show_error(self._t("Mods"), str(error))
 
     def _open_mod_editor(self, mod_id: str) -> None:
         if mod_id == "unified-by-peshk0v":
@@ -9422,22 +9449,22 @@ class MainWindow(QMainWindow):
             entry = installed[mod_id]
             files = self.context.mods.list_files(mod_id)
         except Exception as error:
-            self._show_error(self._t("Модификации", "Mods"), str(error))
+            self._show_error(self._t("Mods"), str(error))
             return
 
-        dialog = AppDialog(self, self.context, self._t("Редактор модификации", "Modification editor"))
+        dialog = AppDialog(self, self.context, self._t("Modification editor"))
         dialog.setMinimumSize(760, 560)
 
         form = QFormLayout()
         name_input = QLineEdit(entry.name or entry.id)
-        author_input = QLineEdit(entry.author or self._t("неизвестен", "unknown"))
+        author_input = QLineEdit(entry.author or self._t("unknown"))
         version_input = QLineEdit(entry.version or datetime.utcnow().strftime("%Y.%m.%d"))
         description_input = QTextEdit(entry.description or "")
         description_input.setFixedHeight(86)
-        form.addRow(self._t("Название", "Name"), name_input)
-        form.addRow(self._t("Автор", "Author"), author_input)
-        form.addRow(self._t("Версия", "Version"), version_input)
-        form.addRow(self._t("Описание", "Description"), description_input)
+        form.addRow(self._t("Name"), name_input)
+        form.addRow(self._t("Author"), author_input)
+        form.addRow(self._t("Version"), version_input)
+        form.addRow(self._t("Description"), description_input)
         dialog.body_layout.addLayout(form)
 
         split = QHBoxLayout()
@@ -9465,7 +9492,7 @@ class MainWindow(QMainWindow):
                 fresh = []
             for item in fresh:
                 rel = str(item.get("path", ""))
-                row = QListWidgetItem(f"{rel}\n{self._t('Размер', 'Size')}: {item.get('size', 0)}")
+                row = QListWidgetItem(f"{rel}\n{self._t('Size')}: {item.get('size', 0)}")
                 row.setData(Qt.ItemDataRole.UserRole, rel)
                 row.setToolTip(rel)
                 files_list.addItem(row)
@@ -9479,7 +9506,7 @@ class MainWindow(QMainWindow):
             try:
                 editor.setPlainText(self.context.mods.read_file(mod_id, rel))
             except Exception as error:
-                self._show_error(self._t("Файл модификации", "Mod file"), str(error))
+                self._show_error(self._t("Mod file"), str(error))
 
         files_list.currentItemChanged.connect(lambda item, _prev=None: select_file(item))
         reload_files()
@@ -9495,11 +9522,11 @@ class MainWindow(QMainWindow):
         dialog.body_layout.addLayout(split, 1)
 
         buttons = QHBoxLayout()
-        save_meta_btn = QPushButton(self._t("Сохранить данные", "Save details"))
-        add_file_btn = QPushButton(self._t("Добавить файл", "Add file"))
-        save_file_btn = QPushButton(self._t("Сохранить файл", "Save file"))
-        delete_file_btn = QPushButton(self._t("Удалить файл", "Delete file"))
-        close_btn = QPushButton(self._t("Закрыть", "Close"))
+        save_meta_btn = QPushButton(self._t("Save details"))
+        add_file_btn = QPushButton(self._t("Add file"))
+        save_file_btn = QPushButton(self._t("Save file"))
+        delete_file_btn = QPushButton(self._t("Delete file"))
+        close_btn = QPushButton(self._t("Close"))
         for btn in (save_meta_btn, add_file_btn, save_file_btn, delete_file_btn, close_btn):
             self._attach_button_animations(btn)
             buttons.addWidget(btn)
@@ -9517,12 +9544,12 @@ class MainWindow(QMainWindow):
                 self._mark_dirty("mods")
                 modified["value"] = True
             except Exception as error:
-                self._show_error(self._t("Модификации", "Mods"), str(error))
+                self._show_error(self._t("Mods"), str(error))
 
         def add_file() -> None:
             rel = self._ask_text_value(
-                self._t("Новый файл", "New file"),
-                self._t("Путь внутри модификации.", "Path inside the modification."),
+                self._t("New file"),
+                self._t("Path inside the modification."),
                 "lists/list-general.txt",
             )
             if not rel:
@@ -9533,7 +9560,7 @@ class MainWindow(QMainWindow):
                 self._mark_dirty("mods", "components", "files")
                 modified["value"] = True
             except Exception as error:
-                self._show_error(self._t("Файл модификации", "Mod file"), str(error))
+                self._show_error(self._t("Mod file"), str(error))
 
         def save_file() -> None:
             rel = current_path["path"]
@@ -9545,7 +9572,7 @@ class MainWindow(QMainWindow):
                 self._mark_dirty("mods", "components", "files")
                 modified["value"] = True
             except Exception as error:
-                self._show_error(self._t("Файл модификации", "Mod file"), str(error))
+                self._show_error(self._t("Mod file"), str(error))
 
         def delete_file() -> None:
             rel = current_path["path"]
@@ -9559,7 +9586,7 @@ class MainWindow(QMainWindow):
                 self._mark_dirty("mods", "components", "files")
                 modified["value"] = True
             except Exception as error:
-                self._show_error(self._t("Файл модификации", "Mod file"), str(error))
+                self._show_error(self._t("Mod file"), str(error))
 
         save_meta_btn.clicked.connect(save_metadata)
         add_file_btn.clicked.connect(add_file)
@@ -9578,7 +9605,7 @@ class MainWindow(QMainWindow):
         try:
             self._submit_backend_task("import_mod_from_path", {"path": path}, action_id="__mods_import__")
         except Exception as error:
-            self._show_error(self._t("Модификации", "Mods"), f"{self._t('Не удалось импортировать папку', 'Failed to import folder')}:\n{error}")
+            self._show_error(self._t("Mods"), f"{self._t('Failed to import folder')}:\n{error}")
 
     def _import_mod_archive(self) -> None:
         path, _ = QFileDialog.getOpenFileName(self, "Select mod archive", filter="ZIP archive (*.zip)")
@@ -9587,7 +9614,7 @@ class MainWindow(QMainWindow):
         try:
             self._submit_backend_task("import_mod_from_path", {"path": path}, action_id="__mods_import__")
         except Exception as error:
-            self._show_error(self._t("Модификации", "Mods"), f"{self._t('Не удалось импортировать архив', 'Failed to import archive')}:\n{error}")
+            self._show_error(self._t("Mods"), f"{self._t('Failed to import archive')}:\n{error}")
 
     def _rebuild_runtime(self) -> None:
         self._submit_backend_task("rebuild_merge_runtime", action_id="__merge_rebuild__")
@@ -9598,16 +9625,16 @@ class MainWindow(QMainWindow):
     def _update_from_file(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
             self,
-            self._t("Выберите файл обновления", "Select update file"),
+            self._t("Select update file"),
             "",
-            self._t("ZIP архив (*.zip)", "ZIP archive (*.zip)"),
+            self._t("ZIP archive (*.zip)"),
         )
         if not path:
             return
         if self._update_prepare_dialog is not None:
             return
-        dialog = AppDialog(self, self.context, self._t("Подготовка обновления", "Preparing update"))
-        label = QLabel(self._t("Подготавливаем обновление из файла...", "Preparing update from file..."))
+        dialog = AppDialog(self, self.context, self._t("Preparing update"))
+        label = QLabel(self._t("Preparing update from file..."))
         label.setWordWrap(True)
         dialog.body_layout.addWidget(label)
         bar = QProgressBar()
@@ -9653,7 +9680,7 @@ class MainWindow(QMainWindow):
         self._close_update_check_dialog()
         if not isinstance(release, dict):
             if manual:
-                self._show_error(self._t("Обновления", "Updates"), self._t("Не удалось проверить обновления.", "Failed to check for updates."))
+                self._show_error(self._t("Updates"), self._t("Failed to check for updates."))
             return
 
         status = str(release.get("status", "error"))
@@ -9676,17 +9703,17 @@ class MainWindow(QMainWindow):
         if manual:
             if status == "up-to-date":
                 self._show_info(
-                    self._t("Обновления", "Updates"),
+                    self._t("Updates"),
                     self._t(
                         f"У вас уже установлена последняя версия: {release.get('current_version', '')}.",
                         f"You already have the latest version: {release.get('current_version', '')}.",
                     ),
                 )
             else:
-                message = str(release.get("error", self._t("Не удалось проверить обновления.", "Failed to check for updates.")))
-                self._add_notification("error", self._t("Обновления", "Updates"), message, source="updates")
+                message = str(release.get("error", self._t("Failed to check for updates.")))
+                self._add_notification("error", self._t("Updates"), message, source="updates")
                 self._show_error(
-                    self._t("Обновления", "Updates"),
+                    self._t("Updates"),
                     message,
                 )
 
@@ -9700,8 +9727,8 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
             return
-        dialog = AppDialog(self, self.context, self._t("Обновления", "Updates"))
-        label = QLabel(self._t("Проверка обновлений...", "Checking for updates..."))
+        dialog = AppDialog(self, self.context, self._t("Updates"))
+        label = QLabel(self._t("Checking for updates..."))
         label.setWordWrap(True)
         dialog.body_layout.addWidget(label)
         dialog.prepare_and_center()
@@ -9738,7 +9765,7 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
             return
-        dialog = AppDialog(self, self.context, self._t("Обновления", "Updates"))
+        dialog = AppDialog(self, self.context, self._t("Updates"))
         label = QLabel(text)
         label.setWordWrap(True)
         dialog.body_layout.addWidget(label)
@@ -9763,7 +9790,7 @@ class MainWindow(QMainWindow):
 
     def _show_update_prompt(self, release: dict[str, str]) -> None:
         is_hotfix = bool(release.get("is_hotfix"))
-        dialog = AppDialog(self, self.context, self._t("Доступен hotfix", "Hotfix available") if is_hotfix else self._t("Доступно обновление", "Update available"))
+        dialog = AppDialog(self, self.context, self._t("Hotfix available") if is_hotfix else self._t("Update available"))
         if is_hotfix:
             message_text_ru = (
                 "Доступна обновленная сборка текущей версии Zapret-Zen.\n\n"
@@ -9825,7 +9852,7 @@ class MainWindow(QMainWindow):
             version = str(item.get("version", "")).strip()
             title = version
             if bool(item.get("is_latest")):
-                title = f"{version} · {self._t('последняя', 'latest')}"
+                title = f"{version} · {self._t('latest')}"
             if bool(item.get("is_hotfix")):
                 title = f"{version} · hotfix"
             row_item = QListWidgetItem(title)
@@ -9860,21 +9887,21 @@ class MainWindow(QMainWindow):
             _render_release(release_list[0])
         dialog.body_layout.addWidget(body_shell)
 
-        next_launch_checkbox = QCheckBox(self._t("Обновить при следующем запуске", "Update on next launch"))
+        next_launch_checkbox = QCheckBox(self._t("Update on next launch"))
         next_launch_checkbox.setChecked(bool(self.context.settings.get().apply_update_on_next_launch))
         dialog.body_layout.addWidget(next_launch_checkbox)
 
         row = QHBoxLayout()
         row.addStretch(1)
-        close_btn = QPushButton(self._t("Закрыть", "Close"))
-        link_btn = QPushButton(self._t("Открыть ссылку", "Open link"))
-        update_btn = QPushButton(self._t("Обновить сейчас", "Update now"))
+        close_btn = QPushButton(self._t("Close"))
+        link_btn = QPushButton(self._t("Open link"))
+        update_btn = QPushButton(self._t("Update now"))
         update_btn.setProperty("class", "primary")
         self._attach_button_animations(close_btn)
         self._attach_button_animations(link_btn)
         self._attach_button_animations(update_btn)
         def _sync_update_button() -> None:
-            update_btn.setText(self._t("Применить", "Apply") if next_launch_checkbox.isChecked() else self._t("Обновить сейчас", "Update now"))
+            update_btn.setText(self._t("Apply") if next_launch_checkbox.isChecked() else self._t("Update now"))
         _sync_update_button()
         next_launch_checkbox.toggled.connect(lambda _checked=False: _sync_update_button())
         close_btn.clicked.connect(dialog.reject)
@@ -9912,8 +9939,8 @@ class MainWindow(QMainWindow):
             self.context.settings.update(apply_update_on_next_launch=False)
         if self._update_prepare_dialog is not None:
             return
-        dialog = AppDialog(self, self.context, self._t("Подготовка обновления", "Preparing update"))
-        label = QLabel(self._t("Скачиваем и подготавливаем новую версию. Приложение перезапустится автоматически.", "Downloading and preparing the new version. The app will restart automatically."))
+        dialog = AppDialog(self, self.context, self._t("Preparing update"))
+        label = QLabel(self._t("Downloading and preparing the new version. The app will restart automatically."))
         label.setWordWrap(True)
         dialog.body_layout.addWidget(label)
         bar = QProgressBar()
@@ -9944,27 +9971,27 @@ class MainWindow(QMainWindow):
             self._update_prepare_dialog.accept()
             self._update_prepare_dialog = None
         if not isinstance(payload, dict) or not payload.get("ok"):
-            message = str((payload or {}).get("error", self._t("Не удалось подготовить обновление.", "Failed to prepare the update."))) if isinstance(payload, dict) else self._t("Не удалось подготовить обновление.", "Failed to prepare the update.")
-            self._add_notification("error", self._t("Обновления", "Updates"), message, source="updates")
+            message = str((payload or {}).get("error", self._t("Failed to prepare the update."))) if isinstance(payload, dict) else self._t("Failed to prepare the update.")
+            self._add_notification("error", self._t("Updates"), message, source="updates")
             self._show_error(
-                self._t("Обновления", "Updates"),
+                self._t("Updates"),
                 message,
             )
             return
         prepared = payload.get("prepared")
         if not isinstance(prepared, dict):
-            self._show_error(self._t("Обновления", "Updates"), self._t("Некорректный пакет обновления.", "Invalid update package."))
+            self._show_error(self._t("Updates"), self._t("Invalid update package."))
             return
         try:
             self.context.updates.launch_update(prepared)
         except Exception as error:
-            self._add_notification("error", self._t("Обновления", "Updates"), str(error), source="updates")
-            self._show_error(self._t("Обновления", "Updates"), str(error))
+            self._add_notification("error", self._t("Updates"), str(error), source="updates")
+            self._show_error(self._t("Updates"), str(error))
             return
         self._add_notification(
             "success",
-            self._t("Обновления", "Updates"),
-            self._t("Обновление подготовлено, приложение перезапускается.", "Update is prepared, restarting the app."),
+            self._t("Updates"),
+            self._t("Update is prepared, restarting the app."),
             source="updates",
         )
         self._quit_for_update()
@@ -9976,7 +10003,7 @@ class MainWindow(QMainWindow):
             + (f" ({item.message})" if getattr(item, "message", "") else "")
             for item in results
         )
-        self._show_info(self._t("Диагностика", "Diagnostics"), text or self._t("Нет данных диагностики.", "No diagnostics data."))
+        self._show_info(self._t("Diagnostics"), text or self._t("No diagnostics data."))
 
     def _load_selected_file(self, *_args: object) -> None:
         full_path = self._selected_file_path()
@@ -9992,7 +10019,7 @@ class MainWindow(QMainWindow):
     def _save_current_file(self) -> None:
         full_path = self._selected_file_path()
         if not full_path:
-            self._show_info(self._t("Файлы", "Files"), self._t("Выберите файл перед сохранением.", "Select a file before saving."))
+            self._show_info(self._t("Files"), self._t("Select a file before saving."))
             return
         self._submit_backend_task(
             "write_file_text",
@@ -10353,7 +10380,7 @@ class MainWindow(QMainWindow):
     def _rename_current_file(self) -> None:
         full_path = self._selected_file_path()
         if not full_path:
-            self._show_info(self._t("Файлы", "Files"), self._t("Выберите файл перед переименованием.", "Select a file before renaming."))
+            self._show_info(self._t("Files"), self._t("Select a file before renaming."))
             return
         path = Path(full_path)
         new_name, ok = QInputDialog.getText(self, "Rename file", "New file name:", text=path.name)
@@ -10364,7 +10391,7 @@ class MainWindow(QMainWindow):
             return
         target = path.with_name(new_name)
         if target.exists():
-            self._show_warning(self._t("Файлы", "Files"), self._t("Файл с таким именем уже существует.", "A file with this name already exists."))
+            self._show_warning(self._t("Files"), self._t("A file with this name already exists."))
             return
         try:
             path.rename(target)
@@ -10373,7 +10400,7 @@ class MainWindow(QMainWindow):
             self._request_page_refresh("files")
             self.refresh_logs()
         except Exception as error:
-            self._show_error(self._t("Файлы", "Files"), f"{self._t('Не удалось переименовать файл', 'Failed to rename file')}:\n{error}")
+            self._show_error(self._t("Files"), f"{self._t('Failed to rename file')}:\n{error}")
 
     def schedule_refresh_all(self) -> None:
         self._refresh_dirty_sections.update({"dashboard", "services", "components", "mods", "files", "logs", "tray"})
@@ -10644,10 +10671,10 @@ class MainWindow(QMainWindow):
             if self.power_aura is not None:
                 self.power_aura.set_idle_pulse_enabled(False)
                 self.power_aura.set_status_glow_enabled(True)
-            self._set_badge("app", self._t("Загрузка", "Loading"), "status_warn.svg")
-            self._set_badge("zapret", self._t("Загрузка", "Loading"), "status_warn.svg")
-            self._set_badge("tg", self._t("Загрузка", "Loading"), "status_warn.svg")
-            self._set_badge("mods", self._t("Загрузка", "Loading"), "status_mod.svg")
+            self._set_badge("app", self._t("Loading"), "status_warn.svg")
+            self._set_badge("zapret", self._t("Loading"), "status_warn.svg")
+            self._set_badge("tg", self._t("Loading"), "status_warn.svg")
+            self._set_badge("mods", self._t("Loading"), "status_mod.svg")
             return
         if self.general_combo.isVisible():
             self._refresh_general_combo(settings.selected_zapret_general)
@@ -10672,13 +10699,13 @@ class MainWindow(QMainWindow):
 
         enabled_mods = list(settings.enabled_mod_ids or [])
 
-        self._set_badge("app", self._t("Работает", "Running") if fully_running else (self._t("Частично", "Partial") if any_running else self._t("Ожидание", "Idle")), "status_ok.svg" if fully_running else ("status_warn.svg" if any_running else "status_off.svg"))
+        self._set_badge("app", self._t("Running") if fully_running else (self._t("Partial") if any_running else self._t("Idle")), "status_ok.svg" if fully_running else ("status_warn.svg" if any_running else "status_off.svg"))
         zapret_text, zapret_icon = self._component_badge_state(components.get("zapret"), zapret_state, any_running)
         self._set_badge_title("zapret", "Zapret")
         tg_text, tg_icon = self._component_badge_state(components.get("tg-ws-proxy"), tg_state, any_running)
         self._set_badge("zapret", zapret_text, zapret_icon)
         self._set_badge("tg", tg_text, tg_icon)
-        self._set_badge("mods", f"{len(enabled_mods)} {self._t('Активно', 'Active')}", "status_mod.svg")
+        self._set_badge("mods", f"{len(enabled_mods)} {self._t('Active')}", "status_mod.svg")
 
     def _power_status_palette(self, state: str) -> tuple[str, str, int]:
         theme = self.context.settings.get().theme
@@ -10780,12 +10807,12 @@ class MainWindow(QMainWindow):
         last_error = str(getattr(state, "last_error", "") or "").strip()
         enabled = bool(getattr(component, "enabled", False))
         if status == "running":
-            return self._t("Работает", "Running"), "status_ok.svg"
+            return self._t("Running"), "status_ok.svg"
         if last_error or (enabled and any_running):
-            return self._t("Ошибка", "Error") if last_error else self._t("Не Запущен", "Not Running"), "status_warn.svg"
+            return self._t("Error") if last_error else self._t("Not Running"), "status_warn.svg"
         if status == "stopped":
-            return self._t("Остановлен", "Stopped"), "status_off.svg"
-        return self._t("Неизвестно", "Unknown"), "status_off.svg"
+            return self._t("Stopped"), "status_off.svg"
+        return self._t("Unknown"), "status_off.svg"
 
     def _refresh_general_combo(self, selected_id: str) -> None:
         options = self._general_options_for_current_service_tests(self._sorted_general_options())
@@ -10870,9 +10897,9 @@ class MainWindow(QMainWindow):
         button.setIcon(self._icon("star_filled.svg" if favorite else "star_outline.svg"))
         button.setIconSize(QSize(16, 16))
         button.setToolTip(
-            self._t("Убрать из избранного", "Remove from favorites")
+            self._t("Remove from favorites")
             if favorite
-            else self._t("Добавить в избранное", "Add to favorites")
+            else self._t("Add to favorites")
         )
 
     def _toggle_general_favorite_from_button(self, general_id: str, button: QToolButton) -> None:
@@ -10924,7 +10951,7 @@ class MainWindow(QMainWindow):
                     self._pages_shell.setVisible(False)
                 if self._sidebar_widget is not None:
                     self._sidebar_widget.setVisible(False)
-                if self._notifications_btn is not None:
+                if getattr(self, "_notifications_btn", None) is not None:
                     self._notifications_btn.setVisible(False)
             else:
                 self._reset_onboarding_intro_state()
@@ -10953,7 +10980,7 @@ class MainWindow(QMainWindow):
                 self._content_surface_layout.setSpacing(8)
         if self._sidebar_widget is not None:
             self._sidebar_widget.setVisible(not visible)
-        if self._notifications_btn is not None:
+        if getattr(self, "_notifications_btn", None) is not None:
             self._notifications_btn.setVisible(not visible)
         if not visible and self._onboarding_service_action_btn is not None:
             self._onboarding_service_action_btn.hide()
@@ -11118,7 +11145,7 @@ class MainWindow(QMainWindow):
         if token is not None and token != self._onboarding_transition_token:
             return
         if self._onboarding_title_label is not None:
-            self._onboarding_title_label.setText(self._t("Выберите сервисы", "Choose services"))
+            self._onboarding_title_label.setText(self._t("Choose services"))
         if self._onboarding_desc_label is not None:
             self._onboarding_desc_label.setText(
                 self._t(
@@ -11129,7 +11156,7 @@ class MainWindow(QMainWindow):
         if self._onboarding_services_panel is not None:
             self._onboarding_services_panel.show()
         if self._onboarding_primary_btn is not None:
-            self._onboarding_primary_btn.setText(self._t("Продолжить", "Continue"))
+            self._onboarding_primary_btn.setText(self._t("Continue"))
         if self._onboarding_actions_widget is not None:
             self._onboarding_actions_widget.hide()
         if self._onboarding_service_action_btn is not None:
@@ -11138,14 +11165,14 @@ class MainWindow(QMainWindow):
             self._onboarding_service_action_btn.set_selection_state(
                 len(self._selected_service_ids()),
                 self._onboarding_services_minimum,
-                text=self._t("Продолжить", "Continue"),
+                text=self._t("Continue"),
             )
             self._onboarding_service_action_btn.show()
             self._position_onboarding_service_action()
             self._onboarding_service_action_btn.raise_()
         if self._onboarding_secondary_btn is not None:
             self._onboarding_secondary_btn.hide()
-            self._onboarding_secondary_btn.setText(self._t("Пропустить", "Skip"))
+            self._onboarding_secondary_btn.setText(self._t("Skip"))
         self._update_service_selection_summary()
         self._sync_onboarding_back_button_visibility()
 
@@ -11160,7 +11187,7 @@ class MainWindow(QMainWindow):
         button.set_selection_state(
             len(self._selected_service_ids()),
             self._onboarding_services_minimum,
-            text=self._t("Продолжить", "Continue"),
+            text=self._t("Continue"),
         )
         self._position_onboarding_service_action()
         button.raise_()
@@ -11186,7 +11213,7 @@ class MainWindow(QMainWindow):
             self._onboarding_result_stage_panel.hide()
         legacy_seen = self._legacy_onboarding_seen() and not self._onboarding_seen() and not self._onboarding_manual_restart
         if self._onboarding_intro_title_label is not None:
-            self._onboarding_intro_title_label.setText(self._t("Приложение обновилось", "The app has been updated") if legacy_seen else self._t("Добро пожаловать", "Welcome"))
+            self._onboarding_intro_title_label.setText(self._t("The app has been updated") if legacy_seen else self._t("Welcome"))
         if self._onboarding_intro_desc_label is not None:
             self._onboarding_intro_desc_label.setText(
                 self._t(
@@ -11215,14 +11242,14 @@ class MainWindow(QMainWindow):
         if self._onboarding_result_actions_widget is not None:
             self._onboarding_result_actions_widget.hide()
         if self._onboarding_result_primary_btn is not None:
-            self._onboarding_result_primary_btn.setText(self._t("Далее", "Next"))
+            self._onboarding_result_primary_btn.setText(self._t("Next"))
         if self._onboarding_primary_btn is not None:
             self._onboarding_primary_btn.setEnabled(True)
             self._onboarding_primary_btn.setVisible(True)
-            self._onboarding_primary_btn.setText(self._t("Далее", "Next"))
+            self._onboarding_primary_btn.setText(self._t("Next"))
         if self._onboarding_secondary_btn is not None:
             self._onboarding_secondary_btn.hide()
-            self._onboarding_secondary_btn.setText(self._t("Пропустить", "Skip"))
+            self._onboarding_secondary_btn.setText(self._t("Skip"))
         if self._onboarding_actions_widget is not None:
             self._onboarding_actions_widget.show()
         if self._onboarding_service_action_btn is not None:
@@ -11412,7 +11439,7 @@ class MainWindow(QMainWindow):
         if token is not None and self._onboarding_back_btn is not None:
             self._onboarding_back_btn.hide()
         if self._onboarding_running_title_label is not None:
-            self._onboarding_running_title_label.setText(self._t("Подбор конфигурации", "Selecting configuration"))
+            self._onboarding_running_title_label.setText(self._t("Selecting configuration"))
         if self._onboarding_running_desc_label is not None:
             self._onboarding_running_desc_label.setText(
                 self._t(
@@ -11421,7 +11448,7 @@ class MainWindow(QMainWindow):
                 )
             )
         if self._onboarding_progress_label is not None:
-            self._onboarding_progress_label.setText(self._t("Подготовка...", "Preparing..."))
+            self._onboarding_progress_label.setText(self._t("Preparing..."))
             self._onboarding_progress_label.show()
         if self._onboarding_progress_counter_label is not None:
             self._onboarding_progress_counter_label.setText("")
@@ -11450,9 +11477,9 @@ class MainWindow(QMainWindow):
                 return
             if self._onboarding_result_title_label is not None:
                 self._onboarding_result_title_label.setText(
-                    self._t("Настройка завершена", "Setup complete")
+                    self._t("Setup complete")
                     if success
-                    else self._t("Настройка не завершена", "Setup was not completed")
+                    else self._t("Setup was not completed")
                 )
             if self._onboarding_result_desc_label is not None:
                 if success:
@@ -11492,7 +11519,7 @@ class MainWindow(QMainWindow):
             if self._onboarding_result_primary_btn is not None:
                 self._onboarding_result_primary_btn.setEnabled(True)
                 self._onboarding_result_primary_btn.setVisible(True)
-                self._onboarding_result_primary_btn.setText(self._t("Далее", "Next") if success else self._t("Продолжить", "Continue"))
+                self._onboarding_result_primary_btn.setText(self._t("Next") if success else self._t("Continue"))
             if self._onboarding_secondary_btn is not None:
                 self._onboarding_secondary_btn.hide()
         self._run_onboarding_transition(
@@ -11641,7 +11668,7 @@ class MainWindow(QMainWindow):
                 action_id="__services_selection__",
             )
         except Exception as error:
-            self._show_error(self._t("Сервисы", "Services"), str(error))
+            self._show_error(self._t("Services"), str(error))
 
     def _set_selected_service_ids(self, service_ids: list[str] | tuple[str, ...] | set[str]) -> None:
         current = self._selected_service_ids()
@@ -11695,7 +11722,7 @@ class MainWindow(QMainWindow):
             self._onboarding_service_action_btn.set_selection_state(
                 cat_count,
                 self._onboarding_services_minimum,
-                text=self._t("Продолжить", "Continue"),
+                text=self._t("Continue"),
             )
             self._position_onboarding_service_action()
 
@@ -11822,7 +11849,7 @@ class MainWindow(QMainWindow):
                     self._onboarding_progress_bar.hide()
                 if self._onboarding_actions_widget is not None:
                     self._onboarding_actions_widget.show()
-            self._show_info(self._t("Подобрать конфигурацию", "Find best configuration"), self._t("Список конфигураций пока пуст.", "The configuration list is empty."))
+            self._show_info(self._t("Find best configuration"), self._t("The configuration list is empty."))
             return
 
         self._general_test_running = True
@@ -11851,7 +11878,7 @@ class MainWindow(QMainWindow):
             self._prepare_general_test_runtime_before_run()
             return
 
-        dialog = AppDialog(self, self.context, self._t("Подобрать конфигурацию", "Find best configuration"))
+        dialog = AppDialog(self, self.context, self._t("Find best configuration"))
         title = QLabel(
             self._t(
                 "Сейчас приложение по очереди проверит все доступные конфигурации и посмотрит, какие из них действительно дают подключение ко всем тестовым серверам. Этот процесс может занять много времени.",
@@ -11860,10 +11887,10 @@ class MainWindow(QMainWindow):
         )
         title.setWordWrap(True)
         dialog.body_layout.addWidget(title)
-        status = QLabel(self._t("Подготовка...", "Preparing..."))
+        status = QLabel(self._t("Preparing..."))
         status.setProperty("class", "muted")
         dialog.body_layout.addWidget(status)
-        eta = QLabel(self._t("Расчёт времени...", "Estimating time..."))
+        eta = QLabel(self._t("Estimating time..."))
         eta.setProperty("class", "muted")
         dialog.body_layout.addWidget(eta)
         bar = QProgressBar()
@@ -11925,11 +11952,11 @@ class MainWindow(QMainWindow):
             self._general_test_embedded = False
             self._onboarding_running = False
             if self._onboarding_progress_label is not None:
-                self._onboarding_progress_label.setText(self._t("Подбор конфигурации остановлен.", "Configuration selection stopped."))
+                self._onboarding_progress_label.setText(self._t("Configuration selection stopped."))
             if self._onboarding_primary_btn is not None:
                 self._onboarding_primary_btn.setEnabled(True)
                 self._onboarding_primary_btn.setVisible(True)
-                self._onboarding_primary_btn.setText(self._t("Далее", "Next"))
+                self._onboarding_primary_btn.setText(self._t("Next"))
             if self._onboarding_actions_widget is not None:
                 self._onboarding_actions_widget.show()
         self._mark_dirty("dashboard", "components", "tray")
@@ -12004,7 +12031,7 @@ class MainWindow(QMainWindow):
         if self._general_test_eta_label is None or self._general_test_total <= 0:
             return
         if self._general_test_started_at <= 0:
-            self._general_test_eta_label.setText(self._t("Расчёт времени...", "Estimating time..."))
+            self._general_test_eta_label.setText(self._t("Estimating time..."))
             return
         if self._general_test_running and self._general_test_remaining_budget_seconds > 0:
             self._general_test_remaining_budget_seconds = max(0, self._general_test_remaining_budget_seconds - 1)
@@ -12042,7 +12069,7 @@ class MainWindow(QMainWindow):
                 if self._general_test_embedded:
                     results = list(self._general_test_results)
                 else:
-                    dialog = AppDialog(self, self.context, self._t("Конфигурация найдена", "Working configuration found"))
+                    dialog = AppDialog(self, self.context, self._t("Working configuration found"))
                     label = QLabel(
                         self._t(
                             "Найдена полностью рабочая конфигурация. Остановиться и использовать её или продолжить проверку остальных?",
@@ -12053,8 +12080,8 @@ class MainWindow(QMainWindow):
                     dialog.body_layout.addWidget(label)
                     row = QHBoxLayout()
                     row.addStretch(1)
-                    stop_btn = QPushButton(self._t("Использовать найденный", "Use found config"))
-                    cont_btn = QPushButton(self._t("Проверить остальные", "Check the rest"))
+                    stop_btn = QPushButton(self._t("Use found config"))
+                    cont_btn = QPushButton(self._t("Check the rest"))
                     stop_btn.setProperty("class", "primary")
                     stop_btn.clicked.connect(dialog.accept)
                     cont_btn.clicked.connect(dialog.reject)
@@ -12131,7 +12158,7 @@ class MainWindow(QMainWindow):
                 if not best_working_id:
                     best_working_id = str(raw.get("id", ""))
             else:
-                error_text = str(raw.get("error", "")).strip() or self._t("не удалось запустить", "failed to start")
+                error_text = str(raw.get("error", "")).strip() or self._t("failed to start")
                 failed.append(f"{label} - {error_text}")
 
         chosen_id = best_working_id or best_id
@@ -12171,35 +12198,35 @@ class MainWindow(QMainWindow):
             self._mark_dirty("dashboard", "components", "tray")
             return
 
-        dialog = AppDialog(self, self.context, self._t("Результаты проверки", "Test results"))
-        title = QLabel(self._t("Проверка завершена.", "Testing is complete."))
+        dialog = AppDialog(self, self.context, self._t("Test results"))
+        title = QLabel(self._t("Testing is complete."))
         title.setProperty("class", "title")
         dialog.body_layout.addWidget(title)
         summary = QTextEdit()
         summary.setReadOnly(True)
         summary.setMinimumHeight(260)
         summary.setPlainText(
-            f"{self._t('Работают:', 'Working:')}\n"
-            + ("\n".join(working) if working else self._t("Нет полностью работающих конфигураций.", "No fully working configurations."))
+            f"{self._t('Working:')}\n"
+            + ("\n".join(working) if working else self._t("No fully working configurations."))
             + "\n\n"
             + (
-                f"{self._t('Лучший результат:', 'Best result:')}\n{best_label} ({best_score}/{best_total})\n\n"
+                f"{self._t('Best result:')}\n{best_label} ({best_score}/{best_total})\n\n"
                 if not working and best_label
                 else ""
             )
             + (
-                f"{self._t('Применено автоматически:', 'Applied automatically:')}\n"
+                f"{self._t('Applied automatically:')}\n"
                 f"{self._format_general_option_label(next((item for item in self._sorted_general_options() if item['id'] == chosen_id), {'id': chosen_id, 'bundle': '', 'name': chosen_id}))}\n\n"
                 if auto_applied and chosen_id
                 else ""
             )
-            + f"{self._t('Не работают или дают ошибку:', 'Not working or failed:')}\n"
-            + ("\n".join(failed) if failed else self._t("Ошибок не обнаружено.", "No failed configurations."))
+            + f"{self._t('Not working or failed:')}\n"
+            + ("\n".join(failed) if failed else self._t("No failed configurations."))
         )
         dialog.body_layout.addWidget(summary)
         row = QHBoxLayout()
         row.addStretch(1)
-        ok_btn = QPushButton(self._t("Ок", "OK"))
+        ok_btn = QPushButton(self._t("OK"))
         ok_btn.setProperty("class", "primary")
         self._attach_button_animations(ok_btn)
         ok_btn.clicked.connect(dialog.accept)
@@ -12229,7 +12256,7 @@ class MainWindow(QMainWindow):
         dialog.body_layout.addWidget(label)
         row = QHBoxLayout()
         row.addStretch(1)
-        ok_btn = QPushButton(self._t("Ок", "OK"))
+        ok_btn = QPushButton(self._t("OK"))
         ok_btn.setProperty("class", "primary")
         self._attach_button_animations(ok_btn)
         ok_btn.clicked.connect(dialog.accept)
@@ -12264,8 +12291,8 @@ class MainWindow(QMainWindow):
         dialog.body_layout.addWidget(field)
         row = QHBoxLayout()
         row.addStretch(1)
-        cancel_btn = QPushButton(self._t("Отмена", "Cancel"))
-        ok_btn = QPushButton(self._t("Загрузить", "Load"))
+        cancel_btn = QPushButton(self._t("Cancel"))
+        ok_btn = QPushButton(self._t("Load"))
         ok_btn.setProperty("class", "primary")
         self._attach_button_animations(cancel_btn)
         self._attach_button_animations(ok_btn)
@@ -12286,8 +12313,8 @@ class MainWindow(QMainWindow):
         dialog.body_layout.addWidget(label)
         row = QHBoxLayout()
         row.addStretch(1)
-        no_btn = QPushButton(self._t("Нет", "No"))
-        yes_btn = QPushButton(self._t("Да", "Yes"))
+        no_btn = QPushButton(self._t("No"))
+        yes_btn = QPushButton(self._t("Yes"))
         yes_btn.setProperty("class", "primary")
         self._attach_button_animations(no_btn)
         self._attach_button_animations(yes_btn)
@@ -12363,7 +12390,7 @@ class MainWindow(QMainWindow):
                 if widget is not None:
                     widget.deleteLater()
             loading, loading_layout = self._card()
-            loading_title = QLabel(self._t("Компоненты загружаются", "Components are loading"))
+            loading_title = QLabel(self._t("Components are loading"))
             loading_title.setProperty("class", "title")
             loading_text = QLabel(
                 self._t(
@@ -12380,8 +12407,8 @@ class MainWindow(QMainWindow):
         for component in components:
             state = states.get(component.id)
             status_text = state.status if state else "stopped"
-            subtitle = f"{self._t('Версия', 'Version')}: {component.version} | {self._t('Включен', 'Enabled')}: {self._t('да', 'yes') if component.enabled else self._t('нет', 'no')} | {self._t('Автозапуск', 'Autostart')}: {self._t('да', 'yes') if component.autostart else self._t('нет', 'no')} | {self._t('Статус', 'Status')}: {status_text}"
-            source = f"{self._t('Источник', 'Source')}: {component.source}"
+            subtitle = f"{self._t('Version')}: {component.version} | {self._t('Enabled')}: {self._t('yes') if component.enabled else self._t('no')} | {self._t('Autostart')}: {self._t('yes') if component.autostart else self._t('no')} | {self._t('Status')}: {status_text}"
+            source = f"{self._t('Source')}: {component.source}"
             display_name = {"zapret": "Zapret", "dns-manager": "DNS Manager", "tg-ws-proxy": "Tg-Ws-Proxy"}.get(component.id, component.name)
             item = QListWidgetItem(f"{display_name}\n{subtitle}\n{source}")
             item.setData(Qt.ItemDataRole.UserRole, component.id)
@@ -12398,7 +12425,7 @@ class MainWindow(QMainWindow):
 
         if not components:
             empty, empty_layout = self._card()
-            empty_title = QLabel(self._t("Компоненты пока недоступны", "Components are currently unavailable"))
+            empty_title = QLabel(self._t("Components are currently unavailable"))
             empty_title.setProperty("class", "title")
             empty_text = QLabel(
                 self._t(
@@ -12467,7 +12494,7 @@ class MainWindow(QMainWindow):
                 settings_icon_btn.setIconSize(QSize(16, 16))
                 settings_icon_btn.setFixedSize(30, 30)
                 settings_icon_btn.setToolTip(
-                    self._t("Настройки TG WS Proxy", "TG WS Proxy settings")
+                    self._t("TG WS Proxy settings")
                 )
                 settings_icon_btn.setEnabled(True)
                 settings_icon_btn.clicked.connect(lambda _=False, cid=component.id: self._open_component_settings(cid))
@@ -12479,7 +12506,7 @@ class MainWindow(QMainWindow):
                 source_icon_btn.setIcon(self._icon("external.svg"))
                 source_icon_btn.setIconSize(QSize(16, 16))
                 source_icon_btn.setFixedSize(30, 30)
-                source_icon_btn.setToolTip(self._t("Источник", "Source"))
+                source_icon_btn.setToolTip(self._t("Source"))
                 source_icon_btn.clicked.connect(lambda _=False, url=component.source: self._open_update_link(url))
                 self._attach_button_animations(source_icon_btn)
                 icon_row.addWidget(source_icon_btn, 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop)
@@ -12489,9 +12516,9 @@ class MainWindow(QMainWindow):
                 update_icon_btn.setIconSize(QSize(16, 16))
                 update_icon_btn.setFixedSize(30, 30)
                 update_icon_btn.setToolTip(
-                    self._t("Обновить Zapret", "Update Zapret")
+                    self._t("Update Zapret")
                     if component.id == "zapret"
-                    else self._t("Обновить TG WS Proxy", "Update TG WS Proxy")
+                    else self._t("Update TG WS Proxy")
                 )
                 update_icon_btn.clicked.connect(
                     self._update_zapret_runtime if component.id == "zapret" else self._update_tg_ws_proxy_runtime
@@ -12513,22 +12540,22 @@ class MainWindow(QMainWindow):
 
             source_author = "Flowseal" if component.id in {"zapret", "tg-ws-proxy"} else (component.source.rstrip("/").split("/")[-1] if "/" in component.source else component.source)
             details = QLabel(
-                f"{self._t('Автор', 'Author')}: {source_author}\n"
-                f"{self._t('Статус', 'Status')}: {status_text}\n"
-                f"{self._t('Версия', 'Version')}: {component.version}"
+                f"{self._t('Author')}: {source_author}\n"
+                f"{self._t('Status')}: {status_text}\n"
+                f"{self._t('Version')}: {component.version}"
             )
             details.setProperty("class", "muted")
             details.setWordWrap(True)
             card_layout.addWidget(details)
 
-            enabled_text = self._t("включен", "enabled") if component.enabled else self._t("выключен", "disabled")
-            participation = QLabel(f"{self._t('Участие в ON/OFF', 'ON/OFF participation')}: {enabled_text}")
+            enabled_text = self._t("enabled") if component.enabled else self._t("disabled")
+            participation = QLabel(f"{self._t('ON/OFF participation')}: {enabled_text}")
             participation.setWordWrap(True)
             card_layout.addWidget(participation)
             if component.id == "zapret":
                 if not self._sorted_general_options() and general_options_from_payload:
                     self._general_options_cache = general_options_from_payload
-                config_label = QLabel(self._t("Конфигурация Zapret", "Zapret Configuration"))
+                config_label = QLabel(self._t("Zapret Configuration"))
                 config_label.setProperty("class", "muted")
                 card_layout.addWidget(config_label)
                 config_combo = ClickSelectComboBox()
@@ -12540,7 +12567,7 @@ class MainWindow(QMainWindow):
                 for option in options:
                     config_combo.addItem(self._format_general_option_label(option), option["id"])
                 if config_combo.count() == 0:
-                    config_combo.addItem(self._t("Конфигурации загружаются", "Configurations are loading"), "")
+                    config_combo.addItem(self._t("Configurations are loading"), "")
                     config_combo.setEnabled(False)
                     try:
                         self._submit_backend_task("load_components_payload")
@@ -12589,21 +12616,21 @@ class MainWindow(QMainWindow):
                 telegram_link.setProperty("class", "muted")
                 link_color = "#2563eb" if is_light_theme(self.context.settings.get().theme) else "#60a5fa"
                 telegram_link.setText(
-                    f'<a style="color:{link_color};" href="tg-download://telegram-desktop">{self._t("Скачать Telegram Desktop", "Download Telegram Desktop")}</a>'
+                    f'<a style="color:{link_color};" href="tg-download://telegram-desktop">{self._t("Download Telegram Desktop")}</a>'
                 )
                 telegram_link.setTextFormat(Qt.TextFormat.RichText)
                 telegram_link.setTextInteractionFlags(Qt.TextInteractionFlag.TextBrowserInteraction)
                 telegram_link.setOpenExternalLinks(False)
                 telegram_link.linkActivated.connect(self._open_external_url)
                 card_layout.addWidget(telegram_link)
-                connect_btn = QPushButton(self._t("Подключить к Telegram", "Connect to Telegram"))
+                connect_btn = QPushButton(self._t("Connect to Telegram"))
                 connect_btn.clicked.connect(self._prompt_tg_proxy_connect)
                 self._attach_button_animations(connect_btn)
                 card_layout.addWidget(connect_btn)
 
             if component.id == "dns-manager":
                 dns_presets = self._dns_presets_cache
-                config_label = QLabel(self._t("DNS сервер", "DNS Server"))
+                config_label = QLabel(self._t("DNS Server"))
                 config_label.setProperty("class", "muted")
                 card_layout.addWidget(config_label)
                 dns_combo = ClickSelectComboBox()
@@ -12611,7 +12638,7 @@ class MainWindow(QMainWindow):
                 config_status.setProperty("class", "muted")
                 config_status.hide()
                 selected = self.context.settings.get().selected_dns_preset
-                dns_combo.addItem(self._t("Не выбран", "Not selected"), "")
+                dns_combo.addItem(self._t("Not selected"), "")
                 for preset in dns_presets:
                     name = str(preset.get("name", preset.get("id", "")))
                     pid = str(preset.get("id", ""))
@@ -12636,9 +12663,9 @@ class MainWindow(QMainWindow):
                 card_layout.addWidget(error_label)
 
             toggle_btn = QPushButton(
-                self._t("Выключить компонент", "Disable component")
+                self._t("Disable component")
                 if component.enabled
-                else self._t("Включить компонент", "Enable component")
+                else self._t("Enable component")
             )
             toggle_btn.setProperty("class", "danger" if component.enabled else "primary")
             toggle_btn.clicked.connect(lambda _=False, cid=component.id, btn=toggle_btn: self._toggle_component_card(cid, btn))
@@ -12653,9 +12680,9 @@ class MainWindow(QMainWindow):
 
     def _format_bytes(self, value: int) -> str:
         size = float(max(0, int(value)))
-        for unit in ("Б", "КБ", "МБ", "ГБ", "ТБ"):
-            if size < 1024.0 or unit == "ТБ":
-                return f"{size:.1f} {unit}" if unit != "Б" else f"{int(size)} {unit}"
+        for unit in ("B", "KB", "MB", "GB", "TB"):
+            if size < 1024.0 or unit == "TB":
+                return f"{size:.1f} {unit}" if unit != "B" else f"{int(size)} {unit}"
             size /= 1024.0
         return f"{int(value)} Б"
 
@@ -12671,8 +12698,8 @@ class MainWindow(QMainWindow):
             self._notify_telegram_proxy_status_from_payload({"telegram_proxy": self.context.processes.consume_telegram_proxy_launch_info() or {}})
         except Exception as error:
             self._show_error(
-                self._t("TG Proxy", "TG Proxy"),
-                f"{self._t('Не удалось открыть запрос на подключение в Telegram.', 'Failed to open Telegram connection prompt.')}\n{error}",
+                self._t("TG Proxy"),
+                f"{self._t('Failed to open Telegram connection prompt.')}\n{error}",
             )
 
     def _update_zapret_runtime(self) -> None:
@@ -12801,8 +12828,8 @@ class MainWindow(QMainWindow):
                     item.id,
                     item.name,
                     item.description,
-                    f"{self._t('Автор', 'Author')}: {item.author} | {self._t('Версия', 'Version')}: {item.version} | {self._t('Статус', 'Status')}: {state}",
-                    f"{self._t('Категория', 'Category')}: {item.category}",
+                    f"{self._t('Author')}: {item.author} | {self._t('Version')}: {item.version} | {self._t('Status')}: {state}",
+                    f"{self._t('Category')}: {item.category}",
                     state,
                 )
             )
@@ -12816,9 +12843,9 @@ class MainWindow(QMainWindow):
                 (
                     mod_id,
                     mod_id,
-                    self._t("Локальная модификация без пользовательского описания.", "Local modification without user description."),
-                    f"{self._t('Локальный импорт', 'Local import')} | {self._t('Версия', 'Version')}: {item.version} | {self._t('Статус', 'Status')}: {state}",
-                    f"{self._t('Тип', 'Type')}: {source_type}",
+                    self._t("Local modification without user description."),
+                    f"{self._t('Local import')} | {self._t('Version')}: {item.version} | {self._t('Status')}: {state}",
+                    f"{self._t('Type')}: {source_type}",
                     state,
                 )
             )
@@ -12947,9 +12974,9 @@ class MainWindow(QMainWindow):
         desktop_dir = Path.home() / "Desktop"
         default_dir = desktop_dir if desktop_dir.exists() else self.context.paths.install_root
         target_path = self._choose_save_file_dialog(
-            self._t("Сохранить ZIP модификации", "Save modification ZIP"),
+            self._t("Save modification ZIP"),
             str(default_dir / suggested_name),
-            self._t("ZIP архив (*.zip)", "ZIP archive (*.zip)"),
+            self._t("ZIP archive (*.zip)"),
         )
         if not target_path:
             self.context.logging.log("info", "Mod export cancelled", mod_id=mod_id)
@@ -12961,7 +12988,7 @@ class MainWindow(QMainWindow):
             archive_path = self.context.mods.export_mod(mod_id, target_path)
             self.context.logging.log("info", "Mod export finished", mod_id=mod_id, archive_path=str(archive_path))
             self._show_info(
-                self._t("Модификации", "Mods"),
+                self._t("Mods"),
                 self._t(
                     f"Модификация сохранена:\n{archive_path}",
                     f"Modification exported:\n{archive_path}",
@@ -12969,7 +12996,7 @@ class MainWindow(QMainWindow):
             )
         except Exception as error:
             self.context.logging.log("error", "Mod export failed", mod_id=mod_id, error=str(error))
-            self._show_error(self._t("Модификации", "Mods"), str(error))
+            self._show_error(self._t("Mods"), str(error))
 
     def _request_mod_export(self, mod_id: str) -> None:
         self.context.logging.log("info", "Mod export click dispatched", mod_id=mod_id)
@@ -12977,7 +13004,7 @@ class MainWindow(QMainWindow):
 
     def _remove_mod_with_confirmation(self, mod_id: str) -> None:
         if not self._ask_yes_no(
-            self._t("Удалить модификацию", "Delete modification"),
+            self._t("Delete modification"),
             self._t(
                 "Точно удалить эту модификацию? Это действие нельзя отменить.",
                 "Delete this modification? This action cannot be undone.",
@@ -12987,7 +13014,7 @@ class MainWindow(QMainWindow):
         try:
             self._submit_backend_task("remove_mod", {"mod_id": mod_id}, action_id=f"mod-remove:{mod_id}")
         except Exception as error:
-            self._show_error(self._t("Модификации", "Mods"), str(error))
+            self._show_error(self._t("Mods"), str(error))
 
     def refresh_mods(self, payload: object | None = None) -> None:
         def _field(obj: object, name: str, default: object = "") -> object:
@@ -13031,8 +13058,8 @@ class MainWindow(QMainWindow):
                 {
                     "id": mod_id,
                     "name": str(_field(indexed or installed_item, "name", mod_id) or mod_id),
-                    "description": str(_field(indexed or installed_item, "description", "") or self._t("Локальная модификация без описания.", "Local mod without description.")),
-                    "subtitle": f"{self._t('Автор', 'Author')}: {str(_field(indexed or installed_item, 'author', self._t('неизвестен', 'unknown')) or self._t('неизвестен', 'unknown'))} | {self._t('Версия', 'Version')}: {str(_field(installed_item, 'version', _field(indexed or installed_item, 'version', '')))}",
+                    "description": str(_field(indexed or installed_item, "description", "") or self._t("Local mod without description.")),
+                    "subtitle": f"{self._t('Author')}: {str(_field(indexed or installed_item, 'author', self._t('unknown')) or self._t('unknown'))} | {self._t('Version')}: {str(_field(installed_item, 'version', _field(indexed or installed_item, 'version', '')))}",
                     "state": state,
                     "enabled": enabled,
                     "changelog": str(_field(indexed or installed_item, "changelog", "") or ""),
@@ -13052,8 +13079,8 @@ class MainWindow(QMainWindow):
                 {
                     "id": item_id,
                     "name": str(_field(item, "name", item_id)),
-                    "description": str(_field(item, "description", "") or self._t("Описание не указано.", "No description.")),
-                    "subtitle": f"{self._t('Автор', 'Author')}: {str(_field(item, 'author', self._t('неизвестен', 'unknown')) or self._t('неизвестен', 'unknown'))} | {self._t('Версия', 'Version')}: {str(_field(item, 'version', ''))}",
+                    "description": str(_field(item, "description", "") or self._t("No description.")),
+                    "subtitle": f"{self._t('Author')}: {str(_field(item, 'author', self._t('unknown')) or self._t('unknown'))} | {self._t('Version')}: {str(_field(item, 'version', ''))}",
                     "state": "not installed",
                     "enabled": False,
                     "changelog": str(_field(item, "changelog", "") or ""),
@@ -13099,7 +13126,7 @@ class MainWindow(QMainWindow):
             empty, empty_layout = self._card()
             empty.setProperty("class", "modCard")
             empty_layout.setContentsMargins(14, 14, 14, 14)
-            title = QLabel(self._t("Пока пусто", "Nothing here yet"))
+            title = QLabel(self._t("Nothing here yet"))
             title.setProperty("class", "title")
             text = QLabel(
                 self._t(
@@ -13150,7 +13177,7 @@ class MainWindow(QMainWindow):
             icon_row.setContentsMargins(2, 2, 2, 2)
             icon_row.setSpacing(0)
             emoji_btn = EmojiBadgeButton(str(mod["emoji"]))
-            emoji_btn.setToolTip(self._t("Выбрать эмодзи", "Choose emoji"))
+            emoji_btn.setToolTip(self._t("Choose emoji"))
             emoji_btn.setFixedSize(48, 48)
             emoji_btn.setStyleSheet("border: none; background: transparent;")
             emoji_btn.setEmojiColor(palette_fg)
@@ -13179,9 +13206,9 @@ class MainWindow(QMainWindow):
             text_col.addWidget(title)
 
             state_map = {
-                "enabled": self._t("Включена", "Enabled"),
-                "installed": self._t("Выключена", "Disabled"),
-                "not installed": self._t("Еще не подключена", "Not added yet"),
+                "enabled": self._t("Enabled"),
+                "installed": self._t("Disabled"),
+                "not installed": self._t("Not added yet"),
             }
             badge = QLabel(state_map.get(state, state))
             badge.setProperty("class", "modState")
@@ -13200,12 +13227,12 @@ class MainWindow(QMainWindow):
             move_up = QToolButton()
             move_up.setProperty("class", "action")
             move_up.setArrowType(Qt.ArrowType.UpArrow)
-            move_up.setToolTip(self._t("Поднять выше", "Move up"))
+            move_up.setToolTip(self._t("Move up"))
             move_up.clicked.connect(lambda _=False, mid=mod_id: self._move_mod(mid, -1))
             move_down = QToolButton()
             move_down.setProperty("class", "action")
             move_down.setArrowType(Qt.ArrowType.DownArrow)
-            move_down.setToolTip(self._t("Опустить ниже", "Move down"))
+            move_down.setToolTip(self._t("Move down"))
             move_down.clicked.connect(lambda _=False, mid=mod_id: self._move_mod(mid, 1))
             installed_total = sum(1 for item in combined if bool(item.get("installed")))
             if bool(mod.get("installed")) and installed_total > 1:
@@ -13221,7 +13248,7 @@ class MainWindow(QMainWindow):
             card_layout.addLayout(left_col, 0)
 
             toggle_btn = QToolButton()
-            toggle_btn.setToolTip(self._t("Выключить модификацию", "Disable modification") if enabled else self._t("Включить модификацию", "Enable modification"))
+            toggle_btn.setToolTip(self._t("Disable modification") if enabled else self._t("Enable modification"))
             toggle_btn.setIcon(self._icon("power.svg"))
             toggle_btn.setIconSize(QSize(16, 16))
             toggle_btn.setFixedSize(36, 36)
@@ -13233,7 +13260,7 @@ class MainWindow(QMainWindow):
             actions.addWidget(toggle_btn)
 
             share_btn = QToolButton()
-            share_btn.setToolTip(self._t("Поделиться модификацией", "Export modification"))
+            share_btn.setToolTip(self._t("Export modification"))
             share_btn.setIcon(self._icon("share.svg"))
             share_btn.setIconSize(QSize(16, 16))
             share_btn.setFixedSize(36, 36)
@@ -13247,7 +13274,7 @@ class MainWindow(QMainWindow):
                 actions.addWidget(share_btn)
 
             remove_btn = QToolButton()
-            remove_btn.setToolTip(self._t("Удалить модификацию", "Delete modification"))
+            remove_btn.setToolTip(self._t("Delete modification"))
             remove_btn.setIcon(self._icon("trash.svg"))
             remove_btn.setIconSize(QSize(16, 16))
             remove_btn.setFixedSize(36, 36)
@@ -13327,15 +13354,15 @@ class MainWindow(QMainWindow):
                 relative_path = str(getattr(record, "relative_path", ""))
                 size = int(getattr(record, "size", 0) or 0)
                 path = str(getattr(record, "path", "") or "")
-            row_item = QListWidgetItem(f"{relative_path}\n{self._t('Размер', 'Size')}: {size} {self._t('байт', 'bytes')}")
+            row_item = QListWidgetItem(f"{relative_path}\n{self._t('Size')}: {size} {self._t('bytes')}")
             row_item.setData(Qt.ItemDataRole.UserRole, path)
             row_item.setSizeHint(QSize(200, 54))
             self.files_list.addItem(row_item)
         if not records:
             self.file_path_label.setText(
-                self._t("General-файлы не найдены", "No General files found")
+                self._t("No General files found")
                 if self._current_file_list_filter == "generals"
-                else ("Hosts" if self._current_file_list_filter == "hosts" else self._t("Файлы не найдены", "No files found"))
+                else ("Hosts" if self._current_file_list_filter == "hosts" else self._t("No files found"))
             )
             self.file_editor.clear()
             self._set_file_editor_loading(False)
@@ -13369,11 +13396,11 @@ class MainWindow(QMainWindow):
         self._files_loading_frame = (self._files_loading_frame + 1) % 4
         dots = "." * self._files_loading_frame
         if self._files_tags_loading_label is not None:
-            self._files_tags_loading_label.setText(f"{self._t('Загрузка', 'Loading')}{dots}")
+            self._files_tags_loading_label.setText(f"{self._t('Loading')}{dots}")
         if self._files_list_loading_label is not None:
-            self._files_list_loading_label.setText(f"{self._t('Загрузка файлов', 'Loading files')}{dots}")
+            self._files_list_loading_label.setText(f"{self._t('Loading files')}{dots}")
         if self._files_editor_loading_label is not None:
-            self._files_editor_loading_label.setText(f"{self._t('Загрузка файла', 'Loading file')}{dots}")
+            self._files_editor_loading_label.setText(f"{self._t('Loading file')}{dots}")
 
     def _set_files_mode_loading(self, loading: bool, *, mode_index_override: int | None = None) -> None:
         mode_index = mode_index_override if mode_index_override is not None else (
@@ -13426,10 +13453,10 @@ class MainWindow(QMainWindow):
         if self._logs_source_combo is None:
             return
         options = [
-            ("app", self._t("Приложение", "App")),
+            ("app", self._t("App")),
             ("zapret", "Zapret"),
             ("tg-ws-proxy", "TG WS Proxy"),
-            ("all", self._t("Все логи", "All logs")),
+            ("all", self._t("All logs")),
         ]
         current = self._current_log_source
         self._logs_source_combo.blockSignals(True)
@@ -13493,7 +13520,7 @@ class MainWindow(QMainWindow):
         self._logs_force_scroll_bottom = False
         if self._logs_stack is not None:
             self._logs_stack.setCurrentIndex(1)
-        self.logs_text.setPlainText("\n".join(lines) if lines else self._t("Логи пока пустые.", "No logs yet."))
+        self.logs_text.setPlainText("\n".join(lines) if lines else self._t("No logs yet."))
 
         def _restore_scroll_position() -> None:
             if at_bottom:

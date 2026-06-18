@@ -51,31 +51,8 @@ RU = _is_ru()
 UNINSTALL_KEY = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\ZapretZen"
 INSTALLER_LOG_PATH = Path(tempfile.gettempdir()) / "zapret_zen_installer.log"
 
-_RU_TRANSLATIONS: dict[str, str] = {}
-
-_RU_TRANSLATIONS: dict[str, str] = {
-    "No": "Нет",
-    "Yes": "Да",
-    "Welcome to Zapret-Zen Installer": "Добро пожаловать в установщик Zapret-Zen",
-    "Browse": "Обзор",
-    "Install": "Установить",
-    "Installing...": "Установка...",
-    "Installation complete": "Установка завершена",
-    "Create desktop shortcut": "Создать ярлык на рабочем столе",
-    "Create Start Menu shortcut": "Создать ярлык в меню Пуск",
-    "Finish": "Готово",
-    "Choose install directory": "Выбор папки",
-    "Failed to request administrator privileges.": "Не удалось запросить права администратора.",
-    "Existing installation found": "Найдена предыдущая версия",
-    "Update": "Обновить",
-    "Reinstall": "Переустановить",
-    "Remove Zapret-Zen": "Удаление Zapret-Zen",
-    "Uninstall started": "Удаление запущено",
-    "The app will be removed in a few seconds.": "Приложение будет удалено через несколько секунд.",
-}
-
-def tr(en: str) -> str:
-    return _RU_TRANSLATIONS.get(en, en) if RU else en
+def tr(ru: str, en: str) -> str:
+    return ru if RU else en
 
 
 def _resource_candidates() -> list[Path]:
@@ -916,9 +893,9 @@ class InstallerDialog(QDialog):
         row = QHBoxLayout()
         row.addStretch(1)
         if with_yes_no:
-            no_btn = QPushButton(no_text or tr("No"))
+            no_btn = QPushButton(no_text or tr("Нет", "No"))
             no_btn.clicked.connect(self._accept_no)
-            yes_btn = QPushButton(yes_text or tr("Yes"))
+            yes_btn = QPushButton(yes_text or tr("Да", "Yes"))
             yes_btn.setObjectName("primary")
             yes_btn.clicked.connect(self._accept_yes)
             attach_button_animations(no_btn)
@@ -1115,24 +1092,27 @@ class InstallerWindow(QMainWindow):
         start_layout = QVBoxLayout(self.page_start)
         start_layout.setContentsMargins(20, 20, 20, 20)
         start_layout.setSpacing(12)
-        head = QLabel(tr("Welcome to Zapret-Zen Installer"))
+        head = QLabel(tr("Добро пожаловать в установщик Zapret-Zen", "Welcome to Zapret-Zen Installer"))
         head.setObjectName("title")
         start_layout.addWidget(head)
         desc = QLabel(
-            tr("This installer deploys Zapret-Zen and automatically picks the proper build for your system.")
+            tr(
+                "Приложение устанавливает Zapret-Zen и автоматически выбирает подходящую версию под вашу систему.",
+                "This installer deploys Zapret-Zen and automatically picks the proper build for your system.",
+            )
         )
         desc.setWordWrap(True)
         start_layout.addWidget(desc)
         path_row = QHBoxLayout()
         self.path_edit = QLineEdit(str(self.install_path))
-        browse_btn = QPushButton(tr("Browse"))
+        browse_btn = QPushButton(tr("Обзор", "Browse"))
         browse_btn.clicked.connect(self._choose_dir)
         attach_button_animations(browse_btn)
         path_row.addWidget(self.path_edit, 1)
         path_row.addWidget(browse_btn)
         start_layout.addLayout(path_row)
         start_layout.addStretch(1)
-        install_btn = QPushButton(tr("Install"))
+        install_btn = QPushButton(tr("Установить", "Install"))
         install_btn.setObjectName("primary")
         install_btn.setMinimumHeight(42)
         install_btn.clicked.connect(self._start_install)
@@ -1144,7 +1124,7 @@ class InstallerWindow(QMainWindow):
         progress_layout = QVBoxLayout(self.page_progress)
         progress_layout.setContentsMargins(20, 20, 20, 20)
         progress_layout.setSpacing(12)
-        progress_layout.addWidget(QLabel(tr("Installing...")))
+        progress_layout.addWidget(QLabel(tr("Установка...", "Installing...")))
         progress_layout.addStretch(1)
         self.bar = QProgressBar()
         self.bar.setRange(0, 100)
@@ -1158,15 +1138,15 @@ class InstallerWindow(QMainWindow):
         done_layout = QVBoxLayout(self.page_done)
         done_layout.setContentsMargins(20, 20, 20, 20)
         done_layout.setSpacing(12)
-        done_layout.addWidget(QLabel(tr("Installation complete")))
-        self.desktop_cb = QCheckBox(tr("Create desktop shortcut"))
-        self.startmenu_cb = QCheckBox(tr("Create Start Menu shortcut"))
+        done_layout.addWidget(QLabel(tr("Установка завершена", "Installation complete")))
+        self.desktop_cb = QCheckBox(tr("Создать ярлык на рабочем столе", "Create desktop shortcut"))
+        self.startmenu_cb = QCheckBox(tr("Создать ярлык в меню Пуск", "Create Start Menu shortcut"))
         self.desktop_cb.setChecked(True)
         self.startmenu_cb.setChecked(True)
         done_layout.addWidget(self.desktop_cb)
         done_layout.addWidget(self.startmenu_cb)
         done_layout.addStretch(1)
-        finish_btn = QPushButton(tr("Finish"))
+        finish_btn = QPushButton(tr("Готово", "Finish"))
         finish_btn.setObjectName("primary")
         finish_btn.setMinimumHeight(42)
         finish_btn.clicked.connect(self._finish)
@@ -1225,7 +1205,7 @@ class InstallerWindow(QMainWindow):
             self.path_edit.setText(str(existing))
 
     def _choose_dir(self) -> None:
-        picked = QFileDialog.getExistingDirectory(self, tr("Choose install directory"), self.path_edit.text())
+        picked = QFileDialog.getExistingDirectory(self, tr("Выбор папки", "Choose install directory"), self.path_edit.text())
         if picked:
             self.path_edit.setText(picked)
 
@@ -1256,7 +1236,7 @@ class InstallerWindow(QMainWindow):
             if relaunch_with_elevation(args):
                 self.close()
                 return
-            InstallerDialog("Error", tr("Failed to request administrator privileges."), parent=self).exec()
+            InstallerDialog("Error", tr("Не удалось запросить права администратора.", "Failed to request administrator privileges."), parent=self).exec()
             return
         self.stack.setCurrentWidget(self.page_progress)
         self.worker = InstallerWorker(self.install_path, preserve_data=self.preserve_existing_data)
@@ -1266,12 +1246,15 @@ class InstallerWindow(QMainWindow):
 
     def _ask_existing_install_mode(self) -> str:
         dialog = InstallerDialog(
-            tr("Existing installation found"),
-            tr("Do you want to reinstall the app and remove all data, or update it while keeping all of your user data?"),
+            tr("Найдена предыдущая версия", "Existing installation found"),
+            tr(
+                "Хотите ли вы переустановить программу, удалив все данные, или обновить, сохранив все ваши пользовательские данные?",
+                "Do you want to reinstall the app and remove all data, or update it while keeping all of your user data?",
+            ),
             with_yes_no=True,
             parent=self,
-            yes_text=tr("Update"),
-            no_text=tr("Reinstall"),
+            yes_text=tr("Обновить", "Update"),
+            no_text=tr("Переустановить", "Reinstall"),
         )
         dialog.exec()
         if dialog.result_mode == "yes":
@@ -1386,8 +1369,11 @@ def main() -> int:
         silent = "--silent" in sys.argv
         if not silent:
             confirm = InstallerDialog(
-                tr("Remove Zapret-Zen"),
-                tr("Remove Zapret-Zen and all data inside the install folder?\n\nExternal folders and third-party files will not be touched."),
+                tr("Удаление Zapret-Zen", "Remove Zapret-Zen"),
+                tr(
+                    "Удалить Zapret-Zen и все данные внутри папки установки?\n\nВнешние папки и сторонние файлы не будут затронуты.",
+                    "Remove Zapret-Zen and all data inside the install folder?\n\nExternal folders and third-party files will not be touched.",
+                ),
                 with_yes_no=True,
             )
             confirm.exec()
@@ -1400,8 +1386,8 @@ def main() -> int:
             _launch_folder_removal(install_dir)
         if not silent:
             InstallerDialog(
-                tr("Uninstall started"),
-                tr("The app will be removed in a few seconds."),
+                tr("Удаление запущено", "Uninstall started"),
+                tr("Приложение будет удалено через несколько секунд.", "The app will be removed in a few seconds."),
             ).exec()
         return 0
 
