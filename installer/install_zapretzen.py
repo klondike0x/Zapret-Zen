@@ -739,13 +739,25 @@ def _overlay_tree(source: Path, target: Path, install_dir: Path, preserve_names:
                 raise
 
 
+def _read_app_version(install_dir: Path) -> str:
+    init_py = install_dir / "zapret_zen" / "__init__.py"
+    try:
+        content = init_py.read_text("utf-8")
+        m = re.search(r'__version__\s*=\s*["\']([^"\']+)["\']', content)
+        if m:
+            return m.group(1)
+    except Exception:
+        pass
+    return "1.0.0"
+
+
 def _write_uninstall_registry(install_dir: Path, uninstaller_exe: Path, app_exe: Path) -> None:
     if not sys.platform.startswith("win"):
         return
     uninstall_cmd = f'"{uninstaller_exe}" --uninstall --install-dir "{install_dir}" --silent'
     values = {
         "DisplayName": "Zapret-Zen",
-        "DisplayVersion": "2.0.0",
+        "DisplayVersion": _read_app_version(install_dir),
         "Publisher": "peshk0v",
         "InstallLocation": str(install_dir),
         "DisplayIcon": str(app_exe),
@@ -1153,6 +1165,7 @@ class InstallerWindow(QMainWindow):
             QLineEdit {{ background: #ffffff; color: #152033; border: 1px solid #c8d7ee; border-radius: 10px; padding: 9px; font-size: 11pt; }}
             QPushButton {{ background: #e6eef9; border: 1px solid #c8d7ee; border-radius: 12px; padding: 10px 14px; font-size: 11pt; color: #152033; }}
             QPushButton#primary {{ background: #5865f2; border: 1px solid #7481ff; color: #fff; font-weight: 800; }}
+            QCheckBox {{ color: #152033; }}
             QToolButton {{ border: none; background: transparent; min-width: 26px; min-height: 26px; max-width: 26px; max-height: 26px; border-radius: 12px; padding: 0px; margin: 0px; }}
             QToolButton[role="close"]:hover {{ background: rgba(170, 84, 97, 0.62); border-radius: 12px; }}
             QProgressBar {{ background: #e6eef9; border: 1px solid #c8d7ee; border-radius: 10px; text-align: center; }}

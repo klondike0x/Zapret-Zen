@@ -1,6 +1,12 @@
 ﻿# -*- mode: python ; coding: utf-8 -*-
 
+import re
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(SPECPATH).resolve().parent / "src"))
+from zapret_zen import __version__ as APP_VERSION
+
 from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 from PyInstaller.utils.win32.versioninfo import (
     VSVersionInfo,
@@ -12,11 +18,16 @@ from PyInstaller.utils.win32.versioninfo import (
     VarStruct,
 )
 
+_m = re.search(r"^(\d+(?:\.\d+)*)", APP_VERSION)
+_version_parts = tuple(int(x) for x in (_m.group(1) if _m else "0").split(".")[:4])
+while len(_version_parts) < 4:
+    _version_parts = _version_parts + (0,)
+
 project_root = Path(SPECPATH).resolve().parent
 version_info = VSVersionInfo(
     ffi=FixedFileInfo(
-        filevers=(2, 0, 0, 0),
-        prodvers=(2, 0, 0, 0),
+        filevers=_version_parts,
+        prodvers=_version_parts,
         mask=0x3F,
         flags=0x0,
         OS=0x40004,
@@ -32,11 +43,11 @@ version_info = VSVersionInfo(
                     [
                         StringStruct("CompanyName", "peshk0v"),
                         StringStruct("FileDescription", "Zapret-Zen"),
-                        StringStruct("FileVersion", "2.1.0"),
+                        StringStruct("FileVersion", APP_VERSION),
                         StringStruct("InternalName", "zapret_zen"),
                         StringStruct("OriginalFilename", "zapret_zen.exe"),
                         StringStruct("ProductName", "Zapret-Zen"),
-                        StringStruct("ProductVersion", "2.1b"),
+                        StringStruct("ProductVersion", APP_VERSION),
                         StringStruct("Publisher", "peshk0v"),
                     ],
                 )
