@@ -23,6 +23,7 @@ class AppSettings:
     autostart_windows: bool = False
     auto_run_components: bool = False
     check_updates_on_start: bool = True
+    update_branch: str = "release"
     notifications_enabled: bool = True
     work_root: str = ""
     active_profile_id: str = "default"

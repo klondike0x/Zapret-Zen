@@ -62,7 +62,7 @@ class UpdatesManager:
         self.logging.log("info", "Update check completed", items=len(updates), app_status=app_status.status)
         return updates
 
-    def fetch_latest_application_release(self) -> dict[str, str]:
+    def fetch_latest_application_release(self, update_branch: str = "release") -> dict[str, str]:
         try:
             payload = self._request_json(self.API_RELEASES, timeout=10)
         except Exception as error:
@@ -78,7 +78,7 @@ class UpdatesManager:
                 "html_url": self.REPO_URL + "/releases",
             }
 
-        releases = self._normalize_release_entries(payload)
+        releases = self._normalize_release_entries(payload, update_branch == "prerelease")
         if not releases:
             return {
                 "status": "error",
@@ -138,14 +138,16 @@ class UpdatesManager:
     def _is_certificate_error(self, error: Exception) -> bool:
         return "CERTIFICATE_VERIFY_FAILED" in str(error).upper()
 
-    def _normalize_release_entries(self, payload: object) -> list[dict[str, object]]:
+    def _normalize_release_entries(self, payload: object, include_prerelease: bool = False) -> list[dict[str, object]]:
         if not isinstance(payload, list):
             return []
         entries: list[dict[str, object]] = []
         for item in payload:
             if not isinstance(item, dict):
                 continue
-            if bool(item.get("draft")) or bool(item.get("prerelease")):
+            if bool(item.get("draft")):
+                continue
+            if not include_prerelease and bool(item.get("prerelease")):
                 continue
             version = str(item.get("tag_name") or item.get("name") or "").strip().lstrip("v")
             if not version:

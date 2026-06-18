@@ -6353,6 +6353,14 @@ class MainWindow(QMainWindow):
         ctrl["check_updates"] = check_upd_cb
         app_section.addWidget(check_upd_cb)
 
+        branch_items = [
+            (self._t("Релиз", "Release"), "release"),
+            (self._t("Пре-релиз", "Pre-release"), "prerelease"),
+        ]
+        branch_w, _ = _segment(branch_items, settings.update_branch, "update_branch")
+        app_section.addWidget(QLabel(self._t("Ветка обновлений", "Update branch")))
+        app_section.addWidget(branch_w)
+
         # --- Zapret section ---
         zapret_section = _section("Zapret")
         ipset_items = [("loaded", "loaded"), ("none", "none"), ("any", "any")]
@@ -6596,6 +6604,9 @@ class MainWindow(QMainWindow):
             cb = ctrl.get(key)
             if isinstance(cb, QCheckBox):
                 cb.stateChanged.connect(_ctrl_changed)
+        branch_grp = ctrl.get("update_branch")
+        if isinstance(branch_grp, QButtonGroup):
+            branch_grp.idClicked.connect(_ctrl_changed)
         for key in ("udp_exclude", "tg_host", "tg_port", "tg_secret", "tg_cf_domain", "tg_fake_tls", "tg_buf", "tg_pool"):
             inp = ctrl.get(key)
             if isinstance(inp, QLineEdit):
@@ -6648,6 +6659,7 @@ class MainWindow(QMainWindow):
         cb = ctrl.get("check_updates")
         if isinstance(cb, QCheckBox):
             cb.setChecked(settings.check_updates_on_start)
+        _set_seg("update_branch", settings.update_branch)
 
         _set_seg("ipset_mode", settings.zapret_ipset_mode)
         _set_seg("gaming_mode", settings.zapret_game_filter_mode)
@@ -6724,6 +6736,9 @@ class MainWindow(QMainWindow):
         cb = ctrl.get("check_updates")
         if isinstance(cb, QCheckBox):
             payload["check_updates_on_start"] = cb.isChecked()
+        val = _read_seg("update_branch")
+        if val:
+            payload["update_branch"] = val
 
         val = _read_seg("ipset_mode")
         if val:
@@ -9622,7 +9637,8 @@ class MainWindow(QMainWindow):
 
     def _run_update_check_worker(self, manual: bool) -> None:
         try:
-            release = self.context.updates.fetch_latest_application_release()
+            branch = self.context.settings.get().update_branch
+            release = self.context.updates.fetch_latest_application_release(update_branch=branch)
         except Exception as error:
             release = {
                 "status": "error",
