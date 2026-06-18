@@ -742,7 +742,7 @@ def _overlay_tree(source: Path, target: Path, install_dir: Path, preserve_names:
 def _write_uninstall_registry(install_dir: Path, uninstaller_exe: Path, app_exe: Path) -> None:
     if not sys.platform.startswith("win"):
         return
-    uninstall_cmd = f'"{uninstaller_exe}" --uninstall --install-dir "{install_dir}"'
+    uninstall_cmd = f'"{uninstaller_exe}" --uninstall --install-dir "{install_dir}" --silent'
     values = {
         "DisplayName": "Zapret-Zen",
         "DisplayVersion": "2.0.0",
@@ -1260,12 +1260,8 @@ class InstallerWindow(QMainWindow):
 
     def _register_uninstaller(self) -> None:
         app_exe = self.install_path / "zapret_zen.exe"
-        uninstaller_exe = self.install_path / "uninstall_zapretzen.exe"
         try:
-            current_installer = Path(sys.executable).resolve()
-            if current_installer.exists() and current_installer.suffix.lower() == ".exe":
-                shutil.copy2(current_installer, uninstaller_exe)
-            _write_uninstall_registry(self.install_path, uninstaller_exe, app_exe)
+            _write_uninstall_registry(self.install_path, app_exe, app_exe)
         except Exception:
             pass
 

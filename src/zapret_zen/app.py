@@ -169,6 +169,64 @@ def _preload_startup_onboarding(context, *, launch_hidden: bool, startup_snapsho
         return False
 
 
+def _run_uninstall(install_dir_arg: str, silent: bool = False) -> int:
+    if not sys.platform.startswith("win"):
+        return 0
+    try:
+        is_admin = bool(ctypes.windll.shell32.IsUserAnAdmin())
+    except Exception:
+        is_admin = False
+    if not is_admin:
+        args = ["--uninstall"]
+        if install_dir_arg:
+            args.extend(["--install-dir", install_dir_arg])
+        if silent:
+            args.append("--silent")
+        return _ensure_admin_windows(args)
+
+    from zapret_zen.installer.install_zapretzen import (
+        InstallerDialog,
+        _install_dir_from_registry,
+        _launch_folder_removal,
+        _remove_autostart_entries,
+        _remove_shortcuts,
+        _remove_uninstall_registry,
+        _terminate_running_instances,
+        default_install_dir,
+        tr,
+    )
+
+    install_dir = Path(install_dir_arg) if install_dir_arg else (_install_dir_from_registry() or default_install_dir())
+
+    if not silent:
+        confirm = InstallerDialog(
+            tr("Удаление Zapret-Zen", "Remove Zapret-Zen"),
+            tr(
+                "Удалить Zapret-Zen и все данные внутри папки установки?\n\nВнешние папки и сторонние файлы не будут затронуты.",
+                "Remove Zapret-Zen and all data inside the install folder?\n\nExternal folders and third-party files will not be touched.",
+            ),
+            with_yes_no=True,
+        )
+        confirm.exec()
+        if not confirm.result_yes:
+            return 0
+
+    _terminate_running_instances(install_dir)
+    _remove_autostart_entries()
+    _remove_shortcuts()
+    _remove_uninstall_registry()
+    if install_dir.exists():
+        _launch_folder_removal(install_dir)
+
+    if not silent:
+        app = QApplication.instance() or QApplication(sys.argv)
+        InstallerDialog(
+            tr("Удаление запущено", "Uninstall started"),
+            tr("Приложение будет удалено через несколько секунд.", "The app will be removed in a few seconds."),
+        ).exec()
+    return 0
+
+
 def run(argv: list[str] | None = None) -> int:
     multiprocessing.freeze_support()
     _startup_trace("run: freeze_support passed")
@@ -177,9 +235,15 @@ def run(argv: list[str] | None = None) -> int:
     parser.add_argument("--worker", choices=["tg-ws-proxy"], default="")
     parser.add_argument("--autostart-launch", action="store_true")
     parser.add_argument("--skip-autosettings", action="store_true")
+    parser.add_argument("--uninstall", action="store_true")
+    parser.add_argument("--install-dir", default="")
+    parser.add_argument("--silent", action="store_true")
     from zapret_zen.cli_args import build_worker_arg_group
     build_worker_arg_group(parser)
     known, _ = parser.parse_known_args(runtime_argv)
+
+    if known.uninstall:
+        return _run_uninstall(known.install_dir, known.silent)
 
     if known.worker == "tg-ws-proxy":
         _startup_trace("run: worker=tg-ws-proxy")
