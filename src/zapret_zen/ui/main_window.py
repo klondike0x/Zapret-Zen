@@ -6481,10 +6481,26 @@ class MainWindow(QMainWindow):
             self._t("Запустить диагностику", "Run diagnostics"),
             self._run_diagnostics_popup,
         ))
-        tools_section.addWidget(_make_tool_btn(
+
+        update_row = QWidget()
+        update_row.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, False)
+        update_layout = QHBoxLayout(update_row)
+        update_layout.setContentsMargins(0, 0, 0, 0)
+        update_layout.setSpacing(6)
+
+        check_btn = _make_tool_btn(
             self._t("Проверить обновления", "Check updates"),
             self._check_updates_popup,
-        ))
+        )
+        update_layout.addWidget(check_btn, 1)
+
+        file_btn = _make_tool_btn(
+            self._t("Установить из файла", "Install from file"),
+            self._update_from_file,
+        )
+        update_layout.addWidget(file_btn, 1)
+
+        tools_section.addWidget(update_row)
         tools_section.addWidget(_make_tool_btn(
             self._t("Пересобрать merged", "Rebuild merged"),
             self._rebuild_runtime,
@@ -9564,6 +9580,30 @@ class MainWindow(QMainWindow):
     def _check_updates_popup(self) -> None:
         self._start_update_check(manual=True)
 
+    def _update_from_file(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            self._t("Выберите файл обновления", "Select update file"),
+            "",
+            self._t("ZIP архив (*.zip)", "ZIP archive (*.zip)"),
+        )
+        if not path:
+            return
+        if self._update_prepare_dialog is not None:
+            return
+        dialog = AppDialog(self, self.context, self._t("Подготовка обновления", "Preparing update"))
+        label = QLabel(self._t("Подготавливаем обновление из файла...", "Preparing update from file..."))
+        label.setWordWrap(True)
+        dialog.body_layout.addWidget(label)
+        bar = QProgressBar()
+        bar.setRange(0, 0)
+        dialog.body_layout.addWidget(bar)
+        dialog.prepare_and_center()
+        dialog.show()
+        self._update_prepare_dialog = dialog
+        thread = threading.Thread(target=self._run_local_update_prepare_worker, args=(path,), daemon=True)
+        thread.start()
+
     def _check_updates_on_start(self) -> None:
         if self._launch_hidden:
             return
@@ -9872,6 +9912,13 @@ class MainWindow(QMainWindow):
     def _run_update_prepare_worker(self, release: dict[str, str]) -> None:
         try:
             prepared = self.context.updates.prepare_update(release)
+            self._ui_signals.update_prepare_done.emit({"ok": True, "prepared": prepared})
+        except Exception as error:
+            self._ui_signals.update_prepare_done.emit({"ok": False, "error": str(error)})
+
+    def _run_local_update_prepare_worker(self, zip_path: str) -> None:
+        try:
+            prepared = self.context.updates.prepare_local_update(zip_path)
             self._ui_signals.update_prepare_done.emit({"ok": True, "prepared": prepared})
         except Exception as error:
             self._ui_signals.update_prepare_done.emit({"ok": False, "error": str(error)})

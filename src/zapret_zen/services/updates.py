@@ -16,8 +16,13 @@ from zapret_zen.domain import UpdateInfo
 from zapret_zen.services.github_network import GitHubNetworkClient
 from zapret_zen.services.logging_service import LoggingManager
 from zapret_zen.services.storage import StorageManager
+from zapret_zen.runtime_env import is_packaged_runtime, packaged_resource_root
 
-_SCRIPT_DIR = Path(__file__).resolve().parent.parent / "scripts"
+_SCRIPT_DIR: Path = (
+    packaged_resource_root() / "scripts"
+    if is_packaged_runtime()
+    else Path(__file__).resolve().parent.parent / "scripts"
+)
 _PS1_TEMPLATE = _SCRIPT_DIR / "apply_update.ps1"
 
 
@@ -216,6 +221,17 @@ class UpdatesManager:
         zip_path = temp_root / asset_name
         zip_path.write_bytes(self._download_bytes(asset_url, timeout=60))
 
+        return self._extract_update_package(zip_path, temp_root, release_info)
+
+    def prepare_local_update(self, zip_path: str) -> dict[str, str]:
+        src = Path(zip_path).resolve()
+        if not src.exists():
+            raise FileNotFoundError(f"Update file not found: {zip_path}")
+
+        temp_root = Path(tempfile.mkdtemp(prefix="zapret_zen_local_update_"))
+        return self._extract_update_package(src, temp_root, {"latest_version": ""})
+
+    def _extract_update_package(self, zip_path: Path, temp_root: Path, release_info: dict[str, str]) -> dict[str, str]:
         extract_root = temp_root / "payload"
         extract_root.mkdir(parents=True, exist_ok=True)
         with zipfile.ZipFile(zip_path, "r") as archive:
@@ -224,7 +240,7 @@ class UpdatesManager:
         payload_root = self._resolve_payload_root(extract_root)
         launch_exe = payload_root / "zapret_zen.exe"
         if not launch_exe.exists():
-            raise FileNotFoundError("The downloaded update package does not contain zapret_zen.exe.")
+            raise FileNotFoundError("The update package does not contain zapret_zen.exe.")
 
         return {
             "temp_root": str(temp_root),
