@@ -777,7 +777,7 @@ def _read_app_version(install_dir: Path) -> str:
 def _write_uninstall_registry(install_dir: Path, uninstaller_exe: Path, app_exe: Path) -> None:
     if not sys.platform.startswith("win"):
         return
-    uninstall_cmd = f'"{uninstaller_exe}" --uninstall --install-dir "{install_dir}" --silent'
+    uninstall_cmd = f'"{uninstaller_exe}" --uninstall --install-dir "{install_dir}"'
     values = {
         "DisplayName": "Zapret-Zen",
         "DisplayVersion": _read_app_version(install_dir),
@@ -1290,8 +1290,12 @@ class InstallerWindow(QMainWindow):
 
     def _register_uninstaller(self) -> None:
         app_exe = self.install_path / "zapret_zen.exe"
+        uninstaller_exe = self.install_path / "uninstall_zapretzen.exe"
         try:
-            _write_uninstall_registry(self.install_path, app_exe, app_exe)
+            if getattr(sys, "frozen", False):
+                import shutil
+                shutil.copy2(sys.executable, uninstaller_exe)
+            _write_uninstall_registry(self.install_path, uninstaller_exe, app_exe)
         except Exception:
             pass
 
