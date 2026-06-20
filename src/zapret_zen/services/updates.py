@@ -16,13 +16,22 @@ from zapret_zen.domain import UpdateInfo
 from zapret_zen.services.github_network import GitHubNetworkClient
 from zapret_zen.services.logging_service import LoggingManager
 from zapret_zen.services.storage import StorageManager
-from zapret_zen.runtime_env import is_packaged_runtime, packaged_resource_root
+from zapret_zen.runtime_env import is_packaged_runtime, packaged_install_root, packaged_resource_root
 
-_SCRIPT_DIR: Path = (
-    packaged_resource_root() / "scripts"
-    if is_packaged_runtime()
-    else Path(__file__).resolve().parent.parent / "scripts"
-)
+
+def _script_dir() -> Path:
+    candidates = []
+    if is_packaged_runtime():
+        candidates.append(packaged_resource_root() / "scripts")
+        candidates.append(packaged_install_root() / "scripts")
+    candidates.append(Path(__file__).resolve().parent.parent / "scripts")
+    for c in candidates:
+        if (c / "apply_update.ps1").exists():
+            return c
+    return candidates[-1]
+
+
+_SCRIPT_DIR: Path = _script_dir()
 _PS1_TEMPLATE = _SCRIPT_DIR / "apply_update.ps1"
 
 
@@ -274,7 +283,13 @@ class UpdatesManager:
         launcher_path = script_root / f"apply_update_{int(datetime.now(timezone.utc).timestamp() * 1000)}.cmd"
         log_path = script_root / f"apply_update_{int(datetime.now(timezone.utc).timestamp() * 1000)}.log"
 
-        template = _PS1_TEMPLATE.read_text(encoding="utf-8")
+        try:
+            template = _PS1_TEMPLATE.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            raise FileNotFoundError(
+                f"Update script not found: {_PS1_TEMPLATE}. "
+                "The installation may be incomplete or damaged."
+            )
         def _esc(val: str) -> str:
             return str(val).replace("'", "''")
         script = (
