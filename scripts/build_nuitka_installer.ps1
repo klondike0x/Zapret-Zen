@@ -29,6 +29,12 @@ if (-not $ReleaseDir) {
     $ReleaseDir = "release_$Version"
 }
 
+$installerPy = Join-Path $root "installer" "install_zapretzen.py"
+$content = Get-Content $installerPy -Raw -Encoding UTF8
+$content = $content -replace '(?<=INSTALLER_VERSION\s*=\s*")[^"]*', $Version
+Set-Content $installerPy -NoNewLine -Encoding UTF8 -Value $content
+Write-Host "Injected INSTALLER_VERSION=$Version into installer source"
+
 & $Python scripts\sync_app_icon.py
 if ($LASTEXITCODE -ne 0) { throw "sync_app_icon.py failed with exit code $LASTEXITCODE" }
 if (-not $SkipPrepareRelease) {

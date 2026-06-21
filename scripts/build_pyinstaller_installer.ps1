@@ -3,7 +3,8 @@ param(
     [string]$AppDir = "dist_pyinstaller",
     [string]$PayloadDir = "installer_payload",
     [string]$OutputDir = "dist_installer",
-    [switch]$SkipPrepareRelease
+    [switch]$SkipPrepareRelease,
+    [string]$Version = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -11,10 +12,26 @@ $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
 
+if (-not $Version) {
+    $Version = & $Python -c "import sys; sys.path.insert(0,'src'); from zapret_zen import __version__; print(__version__)"
+} else {
+    $initPy = Join-Path $root "src" "zapret_zen" "__init__.py"
+    $content = Get-Content $initPy -Raw -Encoding UTF8
+    $content = $content -replace '(?<=__version__\s*=\s*")[^"]*', $Version
+    Set-Content $initPy -NoNewLine -Encoding UTF8 -Value $content
+    Write-Host "Injected version $Version into $initPy"
+}
+
+$installerPy = Join-Path $root "installer" "install_zapretzen.py"
+$content = Get-Content $installerPy -Raw -Encoding UTF8
+$content = $content -replace '(?<=INSTALLER_VERSION\s*=\s*")[^"]*', $Version
+Set-Content $installerPy -NoNewLine -Encoding UTF8 -Value $content
+Write-Host "Injected INSTALLER_VERSION=$Version into installer source"
+
 & $Python scripts\sync_app_icon.py
 if ($LASTEXITCODE -ne 0) { throw "sync_app_icon.py failed with exit code $LASTEXITCODE" }
 
-$versionLine = & $Python -c "import sys; sys.path.insert(0,'src'); from zapret_zen import __version__; print(__version__)"
+$versionLine = $Version
 
 if (-not $SkipPrepareRelease) {
     $appRoot = Join-Path $root $AppDir "zapret_zen"

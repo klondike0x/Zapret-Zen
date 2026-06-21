@@ -38,6 +38,7 @@ from PySide6.QtWidgets import (
 if sys.platform.startswith("win"):
     import winreg
 
+INSTALLER_VERSION = "__BUILD_VERSION__"
 
 def _is_ru() -> bool:
     try:
@@ -763,15 +764,20 @@ def _overlay_tree(source: Path, target: Path, install_dir: Path, preserve_names:
 
 
 def _read_app_version(install_dir: Path) -> str:
-    init_py = install_dir / "zapret_zen" / "__init__.py"
-    try:
-        content = init_py.read_text("utf-8")
-        m = re.search(r'__version__\s*=\s*["\']([^"\']+)["\']', content)
-        if m:
-            return m.group(1)
-    except Exception:
-        pass
-    return "1.0.0"
+    candidates = [
+        install_dir / "zapret_zen" / "__init__.py",
+        install_dir / "__init__.py",
+    ]
+    for init_py in candidates:
+        try:
+            if init_py.exists():
+                content = init_py.read_text("utf-8")
+                m = re.search(r'__version__\s*=\s*["\']([^"\']+)["\']', content)
+                if m:
+                    return m.group(1)
+        except Exception:
+            continue
+    return INSTALLER_VERSION if INSTALLER_VERSION != "__BUILD_VERSION__" else "1.0.0"
 
 
 def _write_uninstall_registry(install_dir: Path, uninstaller_exe: Path, app_exe: Path) -> None:
@@ -1291,13 +1297,21 @@ class InstallerWindow(QMainWindow):
     def _register_uninstaller(self) -> None:
         app_exe = self.install_path / "zapret_zen.exe"
         uninstaller_exe = self.install_path / "uninstall_zapretzen.exe"
-        try:
-            if getattr(sys, "frozen", False):
-                import shutil
-                shutil.copy2(sys.executable, uninstaller_exe)
+        copied = False
+        if getattr(sys, "frozen", False):
+            for attempt in range(3):
+                try:
+                    shutil.copy2(sys.executable, uninstaller_exe)
+                    copied = uninstaller_exe.exists()
+                    if copied:
+                        break
+                except Exception as copy_err:
+                    _installer_log("copy_uninstaller_failed", attempt=str(attempt), error=str(copy_err))
+                    time.sleep(0.3)
+        if copied:
             _write_uninstall_registry(self.install_path, uninstaller_exe, app_exe)
-        except Exception:
-            pass
+        else:
+            _installer_log("register_uninstaller_skipped", reason="copy_failed", dest=str(uninstaller_exe))
 
     def _create_shortcut(self, target: Path, name: str, desktop: bool) -> None:
         if desktop:
