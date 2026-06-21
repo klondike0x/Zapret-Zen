@@ -3,6 +3,7 @@ import ctypes
 import hashlib
 import multiprocessing
 import os
+import subprocess
 import sys
 import threading
 import tempfile
@@ -184,46 +185,20 @@ def _run_uninstall(install_dir_arg: str, silent: bool = False) -> int:
             args.append("--silent")
         return _ensure_admin_windows(args)
 
-    from zapret_zen.installer.install_zapretzen import (
-        InstallerDialog,
-        _install_dir_from_registry,
-        _launch_folder_removal,
-        _remove_autostart_entries,
-        _remove_shortcuts,
-        _remove_uninstall_registry,
-        _terminate_running_instances,
-        default_install_dir,
-        tr,
-    )
+    install_dir = Path(install_dir_arg) if install_dir_arg else Path("C:\\Program Files\\Zapret-Zen")
+    uninstaller = install_dir / "uninstall_zapretzen.exe"
+    if uninstaller.exists():
+        args = [str(uninstaller), "--uninstall", "--install-dir", str(install_dir)]
+        if silent:
+            args.append("--silent")
+        subprocess.Popen(args)
+        return 0
 
-    install_dir = Path(install_dir_arg) if install_dir_arg else (_install_dir_from_registry() or default_install_dir())
-
-    if not silent:
-        confirm = InstallerDialog(
-            tr("Удаление Zapret-Zen", "Remove Zapret-Zen"),
-            tr(
-                "Удалить Zapret-Zen и все данные внутри папки установки?\n\nВнешние папки и сторонние файлы не будут затронуты.",
-                "Remove Zapret-Zen and all data inside the install folder?\n\nExternal folders and third-party files will not be touched.",
-            ),
-            with_yes_no=True,
-        )
-        confirm.exec()
-        if not confirm.result_yes:
-            return 0
-
-    _terminate_running_instances(install_dir)
-    _remove_autostart_entries()
-    _remove_shortcuts()
-    _remove_uninstall_registry()
-    if install_dir.exists():
-        _launch_folder_removal(install_dir)
-
-    if not silent:
-        app = QApplication.instance() or QApplication(sys.argv)
-        InstallerDialog(
-            tr("Удаление запущено", "Uninstall started"),
-            tr("Приложение будет удалено через несколько секунд.", "The app will be removed in a few seconds."),
-        ).exec()
+    # fallback: delete the install dir via a delayed batch script
+    cmd = f"@echo off\r\nping 127.0.0.1 -n 4 > nul\r\nrmdir /s /q \"{install_dir}\"\r\n"
+    bat = Path(tempfile.gettempdir()) / "zapret_zen_cleanup.bat"
+    bat.write_text(cmd, encoding="utf-8")
+    subprocess.Popen(["cmd", "/c", str(bat)], creationflags=subprocess.CREATE_NO_WINDOW)
     return 0
 
 
