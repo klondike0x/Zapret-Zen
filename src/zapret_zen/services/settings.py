@@ -138,8 +138,9 @@ class SettingsManager:
         return self._settings
 
     def update(self, **changes: object) -> AppSettings:
-        for key, value in changes.items():
-            setattr(self._settings, key, value)
+        data = asdict(self._settings)
+        data.update(changes)
+        self._settings = AppSettings(**data)
         self.save()
         return self._settings
 

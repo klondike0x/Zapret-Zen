@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 
 _current_language: str = "en"
@@ -9,11 +10,17 @@ _translations: dict[str, str] = {}
 
 def _load_translations(lang: str) -> None:
     global _translations
-    p = Path(__file__).resolve().parent.parent / "translations" / f"{lang}.json"
-    try:
-        _translations = json.loads(p.read_text("utf-8"))
-    except Exception:
-        _translations = {}
+    candidates = [
+        Path(__file__).resolve().parent.parent / "translations" / f"{lang}.json",
+        Path(sys.executable).resolve().parent / "_internal" / "zapret_zen" / "translations" / f"{lang}.json",
+    ]
+    for p in candidates:
+        try:
+            _translations = json.loads(p.read_text("utf-8"))
+            return
+        except Exception:
+            continue
+    _translations = {}
 
 
 def set_language(lang: str) -> None:
