@@ -2353,14 +2353,15 @@ class ContentGlowWidget(QWidget):
         c = self._accent_color
         light = c.lightnessF() > 0.5
         base_alpha = 0.06 if light else 0.10
-        path = QPainterPath()
-        path.addRoundedRect(QRectF(self.rect()).adjusted(6, 6, -6, -6), 16, 16)
-        painter.setClipPath(path)
-        glow = QRadialGradient(
-            rect.left() + rect.width() * self._glow_x,
-            rect.top() + rect.height() * self._glow_y,
-            max(rect.width() * 0.85, rect.height() * 1.0),
-        )
+        center_x = rect.left() + rect.width() * self._glow_x
+        center_y = rect.top() + rect.height() * self._glow_y
+        inner = QRectF(rect).adjusted(6, 6, -6, -6)
+        inner_path = QPainterPath()
+        inner_path.addRoundedRect(inner, 16, 16)
+
+        # Accent glow in content area
+        painter.setClipPath(inner_path)
+        glow = QRadialGradient(center_x, center_y, max(rect.width() * 0.85, rect.height() * 1.0))
         a = lambda factor: max(0, min(255, int(base_alpha * intensity * factor * 255)))
         glow.setColorAt(0.0, QColor(c.red(), c.green(), c.blue(), a(3.0)))
         glow.setColorAt(0.3, QColor(c.red(), c.green(), c.blue(), a(1.8)))
@@ -4333,6 +4334,38 @@ class MainWindow(QMainWindow):
 
         frame = OnboardingFrame()
         frame.setObjectName("RootFrame")
+        self._frame = frame
+
+        # Shadow background — QGraphicsBlurEffect gives real Gaussian blur
+        shadow_bg = QFrame(shell)
+        shadow_bg.setObjectName("WindowShadowBg")
+        shadow_bg.setStyleSheet("""
+            QFrame#WindowShadowBg {
+                background: rgba(0, 0, 0, 55);
+                border-radius: 16px;
+            }
+        """)
+        shadow_blur = QGraphicsBlurEffect()
+        shadow_blur.setBlurRadius(35.0)
+        shadow_bg.setGraphicsEffect(shadow_blur)
+        shadow_bg.lower()
+        self._shadow_bg = shadow_bg
+
+        class _ShadowSync(QObject):
+            def __init__(self, shadow, target):
+                super().__init__(target)
+                self._shadow = shadow
+                self._target = target
+                target.installEventFilter(self)
+            def set_offset(self, ox, oy):
+                g = self._target.geometry()
+                self._shadow.setGeometry(g.x() + ox, g.y() + oy, g.width(), g.height())
+            def eventFilter(self, obj, event):
+                if event.type() in (QEvent.Type.Resize, QEvent.Type.Move):
+                    self.set_offset(0, 6)
+                return super().eventFilter(obj, event)
+        self._shadow_sync = _ShadowSync(shadow_bg, frame)
+
         root_frame = QVBoxLayout(frame)
         root_frame.setContentsMargins(0, 0, 0, 0)
         root_frame.setSpacing(0)
@@ -4368,9 +4401,15 @@ class MainWindow(QMainWindow):
                     self._g.setGeometry(obj.rect())
                 return super().eventFilter(obj, event)
         _GlowResizer(glow, shell)
+        glow.glowChanged.connect(self._sync_shadow_position)
 
         self.setCentralWidget(shell)
         self._build_loading_overlay(shell)
+
+    def _sync_shadow_position(self) -> None:
+        ox = int((self._pages_host._glow_x - 0.5) * 8)
+        oy = int((self._pages_host._glow_y - 0.5) * 8 + 6)
+        self._shadow_sync.set_offset(ox, oy)
 
     def _build_loading_overlay(self, parent: QWidget) -> None:
         overlay = QFrame(parent)
@@ -6628,6 +6667,12 @@ class MainWindow(QMainWindow):
         branch_grp = ctrl.get("update_branch")
         if isinstance(branch_grp, QButtonGroup):
             branch_grp.idClicked.connect(_ctrl_changed)
+        ipset_grp = ctrl.get("ipset_mode")
+        if isinstance(ipset_grp, QButtonGroup):
+            ipset_grp.idClicked.connect(_ctrl_changed)
+        game_grp = ctrl.get("gaming_mode")
+        if isinstance(game_grp, QButtonGroup):
+            game_grp.idClicked.connect(_ctrl_changed)
         for key in ("udp_exclude", "tg_host", "tg_port", "tg_secret", "tg_cf_domain", "tg_fake_tls", "tg_buf", "tg_pool"):
             inp = ctrl.get(key)
             if isinstance(inp, QLineEdit):

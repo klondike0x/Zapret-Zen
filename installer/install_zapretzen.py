@@ -787,10 +787,13 @@ def _read_app_version(install_dir: Path) -> str:
     return INSTALLER_VERSION if INSTALLER_VERSION != "__BUILD_VERSION__" else "1.0.0"
 
 
-def _write_uninstall_registry(install_dir: Path, uninstaller_exe: Path, app_exe: Path) -> None:
+def _write_uninstall_registry(install_dir: Path, uninstaller_exe: Path, app_exe: Path, override_cmd: str | None = None) -> None:
     if not sys.platform.startswith("win"):
         return
-    uninstall_cmd = f'"{uninstaller_exe}" --uninstall --install-dir "{install_dir}"'
+    if override_cmd:
+        uninstall_cmd = override_cmd
+    else:
+        uninstall_cmd = f'"{uninstaller_exe}" --uninstall --install-dir "{install_dir}"'
     values = {
         "DisplayName": "Zapret-Zen",
         "DisplayVersion": _read_app_version(install_dir),
@@ -1310,7 +1313,17 @@ class InstallerWindow(QMainWindow):
             parent = os.environ.get("NUITKA_ONEFILE_PARENT")
             if parent:
                 sources.append(Path(parent))
-            sources.append(Path(sys.executable))
+            try:
+                sources.append(Path(sys.executable))
+            except Exception:
+                pass
+            # Nuitka onefile temp extraction parent may also be accessible
+            try:
+                argv0 = Path(sys.argv[0]).resolve()
+                if argv0 != sources[-1]:
+                    sources.append(argv0)
+            except Exception:
+                pass
             for source in sources:
                 if not source.exists():
                     continue
@@ -1327,8 +1340,61 @@ class InstallerWindow(QMainWindow):
                     break
         if copied:
             _write_uninstall_registry(self.install_path, uninstaller_exe, app_exe)
+            _installer_log("register_uninstaller_exe", dest=str(uninstaller_exe))
         else:
-            _installer_log("register_uninstaller_skipped", reason="copy_failed", dest=str(uninstaller_exe))
+            _installer_log("register_uninstaller_skipped", reason="exe_copy_failed", dest=str(uninstaller_exe))
+            self._create_ps_uninstaller(app_exe)
+
+    def _create_ps_uninstaller(self, app_exe: Path) -> None:
+        install_dir = self.install_path
+        ps_path = install_dir / "uninstall_zapretzen.ps1"
+        escaped = str(install_dir).replace("'", "''")
+        ps_content = f"""$installDir = '{escaped}'
+$uninstallKey = 'Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\ZapretZen'
+
+# Kill running instances
+$images = @('zapret_zen.exe', 'TgWsProxy_windows.exe', 'winws.exe')
+foreach ($img in $images) {{ taskkill /F /T /IM $img 2>$null }}
+
+# Remove shortcuts
+$lnkPaths = @(
+  [Environment]::GetFolderPath('Desktop'),
+  [Environment]::GetFolderPath('Desktop')
+)
+$lnkNames = @(
+  [io.path]::Combine($lnkPaths[0], 'Zapret-Zen.lnk')
+  [io.path]::Combine($lnkPaths[1], 'Zapret-Zen (Zapret).lnk')
+  [io.path]::Combine([Environment]::GetFolderPath('Programs'), 'Zapret-Zen.lnk')
+)
+foreach ($p in $lnkNames) {{ if (Test-Path $p) {{ Remove-Item $p -Force -ErrorAction SilentlyContinue }} }}
+
+# Remove registry keys
+$reg = [Microsoft.Win32.Registry]::LocalMachine
+try {{ $reg.DeleteSubKey($uninstallKey, $false) }} catch {{}}
+$reg = [Microsoft.Win32.Registry]::CurrentUser
+try {{ $reg.DeleteSubKey($uninstallKey, $false) }} catch {{}}
+
+# Remove install directory (background batch)
+$batch = [io.path]::Combine([io.path]::GetTempPath(), 'rm_zapretzen.bat')
+$batchContent = @"
+@echo off
+:retry
+rmdir /s /q "$installDir" >nul 2>&1
+if exist "$installDir" ( ping 127.0.0.1 -n 2 >nul & goto retry )
+del "%~f0"
+"@
+$batchContent | Out-File -FilePath $batch -Encoding ASCII
+Start-Process cmd.exe -ArgumentList '/c', $batch -WindowStyle Hidden
+"""
+        try:
+            install_dir.mkdir(parents=True, exist_ok=True)
+            ps_path.write_text(ps_content, encoding="utf-8")
+            if ps_path.exists():
+                uninstall_cmd = f'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "{ps_path}"'
+                _installer_log("register_ps_uninstaller", dest=str(ps_path))
+                _write_uninstall_registry(install_dir, ps_path, app_exe, override_cmd=uninstall_cmd)
+        except Exception as ps_err:
+            _installer_log("create_ps_uninstaller_failed", error=str(ps_err))
 
     def _create_shortcut(self, target: Path, name: str, desktop: bool) -> None:
         if desktop:
