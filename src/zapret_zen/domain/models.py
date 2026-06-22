@@ -14,7 +14,7 @@ class ThemeDefinition:
     stylesheet: str
 
 
-@dataclass(slots=True)
+@dataclass
 class AppSettings:
     theme: str = "light"
     accent_color: str = "#7380ff"

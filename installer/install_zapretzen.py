@@ -48,6 +48,13 @@ def _is_ru() -> bool:
     return lang.startswith("ru")
 
 
+def _is_frozen() -> bool:
+    return bool(
+        getattr(sys, "frozen", False)
+        or os.environ.get("NUITKA_ONEFILE_PARENT")
+    )
+
+
 RU = _is_ru()
 UNINSTALL_KEY = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\ZapretZen"
 INSTALLER_LOG_PATH = Path(tempfile.gettempdir()) / "zapret_zen_installer.log"
@@ -85,7 +92,7 @@ def _resource_candidates() -> list[Path]:
         file_path = Path(__file__).resolve()
     except Exception:
         file_path = None
-    if getattr(sys, "frozen", False):
+    if _is_frozen():
         exe_dir = Path(sys.executable).resolve().parent
         candidates.append(exe_dir)
         meipass = getattr(sys, "_MEIPASS", "")
@@ -204,7 +211,7 @@ def app_icon() -> QIcon:
         icon = QIcon(str(icon_path))
         if not icon.isNull():
             return icon
-    if getattr(sys, "frozen", False):
+    if _is_frozen():
         icon = QIcon(str(Path(sys.executable)))
         if not icon.isNull():
             return icon
@@ -371,7 +378,7 @@ def is_admin() -> bool:
 def relaunch_with_elevation(args: list[str]) -> bool:
     if not sys.platform.startswith("win"):
         return True
-    if not getattr(sys, "frozen", False):
+    if not _is_frozen():
         return False
     cmd = " ".join(f'"{arg}"' for arg in args)
     result = ctypes.windll.shell32.ShellExecuteW(  # type: ignore[attr-defined]
@@ -1252,7 +1259,7 @@ class InstallerWindow(QMainWindow):
             self.preserve_existing_data = choice == "preserve"
         else:
             self.preserve_existing_data = True
-        if sys.platform.startswith("win") and getattr(sys, "frozen", False) and not is_admin():
+        if sys.platform.startswith("win") and _is_frozen() and not is_admin():
             args = [
                 "--elevated-install",
                 "--install-dir",
@@ -1298,16 +1305,26 @@ class InstallerWindow(QMainWindow):
         app_exe = self.install_path / "zapret_zen.exe"
         uninstaller_exe = self.install_path / "uninstall_zapretzen.exe"
         copied = False
-        if getattr(sys, "frozen", False):
-            for attempt in range(3):
-                try:
-                    shutil.copy2(sys.executable, uninstaller_exe)
-                    copied = uninstaller_exe.exists()
-                    if copied:
-                        break
-                except Exception as copy_err:
-                    _installer_log("copy_uninstaller_failed", attempt=str(attempt), error=str(copy_err))
-                    time.sleep(0.3)
+        if _is_frozen():
+            sources = []
+            parent = os.environ.get("NUITKA_ONEFILE_PARENT")
+            if parent:
+                sources.append(Path(parent))
+            sources.append(Path(sys.executable))
+            for source in sources:
+                if not source.exists():
+                    continue
+                for attempt in range(3):
+                    try:
+                        shutil.copy2(source, uninstaller_exe)
+                        copied = uninstaller_exe.exists()
+                        if copied:
+                            break
+                    except Exception as copy_err:
+                        _installer_log("copy_uninstaller_failed", attempt=str(attempt), error=str(copy_err))
+                        time.sleep(0.3)
+                if copied:
+                    break
         if copied:
             _write_uninstall_registry(self.install_path, uninstaller_exe, app_exe)
         else:
@@ -1380,7 +1397,7 @@ def main() -> int:
     set_windows_app_id()
     if (
         sys.platform.startswith("win")
-        and getattr(sys, "frozen", False)
+        and _is_frozen()
         and "--uninstall" not in sys.argv
         and "--elevated-ui" not in sys.argv
         and not is_admin()

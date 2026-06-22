@@ -5342,7 +5342,7 @@ class MainWindow(QMainWindow):
         power_block.setObjectName("DashboardPowerBlock")
         power_block_layout = QVBoxLayout(power_block)
         power_block_layout.setContentsMargins(0, 0, 0, 0)
-        power_block_layout.setSpacing(8)
+        power_block_layout.setSpacing(2)
 
         self.power_aura = PowerAuraWidget(top)
         self.power_aura.set_power_theme(self.context.settings.get().theme)
@@ -5376,6 +5376,17 @@ class MainWindow(QMainWindow):
         power_stage_layout.addStretch(1)
 
         power_block_layout.addWidget(power_stage, 0, Qt.AlignmentFlag.AlignHCenter)
+
+        status_label = QLabel()
+        status_label.setObjectName("PowerStatusLabel")
+        status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        status_label.setProperty("class", "muted")
+        status_label.setContentsMargins(0, 2, 0, 0)
+        status_label.setMaximumHeight(20)
+        status_label.setCursor(Qt.CursorShape.ArrowCursor)
+        power_block_layout.addWidget(status_label, 0, Qt.AlignmentFlag.AlignHCenter)
+        self._power_status_label = status_label
+
         self._power_aura_host = top
         self._power_block = power_block
         self._power_stage = power_stage
@@ -6799,18 +6810,15 @@ class MainWindow(QMainWindow):
         menu = QMenu(self)
         show_action = QAction(self._t("Open"), self)
         toggle_action = QAction(self._t("Components"), self)
-        general_menu = QMenu(self._t("Zapret configuration"), self)
         quit_action = QAction(self._t("Exit"), self)
         show_action.triggered.connect(self._restore_from_tray)
         toggle_action.triggered.connect(self._tray_toggle_master_runtime)
         quit_action.triggered.connect(self._exit_application)
         self._tray_show_action = show_action
         self._tray_toggle_action = toggle_action
-        self._tray_general_menu = general_menu
         self._tray_quit_action = quit_action
         menu.addAction(show_action)
         menu.addAction(toggle_action)
-        menu.addMenu(general_menu)
         menu.addSeparator()
         menu.addAction(quit_action)
         self.tray_icon.setContextMenu(menu)
@@ -7040,20 +7048,6 @@ class MainWindow(QMainWindow):
             self._restore_from_tray()
 
     def _rebuild_tray_menu(self) -> None:
-        if self._tray_general_menu is None:
-            return
-        self._tray_general_menu.clear()
-        group = QActionGroup(self)
-        group.setExclusive(True)
-        selected = self.context.settings.get().selected_zapret_general
-        for option in self._sorted_general_options():
-            action = QAction(self._format_general_option_label(option), self)
-            action.setCheckable(True)
-            action.setChecked(option["id"] == selected)
-            action.triggered.connect(lambda _=False, gid=option["id"]: self._tray_select_general(gid))
-            group.addAction(action)
-            self._tray_general_menu.addAction(action)
-        self._tray_general_action_group = group
         states = self._component_states()
         active_ids = self._master_active_components()
         running_ids = {cid for cid in active_ids if states.get(cid) and states[cid].status == "running"}
@@ -8452,8 +8446,6 @@ class MainWindow(QMainWindow):
             self._tray_show_action.setText(self._t("Open"))
         if self._tray_toggle_action is not None:
             self._tray_toggle_action.setText(self._t("Components"))
-        if self._tray_general_menu is not None:
-            self._tray_general_menu.setTitle(self._t("Zapret configuration"))
         if self._tray_quit_action is not None:
             self._tray_quit_action.setText(self._t("Exit"))
 
@@ -9244,6 +9236,8 @@ class MainWindow(QMainWindow):
         self._toggle_in_progress = False
         self.power_button.setEnabled(bool(self._startup_snapshot_ready))
         self._update_power_icon()
+        if self._power_status_label is not None:
+            self._power_status_label.setText("")
         self.refresh_all()
         if self._pending_info_message is not None:
             title, text = self._pending_info_message
@@ -9257,6 +9251,8 @@ class MainWindow(QMainWindow):
         dots_frames = ["", ".", "..", "...", "..", "."]
         full_text = f"{base}{dots_frames[self._loading_frame % len(dots_frames)]}"
         self._loading_frame += 1
+        if self._power_status_label is not None:
+            self._power_status_label.setText(full_text)
         self.power_button.setProperty("state", "loading")
         if isinstance(self.power_button, AnimatedPowerButton):
             self.power_button.set_loading_state(True, animate=True)
@@ -10675,6 +10671,8 @@ class MainWindow(QMainWindow):
             self._set_badge("zapret", self._t("Loading"), "status_warn.svg")
             self._set_badge("tg", self._t("Loading"), "status_warn.svg")
             self._set_badge("mods", self._t("Loading"), "status_mod.svg")
+            if getattr(self, "_power_status_label", None) is not None:
+                self._power_status_label.setText("")
             return
         if self.general_combo.isVisible():
             self._refresh_general_combo(settings.selected_zapret_general)
@@ -10706,6 +10704,8 @@ class MainWindow(QMainWindow):
         self._set_badge("zapret", zapret_text, zapret_icon)
         self._set_badge("tg", tg_text, tg_icon)
         self._set_badge("mods", f"{len(enabled_mods)} {self._t('Active')}", "status_mod.svg")
+
+
 
     def _power_status_palette(self, state: str) -> tuple[str, str, int]:
         theme = self.context.settings.get().theme
@@ -12633,28 +12633,32 @@ class MainWindow(QMainWindow):
                 config_label = QLabel(self._t("DNS Server"))
                 config_label.setProperty("class", "muted")
                 card_layout.addWidget(config_label)
-                dns_combo = ClickSelectComboBox()
-                config_status = QLabel("")
-                config_status.setProperty("class", "muted")
-                config_status.hide()
-                selected = self.context.settings.get().selected_dns_preset
-                dns_combo.addItem(self._t("Not selected"), "")
-                for preset in dns_presets:
-                    name = str(preset.get("name", preset.get("id", "")))
-                    pid = str(preset.get("id", ""))
-                    dns_combo.addItem(name, pid)
-                if dns_combo.count() > 0:
+                if dns_presets:
+                    dns_combo = ClickSelectComboBox()
+                    config_status = QLabel("")
+                    config_status.setProperty("class", "muted")
+                    config_status.hide()
+                    selected = self.context.settings.get().selected_dns_preset
+                    first_id = ""
+                    for preset in dns_presets:
+                        name = str(preset.get("name", preset.get("id", "")))
+                        pid = str(preset.get("id", ""))
+                        dns_combo.addItem(name, pid)
+                        if not first_id:
+                            first_id = pid
+                    if not selected:
+                        selected = first_id
                     picked_index = 0
                     for i in range(dns_combo.count()):
                         if dns_combo.itemData(i) == selected:
                             picked_index = i
                             break
                     dns_combo.setCurrentIndex(picked_index)
-                dns_combo.currentIndexChanged.connect(
-                    lambda _=0, combo=dns_combo: self._on_dns_preset_selected(str(combo.currentData() or ""))
-                )
-                card_layout.addWidget(dns_combo)
-                card_layout.addWidget(config_status)
+                    dns_combo.currentIndexChanged.connect(
+                        lambda _=0, combo=dns_combo: self._on_dns_preset_selected(str(combo.currentData() or ""))
+                    )
+                    card_layout.addWidget(dns_combo)
+                    card_layout.addWidget(config_status)
 
             if state is not None and getattr(state, "last_error", ""):
                 error_label = QLabel(str(getattr(state, "last_error", "")))
