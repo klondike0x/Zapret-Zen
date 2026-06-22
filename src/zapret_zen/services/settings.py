@@ -147,8 +147,16 @@ class SettingsManager:
         self.storage.write_json(self._settings_path, asdict(self._settings))
 
     def _detect_system_language(self) -> str:
+        if sys.platform.startswith("win"):
+            try:
+                import ctypes
+                lang_id = ctypes.windll.kernel32.GetUserDefaultUILanguage()
+                primary = lang_id & 0x3FF
+                return "ru" if primary == 0x19 else "en"
+            except Exception:
+                pass
         try:
-            locale_name = (locale.getdefaultlocale()[0] or "").lower()  # type: ignore[call-arg]
+            locale_name = (locale.getdefaultlocale()[0] or "").lower()
         except Exception:
             locale_name = ""
         return "ru" if locale_name.startswith("ru") else "en"

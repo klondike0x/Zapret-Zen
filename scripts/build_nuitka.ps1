@@ -80,6 +80,7 @@ $nuitkaArgs = @(
   "--output-filename=zapret_zen.exe",
   "--include-data-dir=sample_data=sample_data",
   "--include-data-dir=ui_assets=ui_assets",
+  "--include-data-dir=src\zapret_zen\translations=_internal\zapret_zen\translations",
   "--include-package=cryptography",
   "--include-package=certifi",
   "--include-package-data=certifi",
