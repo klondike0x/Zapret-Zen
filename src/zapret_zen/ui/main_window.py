@@ -7729,7 +7729,8 @@ class MainWindow(QMainWindow):
                 return
         # Store pending theme before reload to restore it if needed
         pending_theme = self._pending_settings_payload.get("theme") if self._pending_settings_payload else None
-        self.context.settings.reload()
+        if action != "apply_settings":
+            self.context.settings.reload()
         if action == "apply_settings" and settings_response_revision:
             self._settings_save_acked_revision = max(self._settings_save_acked_revision, settings_response_revision)
             if settings_response_revision >= self._settings_save_revision:
