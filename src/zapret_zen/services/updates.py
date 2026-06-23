@@ -316,8 +316,13 @@ class UpdatesManager:
                 continue
             if bool(item.get("draft")):
                 continue
-            if not include_prerelease and bool(item.get("prerelease")):
-                continue
+            is_prerelease = bool(item.get("prerelease"))
+            if include_prerelease:
+                if not is_prerelease:
+                    continue
+            else:
+                if is_prerelease:
+                    continue
             version = str(item.get("tag_name") or item.get("name") or "").strip().lstrip("v")
             if not version:
                 continue
@@ -502,16 +507,7 @@ class UpdatesManager:
         return None
 
     def _version_key(self, version: str) -> tuple[int, ...]:
-        m = re.match(r"^(\d+)(?:\.(\d+))?(?:\.(\d+))?([a-z]?)(\d*)$", version.strip().lower())
-        if not m:
-            parts = re.findall(r"\d+", version)
-            if not parts:
-                return (0,)
-            return tuple(int(p) for p in parts)
-        major = int(m.group(1))
-        minor = int(m.group(2) or 0)
-        patch = int(m.group(3) or 0)
-        suffix = m.group(4) or ""
-        suffix_num = int(m.group(5)) if m.group(5) else 0
-        precedence = {"": 4, "p": 3, "b": 2, "d": 1}
-        return (major, minor, patch, precedence.get(suffix, 0), suffix_num)
+        parts = re.findall(r"\d+", version)
+        if not parts:
+            return (0,)
+        return tuple(int(part) for part in parts)
