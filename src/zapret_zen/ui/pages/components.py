@@ -53,5 +53,6 @@ class ComponentsPage(BasePage):
         self._cards_layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
         self._scroll.setWidget(self._cards_root)
         self._register_scroll_fade(self._scroll)
+        self._register_scroll_arrow(self._scroll)
         self._register_smooth_scroll(self._scroll)
         root.addWidget(self._scroll, 1)

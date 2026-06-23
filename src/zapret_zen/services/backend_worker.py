@@ -434,9 +434,6 @@ def _handle_apply_settings(context, payload, emit_progress):
     except (TypeError, ValueError):
         client_revision = 0
     effective_payload = {key: value for key, value in payload.items() if key != "client_revision"}
-    if "fortnite" in {str(item) for item in list(before.selected_service_ids or [])}:
-        effective_payload["zapret_ipset_mode"] = "any"
-        effective_payload["zapret_game_filter_mode"] = "tcpudp"
     tg_before = (
         before.tg_proxy_host,
         int(before.tg_proxy_port),
@@ -458,6 +455,10 @@ def _handle_apply_settings(context, payload, emit_progress):
     theme_before = before.theme
     language_before = before.language
     autostart_before = bool(before.autostart_windows)
+    context.settings.update(**effective_payload)
+    if "fortnite" in {str(item) for item in list(before.selected_service_ids or [])}:
+        effective_payload["zapret_ipset_mode"] = "any"
+        effective_payload["zapret_game_filter_mode"] = "tcpudp"
     requested_zapret = (
         str(effective_payload.get("zapret_ipset_mode", before.zapret_ipset_mode)),
         str(effective_payload.get("zapret_game_filter_mode", before.zapret_game_filter_mode)),
@@ -466,7 +467,6 @@ def _handle_apply_settings(context, payload, emit_progress):
     )
     zapret_changed = zapret_before != requested_zapret
     zapret_was_running = _stop_zapret_for_reconfiguration(context) if zapret_changed else False
-    context.settings.update(**effective_payload)
     tg_after = (
         str(effective_payload.get("tg_proxy_host", context.settings.get().tg_proxy_host)),
         int(effective_payload.get("tg_proxy_port", context.settings.get().tg_proxy_port)),

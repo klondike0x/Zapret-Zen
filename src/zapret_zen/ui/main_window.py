@@ -2017,6 +2017,95 @@ class ScrollFadeOverlay(QWidget):
         return True
 
 
+class ScrollArrowOverlay(QWidget):
+    def __init__(self, scrollable: QAbstractScrollArea) -> None:
+        super().__init__(scrollable.viewport())
+        self._scrollable = scrollable
+        self._visible = False
+        self._arrow_opacity = 0.5
+        self._anim = QPropertyAnimation(self, b"arrow_opacity")
+        self._anim.setStartValue(0.2)
+        self._anim.setKeyValueAt(0.5, 0.85)
+        self._anim.setEndValue(0.2)
+        self._anim.setDuration(1600)
+        self._anim.setLoopCount(-1)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.hide()
+        scrollable.viewport().installEventFilter(self)
+        scrollable.horizontalScrollBar().valueChanged.connect(self._sync_state)
+        scrollable.horizontalScrollBar().rangeChanged.connect(lambda *_: self._sync_state())
+        self._sync_geometry()
+        self._sync_state()
+
+    def _get_arrow_opacity(self) -> float:
+        return self._arrow_opacity
+
+    def _set_arrow_opacity(self, val: float) -> None:
+        self._arrow_opacity = val
+        self.update()
+
+    arrow_opacity = Property(float, _get_arrow_opacity, _set_arrow_opacity)
+
+    def _sync_geometry(self) -> None:
+        vp = self.parentWidget()
+        if vp is None:
+            return
+        self.setGeometry(vp.rect().adjusted(0, 0, 0, 0))
+        self.setFixedWidth(48)
+
+    def _sync_state(self) -> None:
+        hbar = self._scrollable.horizontalScrollBar()
+        max_val = max(0, int(hbar.maximum()))
+        val = max(0, int(hbar.value()))
+        page = max(1, int(hbar.pageStep()))
+        visible = max_val > 0 and val < max_val - page + 5
+        if visible != self._visible:
+            self._visible = visible
+            if visible:
+                self.show()
+                self.raise_()
+                self._anim.start()
+            else:
+                self._anim.stop()
+                self.hide()
+
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:
+        if watched is self.parentWidget() and event.type() == QEvent.Type.Resize:
+            self._sync_geometry()
+            QTimer.singleShot(0, self._sync_state)
+        return super().eventFilter(watched, event)
+
+    def paintEvent(self, event: QEvent) -> None:
+        if not self._visible:
+            return
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        rect = self.rect()
+        cx = rect.width() - 16
+        cy = rect.height() / 2.0
+        s = 12
+        alpha = int(self._arrow_opacity * 200)
+        gap = 6
+
+        pen = QPen(QColor(255, 255, 255, alpha), 2.5)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        painter.setPen(pen)
+
+        path = QPainterPath()
+        path.moveTo(cx - s * 0.4 - gap, cy - s * 0.55)
+        path.lineTo(cx + s * 0.4 - gap, cy)
+        path.lineTo(cx - s * 0.4 - gap, cy + s * 0.55)
+        painter.drawPath(path)
+
+        path2 = QPainterPath()
+        path2.moveTo(cx - s * 0.4, cy - s * 0.55)
+        path2.lineTo(cx + s * 0.4, cy)
+        path2.lineTo(cx - s * 0.4, cy + s * 0.55)
+        painter.drawPath(path2)
+
+
 def _content_surface_color(theme: str) -> QColor:
     if theme == "light":
         return QColor("#f4f7fc")
@@ -6639,7 +6728,7 @@ class MainWindow(QMainWindow):
                     self._retranslate_ui()
                     self._schedule_full_locale_theme_refresh()
 
-        def _ctrl_changed() -> None:
+        def _ctrl_changed(_=None) -> None:
             self._save_settings_page(page)
 
         debounce = QTimer(page)
@@ -6650,6 +6739,13 @@ class MainWindow(QMainWindow):
         def _schedule_ctrl_save() -> None:
             debounce.stop()
             debounce.start()
+
+        def _make_button_handler(key: str) -> None:
+            def handler(btn: QAbstractButton) -> None:
+                if hasattr(btn, "_seg_value"):
+                    ctrl[f"_last_{key}"] = str(btn._seg_value)
+                self._save_settings_page(page)
+            return handler
 
         mode_grp = ctrl.get("theme_mode")
         if isinstance(mode_grp, QButtonGroup):
@@ -6664,15 +6760,10 @@ class MainWindow(QMainWindow):
             cb = ctrl.get(key)
             if isinstance(cb, QCheckBox):
                 cb.stateChanged.connect(_ctrl_changed)
-        branch_grp = ctrl.get("update_branch")
-        if isinstance(branch_grp, QButtonGroup):
-            branch_grp.idClicked.connect(_ctrl_changed)
-        ipset_grp = ctrl.get("ipset_mode")
-        if isinstance(ipset_grp, QButtonGroup):
-            ipset_grp.idClicked.connect(_ctrl_changed)
-        game_grp = ctrl.get("gaming_mode")
-        if isinstance(game_grp, QButtonGroup):
-            game_grp.idClicked.connect(_ctrl_changed)
+        for seg_key in ("update_branch", "ipset_mode", "gaming_mode", "tg_media_mode"):
+            grp = ctrl.get(seg_key)
+            if isinstance(grp, QButtonGroup):
+                grp.buttonClicked.connect(_make_button_handler(seg_key))
         for key in ("udp_exclude", "tg_host", "tg_port", "tg_secret", "tg_cf_domain", "tg_fake_tls", "tg_buf", "tg_pool"):
             inp = ctrl.get(key)
             if isinstance(inp, QLineEdit):
@@ -6729,6 +6820,7 @@ class MainWindow(QMainWindow):
 
         _set_seg("ipset_mode", settings.zapret_ipset_mode)
         _set_seg("gaming_mode", settings.zapret_game_filter_mode)
+        _set_seg("tg_media_mode", settings.tg_proxy_media_mode)
         inp = ctrl.get("udp_exclude")
         if isinstance(inp, QLineEdit):
             inp.setText(settings.zapret_udp_exclude_ports or "")
@@ -6742,7 +6834,6 @@ class MainWindow(QMainWindow):
         inp = ctrl.get("tg_secret")
         if isinstance(inp, QLineEdit):
             inp.setText(settings.tg_proxy_secret or "")
-        _set_seg("tg_media_mode", "default")
         inp = ctrl.get("tg_dc")
         if isinstance(inp, QTextEdit):
             inp.setPlainText(settings.tg_proxy_dc_ip or "")
@@ -6772,11 +6863,14 @@ class MainWindow(QMainWindow):
         payload: dict[str, object] = {}
 
         def _read_seg(key: str) -> str | None:
+            cached = ctrl.get(f"_last_{key}")
+            if cached is not None:
+                return str(cached)
             grp = ctrl.get(key)
             if isinstance(grp, QButtonGroup):
-                checked = grp.checkedButton()
-                if checked is not None and hasattr(checked, "_seg_value"):
-                    return str(checked._seg_value)
+                for btn in grp.buttons():
+                    if btn.isChecked() and hasattr(btn, "_seg_value"):
+                        return str(btn._seg_value)
             return None
 
         val = _read_seg("theme_mode")
@@ -6846,6 +6940,9 @@ class MainWindow(QMainWindow):
         inp = ctrl.get("tg_pool")
         if isinstance(inp, QLineEdit):
             payload["tg_proxy_pool_size"] = inp.text()
+        val = _read_seg("tg_media_mode")
+        if val:
+            payload["tg_proxy_media_mode"] = val
 
         before = self.context.settings.get()
         QTimer.singleShot(0, lambda p=payload, b=before: self._apply_settings_payload(b, p))
@@ -7451,9 +7548,6 @@ class MainWindow(QMainWindow):
 
     def _apply_settings_payload(self, before, payload: dict[str, object]) -> None:
         effective_payload = dict(payload)
-        if "fortnite" in {str(item) for item in list(self.context.settings.get().selected_service_ids or [])}:
-            effective_payload["zapret_ipset_mode"] = "any"
-            effective_payload["zapret_game_filter_mode"] = "tcpudp"
         before_theme = str(getattr(before, "theme", self.context.settings.get().theme))
         before_language = str(getattr(before, "language", self.context.settings.get().language))
         before_accent = str(getattr(before, "accent_color", self.context.settings.get().accent_color))
@@ -8272,6 +8366,10 @@ class MainWindow(QMainWindow):
         if surface_color is not None:
             overlay.set_surface_color(surface_color)
         self._scroll_fade_overlays.append(overlay)
+        return overlay
+
+    def _register_scroll_arrow(self, scrollable: QAbstractScrollArea) -> ScrollArrowOverlay:
+        overlay = ScrollArrowOverlay(scrollable)
         return overlay
 
     def _apply_file_search_style(self) -> None:
