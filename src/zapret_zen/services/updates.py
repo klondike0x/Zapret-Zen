@@ -317,10 +317,7 @@ class UpdatesManager:
             if bool(item.get("draft")):
                 continue
             if not include_prerelease and bool(item.get("prerelease")):
-                tag = str(item.get("tag_name") or "").strip().lower()
-                is_preview = bool(re.search(r"(?:^|\d)p\d+", tag))
-                if not is_preview:
-                    continue
+                continue
             version = str(item.get("tag_name") or item.get("name") or "").strip().lstrip("v")
             if not version:
                 continue
