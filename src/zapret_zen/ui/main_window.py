@@ -793,7 +793,7 @@ class ServiceCardFrame(BaseServiceCard):
             self._selected_label.setStyleSheet("background: transparent;")
 
 
-class ServiceToggleIcon(QWidget):
+class ServiceToggleCard(QFrame):
     toggled = Signal(str, bool)
 
     def __init__(self, preset: ServicePreset, display_name: str, parent: QWidget | None = None) -> None:
@@ -806,26 +806,50 @@ class ServiceToggleIcon(QWidget):
         self._accent_color = QColor("#7380ff")
         self._theme_name = "night"
 
-        self.setFixedSize(52, 60)
+        self.setFixedHeight(42)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setMouseTracking(True)
 
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(10, 0, 10, 0)
+        layout.setSpacing(10)
+
+        self._icon_label = QLabel()
+        self._icon_label.setFixedSize(28, 28)
+        self._icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self._icon_label)
+
+        self._name_label = QLabel(display_name)
+        self._name_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        layout.addWidget(self._name_label, 1)
+
+        self._toggle_switch = QLabel()
+        self._toggle_switch.setFixedSize(38, 20)
+        self._toggle_switch.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        layout.addWidget(self._toggle_switch)
+
     def set_selected(self, selected: bool) -> None:
         self._selected = bool(selected)
+        self._sync_style()
         self.update()
 
     def set_pixmap(self, pixmap: QPixmap) -> None:
         self._pixmap = pixmap
+        if not pixmap.isNull():
+            scaled = pixmap.scaled(28, 28, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+            self._icon_label.setPixmap(scaled)
         self.update()
 
     def set_accent_color(self, color: QColor | str) -> None:
         if isinstance(color, str):
             color = QColor(color)
         self._accent_color = color
+        self._sync_style()
         self.update()
 
     def set_theme(self, theme: str) -> None:
         self._theme_name = theme
+        self._sync_style()
         self.update()
 
     def enterEvent(self, event: QEvent) -> None:
@@ -843,39 +867,101 @@ class ServiceToggleIcon(QWidget):
         if event.button() == Qt.MouseButton.LeftButton:
             self.toggled.emit(self._preset.id, not self._selected)
 
+    def _sync_style(self) -> None:
+        light = is_light_theme(self._theme_name)
+        accent = self._accent_color.name(QColor.NameFormat.HexRgb)
+
+        if self._selected:
+            text_color = accent
+        else:
+            text_color = "#3a4a62" if light else "#a0b0c8"
+
+        self._name_label.setStyleSheet(
+            f"color: {text_color}; background: transparent; font-size: 13px; font-weight: 500;"
+        )
+
+        if self._selected:
+            off_bg = "#c0c0c0"
+            off_fg = "#ffffff"
+            on_bg = accent
+            on_fg = "#ffffff"
+        else:
+            off_bg = "#3a3f48" if not light else "#d0d4dc"
+            off_fg = "#7a7f88" if not light else "#9a9ea8"
+            on_bg = off_bg
+            on_fg = off_fg
+
+        self._toggle_switch.setStyleSheet(
+            f"background: {on_bg}; border-radius: 10px; border: none;"
+            f"color: {on_fg}; font-size: 12px; font-weight: bold;"
+        )
+        self._toggle_switch.setText("ON" if self._selected else "OFF")
+
     def paintEvent(self, event: QPaintEvent) -> None:
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
 
         w = float(self.width())
         h = float(self.height())
-
         light = is_light_theme(self._theme_name)
 
+        rect = QRectF(0.5, 0.5, w - 1.0, h - 1.0)
+        radius = 8.0
+
+        base_fill = QColor("#ffffff" if light else "#1e232e")
+        if self._theme_name == "night":
+            base_fill = QColor("#1a1f2a")
+        if self._selected:
+            base_fill = QColor(base_fill.lighter(104))
+            border_color = QColor(self._accent_color)
+            border_color.setAlpha(80 if light else 60)
+        else:
+            border_color = QColor("#d9e3f1" if light else "#2a3340")
+
+        painter.setPen(QPen(border_color, 1.0))
+        painter.setBrush(base_fill)
+        painter.drawRoundedRect(rect, radius, radius)
+
         if self._hovered:
+            highlight = QColor(self._accent_color)
+            highlight.setAlphaF(0.06 if light else 0.10)
             painter.setPen(Qt.PenStyle.NoPen)
-            bg = QColor(self._accent_color)
-            bg.setAlphaF(0.10 if light else 0.14)
-            painter.setBrush(bg)
-            painter.drawRoundedRect(QRectF(2.0, 2.0, w - 4.0, h - 4.0), 8.0, 8.0)
+            painter.setBrush(highlight)
+            painter.drawRoundedRect(rect, radius, radius)
+            border_color.setAlpha(180)
+            fill_color = QColor(self._accent_color)
+            fill_color.setAlpha(18 if light else 24)
+        elif self._hovered:
+            border_color = QColor(self._accent_color)
+            border_color.setAlpha(80)
+            fill_color = QColor(self._accent_color)
+            fill_color.setAlpha(8 if light else 12)
+        else:
+            if light:
+                border_color = QColor("#d9e3f1")
+                fill_color = QColor("#ffffff")
+            else:
+                border_color = QColor("#2a3342")
+                fill_color = QColor("#1a2028")
 
-        icon_size = 26.0
-        if not self._pixmap.isNull():
-            target = QRectF(
-                (w - icon_size) / 2.0,
-                5.0,
-                icon_size,
-                icon_size,
-            )
-            painter.drawPixmap(target, self._pixmap, QRectF(0, 0, self._pixmap.width(), self._pixmap.height()))
+        painter.setPen(QPen(border_color, 1.5 if self._selected else 1.0))
+        painter.setBrush(fill_color)
+        painter.drawRoundedRect(rect, radius, radius)
 
-        painter.setPen(QColor(self._accent_color if self._selected else ("#8d99aa" if not light else "#6f7f95")))
-        font = painter.font()
-        font.setPixelSize(9)
-        font.setWeight(QFont.Weight.Medium)
-        painter.setFont(font)
-        painter.drawText(QRectF(2.0, 34.0, w - 4.0, h - 36.0), Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop, self._display_name)
+        if self._selected:
+            glow = QRadialGradient(rect.center(), max(rect.width(), rect.height()) * 0.6)
+            glow_color = QColor(self._accent_color)
+            glow_color.setAlpha(12)
+            glow.setColorAt(0.0, glow_color)
+            glow_color.setAlpha(0)
+            glow.setColorAt(1.0, glow_color)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(glow)
+            painter.drawRoundedRect(rect, radius, radius)
+
+        super().paintEvent(event)
+
+
 
 
 class ServiceCategoryCard(BaseServiceCard):
@@ -893,72 +979,86 @@ class ServiceCategoryCard(BaseServiceCard):
         self.category = category
         self._icon_pixmap = QPixmap()
         self._check_pixmap = QPixmap()
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setMinimumSize(220, 180)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, False)
 
         self._expanded = False
-        self._service_toggles: dict[str, ServiceToggleIcon] = {}
 
         root = QVBoxLayout(self)
         root.setContentsMargins(16, 16, 16, 16)
         root.setSpacing(6)
+
+        # Container inside the scroll area: header + services
+        self._services_container = QWidget()
+        self._services_container.setStyleSheet("background: transparent;")
+        container_layout = QVBoxLayout(self._services_container)
+        container_layout.setContentsMargins(0, 0, 0, 0)
+        container_layout.setSpacing(4)
+
+        # Clickable header (icon + title + desc) inside the scroll area
+        self._clickable_area = QWidget(self._services_container)
+        self._clickable_area.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._clickable_area.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, False)
+        self._clickable_area.setStyleSheet("background: transparent;")
+        clickable_layout = QVBoxLayout(self._clickable_area)
+        clickable_layout.setContentsMargins(0, 0, 0, 0)
+        clickable_layout.setSpacing(6)
 
         top = QHBoxLayout()
         top.setContentsMargins(0, 0, 0, 0)
         top.setSpacing(6)
         self._icon_label = QLabel()
         self._icon_label.setFixedSize(28, 28)
-        self._icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        top.addWidget(self._icon_label, 0, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        top.addWidget(self._icon_label, 0, Qt.AlignmentFlag.AlignLeft)
         top.addStretch(1)
         self._selected_label = QLabel()
         self._selected_label.setFixedSize(18, 18)
-        self._selected_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        top.addWidget(self._selected_label, 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop)
-        root.addLayout(top)
+        top.addWidget(self._selected_label, 0, Qt.AlignmentFlag.AlignRight)
+        clickable_layout.addLayout(top)
 
         self._title_label = QLabel()
         self._title_label.setWordWrap(True)
-        self._title_label.setProperty("class", "title")
-        root.addWidget(self._title_label)
+        clickable_layout.addWidget(self._title_label)
 
         self._desc_label = QLabel()
         self._desc_label.setWordWrap(True)
-        self._desc_label.setProperty("class", "muted")
-        root.addWidget(self._desc_label)
+        clickable_layout.addWidget(self._desc_label)
 
-        self._services_container = QWidget()
-        self._services_container.setVisible(False)
-        self._services_grid = QGridLayout(self._services_container)
+        container_layout.addWidget(self._clickable_area)
+
+        # Services toggle container (hidden when collapsed)
+        self._services_toggle_widget = QWidget(self._services_container)
+        self._services_toggle_widget.setStyleSheet("background: transparent;")
+        self._services_toggle_widget.setVisible(False)
+        self._services_grid = QVBoxLayout(self._services_toggle_widget)
         self._services_grid.setContentsMargins(0, 4, 0, 4)
-        self._services_grid.setSpacing(4)
-        root.addWidget(self._services_container)
+        self._services_grid.setSpacing(2)
+        container_layout.addWidget(self._services_toggle_widget)
+        container_layout.addStretch(1)
 
-        root.addStretch(1)
+        # Scroll area (always visible, fills card)
+        self._services_scroll = QScrollArea()
+        self._services_scroll.setWidget(self._services_container)
+        self._services_scroll.setWidgetResizable(True)
+        self._services_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._services_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self._services_scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
+        root.addWidget(self._services_scroll, 1)
 
         expand_row = QHBoxLayout()
-        expand_row.setContentsMargins(0, 0, 0, 0)
+        expand_row.setContentsMargins(0, 4, 0, 0)
         expand_row.setSpacing(0)
         expand_row.addStretch(1)
-        self._expand_btn = QToolButton()
-        self._expand_btn.setFixedSize(22, 22)
+        self._expand_btn = QPushButton()
+        self._expand_btn.setFixedSize(140, 32)
         self._expand_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._expand_btn.setAutoRaise(True)
+        self._expand_btn.setFlat(True)
+        self._expand_btn.setText("Show services")
         self._expand_btn.clicked.connect(self._toggle_expand)
-        expand_row.addWidget(self._expand_btn, 0, Qt.AlignmentFlag.AlignRight)
+        expand_row.addWidget(self._expand_btn, 0, Qt.AlignmentFlag.AlignCenter)
+        expand_row.addStretch(1)
         root.addLayout(expand_row)
-
-        self._members_frame = QFrame()
-        self._members_frame.setObjectName("membersFrame")
-        mf = QVBoxLayout(self._members_frame)
-        mf.setContentsMargins(10, 6, 10, 6)
-        mf.setSpacing(0)
-        self._members_label = QLabel()
-        self._members_label.setWordWrap(True)
-        mf.addWidget(self._members_label)
-        root.addWidget(self._members_frame)
 
     def set_card_width(self, width: int) -> None:
         self.setMinimumWidth(max(160, min(width, 320)))
@@ -1000,16 +1100,27 @@ class ServiceCategoryCard(BaseServiceCard):
         self._sync_style()
         self.update()
 
-    def set_texts(self, title: str, description: str, members_text: str) -> None:
+    def set_texts(self, title: str, description: str) -> None:
         self._title_label.setText(title)
         self._desc_label.setText(description)
-        self._members_label.setText(members_text)
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            local = self._clickable_area.mapFrom(self, event.pos())
+            if self._clickable_area.rect().contains(local):
+                event.accept()
+                return
+        super().mousePressEvent(event)
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
-        super().mouseReleaseEvent(event)
         if event.button() == Qt.MouseButton.LeftButton:
-            self._play_select_feedback()
-            self.toggled.emit(self.category.id, not self._selected)
+            local = self._clickable_area.mapFrom(self, event.pos())
+            if self._clickable_area.rect().contains(local):
+                self._play_select_feedback()
+                self.toggled.emit(self.category.id, not self._selected)
+                event.accept()
+                return
+        super().mouseReleaseEvent(event)
 
     def _card_accent(self) -> QColor:
         return QColor(self._current_accent)
@@ -1019,42 +1130,75 @@ class ServiceCategoryCard(BaseServiceCard):
 
     def _toggle_expand(self) -> None:
         self._expanded = not self._expanded
-        self._services_container.setVisible(self._expanded)
-        self._expand_btn.setArrowType(Qt.ArrowType.UpArrow if self._expanded else Qt.ArrowType.DownArrow)
-        self.updateGeometry()
-        self.update()
+        self._services_toggle_widget.setVisible(self._expanded)
+        self._expand_btn.setText("Hide services" if self._expanded else "Show services")
+        self._sync_expand_button_style()
+        if not self._expanded:
+            self._services_scroll.verticalScrollBar().setValue(0)
 
     def set_service_toggles(self, presets: list[ServicePreset], pixmaps: dict[str, QPixmap], selected_ids: set[str]) -> None:
-        for row, i in enumerate(range(0, len(presets), 4)):
-            for col in range(4):
-                idx = row * 4 + col
-                if idx >= len(presets):
-                    break
-                preset = presets[idx]
-                toggle = ServiceToggleIcon(preset, preset.title_en, self._services_container)
-                toggle.set_pixmap(pixmaps.get(preset.id, QPixmap()))
-                toggle.set_selected(preset.id in selected_ids)
-                toggle.set_accent_color(self._current_accent)
-                toggle.set_theme(self._theme)
-                toggle.toggled.connect(self._on_service_toggle_clicked)
-                self._services_grid.addWidget(toggle, row, col, Qt.AlignmentFlag.AlignCenter)
-                self._service_toggles[preset.id] = toggle
-
-    def refresh_service_toggles(self, pixmaps: dict[str, QPixmap], selected_ids: set[str]) -> None:
-        for service_id, toggle in self._service_toggles.items():
-            pix = pixmaps.get(service_id)
-            if pix is not None:
-                toggle.set_pixmap(pix)
-            toggle.set_selected(service_id in selected_ids)
+        for preset in presets:
+            toggle = ServiceToggleCard(preset, preset.title_en, self._services_container)
+            toggle.set_pixmap(pixmaps.get(preset.id, QPixmap()))
+            toggle.set_selected(preset.id in selected_ids)
             toggle.set_accent_color(self._current_accent)
             toggle.set_theme(self._theme)
+            toggle.toggled.connect(self._on_service_toggle_clicked)
+            self._services_grid.addWidget(toggle)
+        # Card height is set later to fill viewport (see _fit_category_cards)
+
+    def refresh_service_toggles(self, pixmaps: dict[str, QPixmap], selected_ids: set[str]) -> None:
+        for i in range(self._services_grid.count()):
+            item = self._services_grid.itemAt(i)
+            w = item.widget()
+            if isinstance(w, ServiceToggleCard):
+                pix = pixmaps.get(w._preset.id)
+                if pix is not None:
+                    w.set_pixmap(pix)
+                w.set_selected(w._preset.id in selected_ids)
+                w.set_accent_color(self._current_accent)
+                w.set_theme(self._theme)
 
     def _on_service_toggle_clicked(self, service_id: str, selected: bool) -> None:
         self.service_toggled.emit(service_id, selected)
 
-    def set_selected_service_ids(self, ids: set[str]) -> None:
-        for service_id, toggle in self._service_toggles.items():
-            toggle.set_selected(service_id in ids)
+    def _sync_expand_button_style(self) -> None:
+        onboarding = self._visual_scope == "onboarding"
+        accent = self._card_accent()
+        selected = bool(self._selected)
+        light = onboarding or is_light_theme(self._theme)
+
+        if self._expanded:
+            bg_color = accent.name(QColor.NameFormat.HexArgb)
+            text_color = "#ffffff"
+            hover_bg = QColor(accent).lighter(110).name(QColor.NameFormat.HexArgb)
+        else:
+            if light:
+                bg_color = "rgba(0, 0, 0, 0.05)"
+                text_color = "#3a4a62"
+                hover_bg = "rgba(0, 0, 0, 0.08)"
+            else:
+                bg_color = "rgba(255, 255, 255, 0.08)"
+                text_color = "#d2d9e5" if selected else "#8d99aa"
+                hover_bg = "rgba(255, 255, 255, 0.12)"
+
+        self._expand_btn.setStyleSheet(
+            f"QPushButton {{"
+            f"  background: {bg_color};"
+            f"  color: {text_color};"
+            f"  border: none;"
+            f"  border-radius: 6px;"
+            f"  font-size: 12px;"
+            f"  font-weight: 600;"
+            f"  padding: 6px 12px;"
+            f"}}"
+            f"QPushButton:hover {{"
+            f"  background: {hover_bg};"
+            f"}}"
+            f"QPushButton:pressed {{"
+            f"  background: {QColor(accent).darker(110).name(QColor.NameFormat.HexArgb) if self._expanded else hover_bg};"
+            f"}}"
+        )
 
     def _sync_style(self) -> None:
         onboarding = self._visual_scope == "onboarding"
@@ -1065,15 +1209,8 @@ class ServiceCategoryCard(BaseServiceCard):
         desc_color = "#3a4a62" if (onboarding or is_light_theme(self._theme)) else ("#a0b0c8" if selected else "#6f7f95")
         if self._selected:
             muted_color = "#334154" if (onboarding or is_light_theme(self._theme)) else "#d5def0"
-        frame_bg = "rgba(255,255,255,0.06)" if not (onboarding or is_light_theme(self._theme)) else "rgba(0,0,0,0.04)"
-        if self._selected and not (onboarding or is_light_theme(self._theme)):
-            frame_bg = "rgba(255,255,255,0.10)"
         self._title_label.setStyleSheet(f"color: {text_color}; background: transparent; font-size: 17px; font-weight: 700;")
         self._desc_label.setStyleSheet(f"color: {desc_color}; background: transparent; font-size: 13px; font-weight: 500;")
-        self._members_label.setStyleSheet(f"color: {muted_color}; background: transparent; font-size: 11px;")
-        self._members_frame.setStyleSheet(
-            f"#membersFrame {{ background: {frame_bg}; border-radius: 8px; border: none; }}"
-        )
         if self._selected:
             self._selected_label.setText("")
             if not self._check_pixmap.isNull():
@@ -1090,11 +1227,7 @@ class ServiceCategoryCard(BaseServiceCard):
             self._selected_label.setText("")
             self._selected_label.setPixmap(QPixmap())
             self._selected_label.setStyleSheet("background: transparent;")
-        expand_color = muted_color if not selected else ("#d5def0" if not (onboarding or is_light_theme(self._theme)) else muted_color)
-        self._expand_btn.setStyleSheet(
-            f"QToolButton {{ background: transparent; border: none; color: {expand_color}; }}"
-            f"QToolButton:hover {{ background: rgba(255,255,255,0.08); border-radius: 4px; }}"
-        )
+        self._sync_expand_button_style()
 
 
 class ServiceGridPanel(QWidget):
@@ -5816,6 +5949,7 @@ class MainWindow(QMainWindow):
         self._register_smooth_scroll(scroll, duration=250, angle_divisor=3.0)
         self._services_scroll = scroll
         root.addWidget(scroll, 1)
+        QTimer.singleShot(0, self._fit_category_cards)
         return page
 
     def _build_onboarding_services_panel(self) -> QWidget:
@@ -5852,7 +5986,7 @@ class MainWindow(QMainWindow):
             card = ServiceCategoryCard(cat)
             card.set_visual_scope(scope)
             is_selected = any(sid in selected for sid in cat.member_ids)
-            card.set_texts(cat.title_en, self._t(cat.description_ru, cat.description_en), self._category_card_members_text(cat))
+            card.set_texts(cat.title_en, self._t(cat.description_ru, cat.description_en))
             card.set_icon_pixmap(self._category_card_icon_pixmap(cat, 28, selected=is_selected, onboarding=scope == "onboarding"))
             card.set_check_pixmap(self._service_check_pixmap(10))
             card.set_theme(theme)
@@ -5867,6 +6001,19 @@ class MainWindow(QMainWindow):
             card.service_toggled.connect(self._on_service_card_toggled)
             cards.append(card)
         return cards
+
+    def _fit_category_cards(self) -> None:
+        scroll = getattr(self, "_services_scroll", None)
+        if scroll is None or not scroll.isVisible():
+            return
+        viewport = scroll.viewport()
+        if viewport is None:
+            return
+        avail = viewport.height() - 28  # canvas margins
+        if avail < 100:
+            return
+        for card in self._category_cards:
+            card.setFixedHeight(avail)
 
     def _service_card_texts(self, preset: ServicePreset, *, scope: str = "onboarding") -> tuple[str, str]:
         description_ru = preset.description_ru
@@ -7489,6 +7636,7 @@ class MainWindow(QMainWindow):
             if index == 1:
                 self.refresh_services()
                 if self._services_scroll is not None:
+                    QTimer.singleShot(0, self._fit_category_cards)
                     QTimer.singleShot(0, lambda: self._services_scroll.verticalScrollBar().setValue(0))
             elif index == 2:
                 try:
@@ -12100,7 +12248,7 @@ class MainWindow(QMainWindow):
                 card.blockSignals(True)
                 card.set_theme(theme)
                 card.set_accent_color(accent)
-                card.set_texts(cat.title_en, self._t(cat.description_ru, cat.description_en), self._category_card_members_text(cat))
+                card.set_texts(cat.title_en, self._t(cat.description_ru, cat.description_en))
                 card.set_icon_pixmap(self._category_card_icon_pixmap(cat, 28, selected=is_selected))
                 card.set_check_pixmap(self._service_check_pixmap(10))
                 card.set_selected(is_selected)
