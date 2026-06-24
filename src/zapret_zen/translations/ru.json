@@ -175,6 +175,7 @@
   "Select a file before renaming.": "Выберите файл перед переименованием.",
   "A file with this name already exists.": "Файл с таким именем уже существует.",
   "Loading": "Загрузка",
+  "Starting": "Запуск",
   "Running": "Работает",
   "Idle": "Ожидание",
   "Error": "Ошибка",

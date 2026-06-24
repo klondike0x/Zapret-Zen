@@ -3623,6 +3623,7 @@ class MainWindow(QMainWindow):
         self._min_btn: QToolButton | None = None
         self._close_btn: QToolButton | None = None
         self._toggle_in_progress = False
+        self._autostart_in_progress = False
         self._loading_frame = 0
         self._loading_timer = QTimer(self)
         self._loading_timer.setInterval(220)
@@ -7286,6 +7287,8 @@ class MainWindow(QMainWindow):
             return
         self._loading_action = "connect"
         self._toggle_in_progress = True
+        if autostart_only:
+            self._autostart_in_progress = True
         self._loading_timer.start()
         self._advance_loading_caption()
         self._submit_backend_task("start_enabled_components", {"autostart_only": autostart_only})
@@ -9566,6 +9569,7 @@ class MainWindow(QMainWindow):
     def _on_master_toggle_finished(self) -> None:
         self._loading_timer.stop()
         self._toggle_in_progress = False
+        self._autostart_in_progress = False
         self.power_button.setEnabled(bool(self._startup_snapshot_ready))
         self._update_power_icon()
         if self._power_status_label is not None:
@@ -11002,6 +11006,22 @@ class MainWindow(QMainWindow):
             self._set_badge("app", self._t("Loading"), "status_warn.svg")
             self._set_badge("zapret", self._t("Loading"), "status_warn.svg")
             self._set_badge("tg", self._t("Loading"), "status_warn.svg")
+            self._set_badge("mods", self._t("Loading"), "status_mod.svg")
+            if getattr(self, "_power_status_label", None) is not None:
+                self._power_status_label.setText("")
+            return
+        if self._autostart_in_progress:
+            self.power_button.setEnabled(False)
+            self.power_button.setProperty("state", "loading")
+            self._update_power_icon()
+            if isinstance(self.power_button, AnimatedPowerButton):
+                self.power_button.set_loading_state(True, animate=not self._page_transition_running)
+            if self.power_aura is not None:
+                self.power_aura.set_idle_pulse_enabled(False)
+                self.power_aura.set_status_glow_enabled(True)
+            self._set_badge("app", self._t("Starting"), "status_warn.svg")
+            self._set_badge("zapret", self._t("Starting"), "status_warn.svg")
+            self._set_badge("tg", self._t("Starting"), "status_warn.svg")
             self._set_badge("mods", self._t("Loading"), "status_mod.svg")
             if getattr(self, "_power_status_label", None) is not None:
                 self._power_status_label.setText("")

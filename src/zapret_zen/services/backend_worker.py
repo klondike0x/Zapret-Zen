@@ -379,6 +379,11 @@ def _handle_start_enabled_components(context, payload, emit_progress):
         for component in components:
             if component.enabled:
                 context.processes.start_component(component.id)
+    # Force fresh state computation after all components started
+    import time
+    context.processes._invalidate_state_cache()
+    time.sleep(0.5)  # Give processes time to fully initialize
+    context.processes._invalidate_state_cache()  # Invalidate again for fresh data
     result = _snapshot(context)
     _attach_telegram_proxy_info(context, result)
     return result
