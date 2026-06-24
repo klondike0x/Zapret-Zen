@@ -292,7 +292,8 @@ class ProcessManager:
         for component in self.list_components():
             state = self._states.get(component.id, ComponentState(component_id=component.id))
             if component.id == "zapret":
-                state.status = "running" if self._is_image_running("winws.exe") else "stopped"
+                was_running = self._is_image_running("winws.exe")
+                state.status = "running" if was_running else "stopped"
                 state.pid = None
             elif component.id == "tg-ws-proxy":
                 worker = self._processes.get(component.id)
@@ -304,7 +305,8 @@ class ProcessManager:
                     state.status = "stopped"
                     state.pid = None
             elif component.id == "dns-manager":
-                state.status = "running" if self._dns_manager_is_active() else "stopped"
+                active = self._dns_manager_is_active()
+                state.status = "running" if active else "stopped"
                 state.pid = None
             else:
                 process = self._processes.get(component.id)

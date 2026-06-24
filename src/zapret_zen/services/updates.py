@@ -316,13 +316,8 @@ class UpdatesManager:
                 continue
             if bool(item.get("draft")):
                 continue
-            is_prerelease = bool(item.get("prerelease"))
-            if include_prerelease:
-                if not is_prerelease:
-                    continue
-            else:
-                if is_prerelease:
-                    continue
+            if not include_prerelease and bool(item.get("prerelease")):
+                continue
             version = str(item.get("tag_name") or item.get("name") or "").strip().lstrip("v")
             if not version:
                 continue
@@ -506,8 +501,20 @@ class UpdatesManager:
                 return asset
         return None
 
-    def _version_key(self, version: str) -> tuple[int, ...]:
-        parts = re.findall(r"\d+", version)
-        if not parts:
+    @staticmethod
+    def _version_key(version: str) -> tuple[int, ...]:
+        m = re.match(r"(\d+(?:\.\d+)*)", version)
+        if not m:
             return (0,)
-        return tuple(int(part) for part in parts)
+        base = tuple(int(p) for p in m.group(1).split("."))
+        remaining = version[m.end():]
+        suffix_weights = {"": 3, "p": 2, "b": 1, "d": 0}
+        suffix_letter = ""
+        suffix_num = 0
+        if remaining:
+            suffix_match = re.match(r"([a-zA-Z])(\d*)", remaining)
+            if suffix_match:
+                suffix_letter = suffix_match.group(1)
+                suffix_num = int(suffix_match.group(2)) if suffix_match.group(2) else 0
+        weight = suffix_weights.get(suffix_letter, -1)
+        return base + (weight, suffix_num)
