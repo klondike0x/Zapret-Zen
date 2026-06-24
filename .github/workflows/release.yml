@@ -1,12 +1,15 @@
 name: Build & Release
 
 on:
+  push:
+    tags:
+      - 'v*'
   workflow_dispatch:
     inputs:
       tag:
         description: "Version tag (e.g. v2.2.0)"
         required: true
-        default: "2.2.0"
+        default: "v2.2.0"
       release_name:
         description: "Release title (e.g. Zapret-Zen 2.2.0)"
         required: false
@@ -26,7 +29,9 @@ jobs:
     runs-on: windows-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Clean workspace
         shell: pwsh
@@ -55,7 +60,11 @@ jobs:
       - name: Build Nuitka x64
         shell: pwsh
         run: |
-          $version = "${{ inputs.tag }}".TrimStart("v")
+          $tag = "${{ github.ref_name }}"
+          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
+            $tag = "${{ inputs.tag }}"
+          }
+          $version = $tag.TrimStart("v")
           .\scripts\build_nuitka.ps1 -Python python -OutputDir dist_nuitka -Compiler msvc -Version $version
 
       - name: Upload x64 artifact
@@ -69,7 +78,9 @@ jobs:
     runs-on: windows-11-arm
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Clean workspace
         shell: pwsh
@@ -101,7 +112,11 @@ jobs:
       - name: Build Nuitka arm64
         shell: pwsh
         run: |
-          $version = "${{ inputs.tag }}".TrimStart("v")
+          $tag = "${{ github.ref_name }}"
+          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
+            $tag = "${{ inputs.tag }}"
+          }
+          $version = $tag.TrimStart("v")
           .\scripts\build_nuitka.ps1 -Python python -OutputDir dist_nuitka -Compiler msvc -Version $version
 
       - name: Upload arm64 artifact
@@ -120,7 +135,9 @@ jobs:
       contents: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Clean workspace
         shell: pwsh
@@ -166,11 +183,14 @@ jobs:
         id: meta
         shell: pwsh
         run: |
-          $tag = "${{ inputs.tag }}"
-          if (-not $tag) { $tag = "v0.0.0" }
+          $tag = "${{ github.ref_name }}"
+          if ("${{ github.event_name }}" -eq "workflow_dispatch") {
+            $tag = "${{ inputs.tag }}"
+          }
+          if (-not $tag -or $tag -eq "") { $tag = "v0.0.0" }
           $version = $tag.TrimStart("v")
           $name = "${{ inputs.release_name }}"
-          if (-not $name) { $name = "Zapret-Zen $version" }
+          if (-not $name -or $name -eq "") { $name = "Zapret-Zen $version" }
           "tag=$tag" >> $env:GITHUB_OUTPUT
           "version=$version" >> $env:GITHUB_OUTPUT
           "name=$name" >> $env:GITHUB_OUTPUT
@@ -210,33 +230,108 @@ jobs:
             Copy-Item $installer.FullName ".\release_$version\" -Force
           }
 
-      - name: Read release notes
+      - name: Check if release exists
+        id: release_check
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "${{ steps.meta.outputs.tag }}"
+          $exists = $false
+          try {
+            gh release view $tag --json url 2>&1 | Out-Null
+            if ($LASTEXITCODE -eq 0) {
+              $exists = $true
+              Write-Host "Release $tag already exists"
+            }
+          } catch {
+            Write-Host "Release $tag does not exist"
+          }
+          "exists=$($exists.ToString().ToLower())" >> $env:GITHUB_OUTPUT
+
+      - name: Read release notes for new release
         id: notes
+        if: steps.release_check.outputs.exists == 'false'
         shell: pwsh
         run: |
           $body = ""
           $inputBody = "${{ inputs.body }}"
+
+          # Priority 1: workflow_dispatch body input
           if ($inputBody.Trim()) {
             $body = $inputBody
-          } elseif (Test-Path "release_note.md") {
-            $body = Get-Content "release_note.md" -Raw -Encoding UTF8
           }
+          # Priority 2: release_note.md file
+          elseif (Test-Path "release_note.md") {
+            $content = Get-Content "release_note.md" -Raw -Encoding UTF8
+            if ($content -and $content.Trim()) {
+              $body = $content.TrimEnd()
+            }
+          }
+
+          # Priority 3: default fallback
           if (-not $body.Trim()) {
             $body = "Zapret-Zen ${{ steps.meta.outputs.version }} release."
           }
-          $delimiter = "REL_BODY_EOF_{0}" -f [guid]::NewGuid().ToString("N")
-          "body<<$delimiter" >> $env:GITHUB_OUTPUT
-          $body >> $env:GITHUB_OUTPUT
-          $delimiter >> $env:GITHUB_OUTPUT
 
-      - name: Create GitHub release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ steps.meta.outputs.tag }}
-          name: ${{ steps.meta.outputs.name }}
-          body: ${{ steps.notes.outputs.body }}
-          files: |
-            release_${{ steps.meta.outputs.version }}/*.exe
-            release_${{ steps.meta.outputs.version }}/*portable*.zip
-          draft: false
-          prerelease: ${{ inputs.prerelease }}
+          # Write to temp file for gh release create
+          $body | Out-File -FilePath "release_body.txt" -Encoding UTF8 -NoNewline
+          Write-Host "Release notes prepared (length: $($body.Length) chars)"
+
+      - name: Create new GitHub release
+        if: steps.release_check.outputs.exists == 'false'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "${{ steps.meta.outputs.tag }}"
+          $name = "${{ steps.meta.outputs.name }}"
+          $prerelease = "${{ inputs.prerelease }}"
+
+          $args = @(
+            "release", "create", $tag,
+            "--title", $name,
+            "--notes-file", "release_body.txt"
+          )
+
+          if ($prerelease -eq "true") {
+            $args += "--prerelease"
+          }
+
+          # Add all release files
+          $version = "${{ steps.meta.outputs.version }}"
+          $files = Get-ChildItem ".\release_$version\*" -File
+          foreach ($file in $files) {
+            $args += $file.FullName
+          }
+
+          Write-Host "Creating release $tag with title '$name'"
+          & gh @args
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "Failed to create release"
+            exit 1
+          }
+
+      - name: Update existing release assets
+        if: steps.release_check.outputs.exists == 'true'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = "${{ steps.meta.outputs.tag }}"
+          $version = "${{ steps.meta.outputs.version }}"
+
+          Write-Host "Updating assets for existing release $tag (preserving title and description)"
+
+          # Upload all files with --clobber to replace existing assets
+          $files = Get-ChildItem ".\release_$version\*" -File
+          foreach ($file in $files) {
+            Write-Host "Uploading $($file.Name)..."
+            gh release upload $tag $file.FullName --clobber
+            if ($LASTEXITCODE -ne 0) {
+              Write-Error "Failed to upload $($file.Name)"
+              exit 1
+            }
+          }
+
+          Write-Host "All assets updated successfully"

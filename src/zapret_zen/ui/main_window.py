@@ -793,8 +793,94 @@ class ServiceCardFrame(BaseServiceCard):
             self._selected_label.setStyleSheet("background: transparent;")
 
 
+class ServiceToggleIcon(QWidget):
+    toggled = Signal(str, bool)
+
+    def __init__(self, preset: ServicePreset, display_name: str, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._preset = preset
+        self._display_name = display_name
+        self._selected = False
+        self._pixmap = QPixmap()
+        self._hovered = False
+        self._accent_color = QColor("#7380ff")
+        self._theme_name = "night"
+
+        self.setFixedSize(52, 60)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setMouseTracking(True)
+
+    def set_selected(self, selected: bool) -> None:
+        self._selected = bool(selected)
+        self.update()
+
+    def set_pixmap(self, pixmap: QPixmap) -> None:
+        self._pixmap = pixmap
+        self.update()
+
+    def set_accent_color(self, color: QColor | str) -> None:
+        if isinstance(color, str):
+            color = QColor(color)
+        self._accent_color = color
+        self.update()
+
+    def set_theme(self, theme: str) -> None:
+        self._theme_name = theme
+        self.update()
+
+    def enterEvent(self, event: QEvent) -> None:
+        self._hovered = True
+        self.update()
+        super().enterEvent(event)
+
+    def leaveEvent(self, event: QEvent) -> None:
+        self._hovered = False
+        self.update()
+        super().leaveEvent(event)
+
+    def mouseReleaseEvent(self, event: QMouseEvent) -> None:
+        super().mouseReleaseEvent(event)
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.toggled.emit(self._preset.id, not self._selected)
+
+    def paintEvent(self, event: QPaintEvent) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+
+        w = float(self.width())
+        h = float(self.height())
+
+        light = is_light_theme(self._theme_name)
+
+        if self._hovered:
+            painter.setPen(Qt.PenStyle.NoPen)
+            bg = QColor(self._accent_color)
+            bg.setAlphaF(0.10 if light else 0.14)
+            painter.setBrush(bg)
+            painter.drawRoundedRect(QRectF(2.0, 2.0, w - 4.0, h - 4.0), 8.0, 8.0)
+
+        icon_size = 26.0
+        if not self._pixmap.isNull():
+            target = QRectF(
+                (w - icon_size) / 2.0,
+                5.0,
+                icon_size,
+                icon_size,
+            )
+            painter.drawPixmap(target, self._pixmap, QRectF(0, 0, self._pixmap.width(), self._pixmap.height()))
+
+        painter.setPen(QColor(self._accent_color if self._selected else ("#8d99aa" if not light else "#6f7f95")))
+        font = painter.font()
+        font.setPixelSize(9)
+        font.setWeight(QFont.Weight.Medium)
+        painter.setFont(font)
+        painter.drawText(QRectF(2.0, 34.0, w - 4.0, h - 36.0), Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop, self._display_name)
+
+
 class ServiceCategoryCard(BaseServiceCard):
     toggled = Signal(str, bool)
+    service_toggled = Signal(str, bool)
 
     _current_accent: str = "#7380ff"
 
@@ -811,6 +897,9 @@ class ServiceCategoryCard(BaseServiceCard):
         self.setMinimumSize(220, 180)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, False)
+
+        self._expanded = False
+        self._service_toggles: dict[str, ServiceToggleIcon] = {}
 
         root = QVBoxLayout(self)
         root.setContentsMargins(16, 16, 16, 16)
@@ -840,7 +929,26 @@ class ServiceCategoryCard(BaseServiceCard):
         self._desc_label.setProperty("class", "muted")
         root.addWidget(self._desc_label)
 
+        self._services_container = QWidget()
+        self._services_container.setVisible(False)
+        self._services_grid = QGridLayout(self._services_container)
+        self._services_grid.setContentsMargins(0, 4, 0, 4)
+        self._services_grid.setSpacing(4)
+        root.addWidget(self._services_container)
+
         root.addStretch(1)
+
+        expand_row = QHBoxLayout()
+        expand_row.setContentsMargins(0, 0, 0, 0)
+        expand_row.setSpacing(0)
+        expand_row.addStretch(1)
+        self._expand_btn = QToolButton()
+        self._expand_btn.setFixedSize(22, 22)
+        self._expand_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._expand_btn.setAutoRaise(True)
+        self._expand_btn.clicked.connect(self._toggle_expand)
+        expand_row.addWidget(self._expand_btn, 0, Qt.AlignmentFlag.AlignRight)
+        root.addLayout(expand_row)
 
         self._members_frame = QFrame()
         self._members_frame.setObjectName("membersFrame")
@@ -909,6 +1017,45 @@ class ServiceCategoryCard(BaseServiceCard):
     def _burst_origin_widget(self) -> QFrame:
         return self._icon_label
 
+    def _toggle_expand(self) -> None:
+        self._expanded = not self._expanded
+        self._services_container.setVisible(self._expanded)
+        self._expand_btn.setArrowType(Qt.ArrowType.UpArrow if self._expanded else Qt.ArrowType.DownArrow)
+        self.updateGeometry()
+        self.update()
+
+    def set_service_toggles(self, presets: list[ServicePreset], pixmaps: dict[str, QPixmap], selected_ids: set[str]) -> None:
+        for row, i in enumerate(range(0, len(presets), 4)):
+            for col in range(4):
+                idx = row * 4 + col
+                if idx >= len(presets):
+                    break
+                preset = presets[idx]
+                toggle = ServiceToggleIcon(preset, preset.title_en, self._services_container)
+                toggle.set_pixmap(pixmaps.get(preset.id, QPixmap()))
+                toggle.set_selected(preset.id in selected_ids)
+                toggle.set_accent_color(self._current_accent)
+                toggle.set_theme(self._theme)
+                toggle.toggled.connect(self._on_service_toggle_clicked)
+                self._services_grid.addWidget(toggle, row, col, Qt.AlignmentFlag.AlignCenter)
+                self._service_toggles[preset.id] = toggle
+
+    def refresh_service_toggles(self, pixmaps: dict[str, QPixmap], selected_ids: set[str]) -> None:
+        for service_id, toggle in self._service_toggles.items():
+            pix = pixmaps.get(service_id)
+            if pix is not None:
+                toggle.set_pixmap(pix)
+            toggle.set_selected(service_id in selected_ids)
+            toggle.set_accent_color(self._current_accent)
+            toggle.set_theme(self._theme)
+
+    def _on_service_toggle_clicked(self, service_id: str, selected: bool) -> None:
+        self.service_toggled.emit(service_id, selected)
+
+    def set_selected_service_ids(self, ids: set[str]) -> None:
+        for service_id, toggle in self._service_toggles.items():
+            toggle.set_selected(service_id in ids)
+
     def _sync_style(self) -> None:
         onboarding = self._visual_scope == "onboarding"
         accent = self._card_accent()
@@ -943,6 +1090,11 @@ class ServiceCategoryCard(BaseServiceCard):
             self._selected_label.setText("")
             self._selected_label.setPixmap(QPixmap())
             self._selected_label.setStyleSheet("background: transparent;")
+        expand_color = muted_color if not selected else ("#d5def0" if not (onboarding or is_light_theme(self._theme)) else muted_color)
+        self._expand_btn.setStyleSheet(
+            f"QToolButton {{ background: transparent; border: none; color: {expand_color}; }}"
+            f"QToolButton:hover {{ background: rgba(255,255,255,0.08); border-radius: 4px; }}"
+        )
 
 
 class ServiceGridPanel(QWidget):
@@ -5706,6 +5858,12 @@ class MainWindow(QMainWindow):
             card.set_accent_color(accent)
             card.set_selected(is_selected)
             card.toggled.connect(self._on_category_card_toggled)
+            cat_presets = [p for p in SERVICE_PRESETS if p.id in cat.member_ids]
+            pixmaps: dict[str, QPixmap] = {}
+            for preset in cat_presets:
+                pixmaps[preset.id] = self._service_icon_pixmap(preset, 24, selected=preset.id in selected)
+            card.set_service_toggles(cat_presets, pixmaps, selected)
+            card.service_toggled.connect(self._on_service_card_toggled)
             cards.append(card)
         return cards
 
@@ -11926,6 +12084,11 @@ class MainWindow(QMainWindow):
                 card.set_icon_pixmap(self._category_card_icon_pixmap(cat, 28, selected=is_selected))
                 card.set_check_pixmap(self._service_check_pixmap(10))
                 card.set_selected(is_selected)
+                cat_presets = [p for p in SERVICE_PRESETS if p.id in cat.member_ids]
+                pixmaps: dict[str, QPixmap] = {}
+                for preset in cat_presets:
+                    pixmaps[preset.id] = self._service_icon_pixmap(preset, 24, selected=preset.id in selected)
+                card.refresh_service_toggles(pixmaps, selected)
             finally:
                 try:
                     card.blockSignals(False)
@@ -11946,6 +12109,11 @@ class MainWindow(QMainWindow):
                 card.set_icon_pixmap(self._category_card_icon_pixmap(cat, 28, selected=is_selected))
                 card.set_check_pixmap(self._service_check_pixmap(10))
                 card.set_selected(is_selected)
+                cat_presets = [p for p in SERVICE_PRESETS if p.id in cat.member_ids]
+                pixmaps: dict[str, QPixmap] = {}
+                for preset in cat_presets:
+                    pixmaps[preset.id] = self._service_icon_pixmap(preset, 24, selected=preset.id in selected)
+                card.refresh_service_toggles(pixmaps, selected)
             finally:
                 try:
                     card.blockSignals(False)
