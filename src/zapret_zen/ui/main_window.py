@@ -333,11 +333,18 @@ class AnimatedNavButton(QToolButton):
         self._glow_pos = QPointF(22.0, 22.0)
         self._light_theme = False
         self._theme_name = "night"
+        self._accent_color = QColor("#7380ff")
         self._anims: list[QPropertyAnimation] = []
 
     def set_nav_theme(self, theme: str) -> None:
         self._theme_name = theme
         self._light_theme = is_light_theme(theme)
+        self.update()
+
+    def set_accent_color(self, color: QColor | str) -> None:
+        if isinstance(color, str):
+            color = QColor(color)
+        self._accent_color = color
         self.update()
 
     def _stop_anims(self) -> None:
@@ -432,6 +439,19 @@ class AnimatedNavButton(QToolButton):
         if requested_icon.isValid():
             icon_size = max(18, round(max(requested_icon.width(), requested_icon.height()) * self._icon_scale))
         pixmap = self.icon().pixmap(icon_size, icon_size)
+        if not pixmap.isNull():
+            tinted = QPixmap(pixmap.size())
+            tinted.fill(Qt.GlobalColor.transparent)
+            tinted.setDevicePixelRatio(1.0)
+            tint_painter = QPainter(tinted)
+            tint_painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+            tint_painter.drawPixmap(0, 0, pixmap)
+            tint_painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceAtop)
+            accent = QColor(self._accent_color)
+            accent.setAlphaF(0.45)
+            tint_painter.fillRect(tinted.rect(), accent)
+            tint_painter.end()
+            pixmap = tinted
         target = QRectF(
             (self.width() - icon_size) / 2.0 + self._icon_dx + base_icon_dx,
             (self.height() - icon_size) / 2.0 + self._icon_dy,
@@ -531,6 +551,7 @@ class GitHubSidebarButton(QToolButton):
         super().__init__(parent)
         self._hover_progress = 0.0
         self._theme_name = "dark"
+        self._accent_color = QColor("#7380ff")
         self._hover_anim: QPropertyAnimation | None = None
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setMouseTracking(True)
@@ -538,6 +559,12 @@ class GitHubSidebarButton(QToolButton):
 
     def set_button_theme(self, theme: str) -> None:
         self._theme_name = theme
+        self.update()
+
+    def set_accent_color(self, color: QColor | str) -> None:
+        if isinstance(color, str):
+            color = QColor(color)
+        self._accent_color = color
         self.update()
 
     def enterEvent(self, event: QEvent) -> None:
@@ -574,7 +601,6 @@ class GitHubSidebarButton(QToolButton):
             icon_size,
         )
         if not pixmap.isNull():
-            tint = QColor("#1f2a3d" if is_light_theme(self._theme_name) else "#d7deea")
             pixmap.setDevicePixelRatio(1.0)
             tinted = QPixmap(pixmap.size())
             tinted.fill(Qt.GlobalColor.transparent)
@@ -583,7 +609,7 @@ class GitHubSidebarButton(QToolButton):
             tint_painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
             tint_painter.drawPixmap(0, 0, pixmap)
             tint_painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
-            tint_painter.fillRect(tinted.rect(), tint)
+            tint_painter.fillRect(tinted.rect(), self._accent_color)
             tint_painter.end()
             pixmap = tinted
         painter.setOpacity(opacity)
@@ -7219,7 +7245,9 @@ class MainWindow(QMainWindow):
 
     def _attach_button_animations(self, widget: QWidget) -> None:
         if isinstance(widget, AnimatedNavButton):
-            widget.set_nav_theme(self.context.settings.get().theme)
+            settings = self.context.settings.get()
+            widget.set_nav_theme(settings.theme)
+            widget.set_accent_color(settings.accent_color)
             return
         if isinstance(widget, AnimatedPowerButton):
             return
@@ -8156,9 +8184,11 @@ class MainWindow(QMainWindow):
         for btn in self._nav_buttons:
             if isinstance(btn, AnimatedNavButton):
                 btn.set_nav_theme(theme)
+                btn.set_accent_color(accent)
         if self._github_sidebar_btn is not None:
             self._github_sidebar_btn.setIcon(self._icon("github.svg"))
             self._github_sidebar_btn.set_button_theme(theme)
+            self._github_sidebar_btn.set_accent_color(accent)
         for overlay in self._scroll_fade_overlays:
             overlay.set_theme(theme)
             if getattr(overlay, "_scrollable", None) is getattr(self, "_file_tag_scroll", None):
