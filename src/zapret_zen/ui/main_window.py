@@ -25,7 +25,7 @@ from zapret_zen.services.service_catalog import (
     prioritize_generals_for_services,
     service_ids_in_categories,
 )
-from PySide6.QtCore import QCoreApplication, QEasingCurve, QEvent, QEventLoop, QObject, QPoint, QPointF, QRect, QRectF, QSize, QSizeF, Qt, QTimer, Signal, QPropertyAnimation, QParallelAnimationGroup, Property, QByteArray
+from PySide6.QtCore import QAbstractAnimation, QCoreApplication, QEasingCurve, QEvent, QEventLoop, QObject, QPoint, QPointF, QRect, QRectF, QSize, QSizeF, Qt, QTimer, Signal, QPropertyAnimation, QParallelAnimationGroup, Property, QByteArray
 from PySide6.QtGui import QAction, QActionGroup, QColor, QCloseEvent, QFont, QFontDatabase, QFontMetrics, QIcon, QImage, QKeyEvent, QLinearGradient, QMouseEvent, QPainter, QPainterPath, QPen, QPixmap, QRadialGradient, QRegion, QTextCharFormat, QTextCursor, QTextDocument
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import (
@@ -3980,6 +3980,160 @@ class SettingsDialog(AppDialog):
             self.tg_dc_ip_input.setPlainText("2:149.154.167.220\n4:149.154.167.220")
 
 
+# ── SettingsTabBar ──────────────────────────────────────────────────────────
+
+class _SettingsTabButton(QWidget):
+    clicked = Signal()
+
+    def __init__(self, text: str, parent=None):
+        super().__init__(parent)
+        self._text = text
+        self._checked = False
+        self._hover_progress = 0.0
+        self._hover_anim = QPropertyAnimation(self, b"hoverProgress", self)
+        self._hover_anim.setDuration(200)
+        self._hover_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._hover_anim.setStartValue(0.0)
+        self._hover_anim.setEndValue(1.0)
+        self._glint_progress = 0.0
+        self._glint_anim = QPropertyAnimation(self, b"glintProgress", self)
+        self._glint_anim.setDuration(400)
+        self._glint_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._glint_anim.setEndValue(1.0)
+        self.setFixedHeight(34)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+    def _get_hover_progress(self) -> float:
+        return self._hover_progress
+    def _set_hover_progress(self, v: float) -> None:
+        self._hover_progress = v
+        self.update()
+    hoverProgress = Property(float, _get_hover_progress, _set_hover_progress)
+
+    def _get_glint_progress(self) -> float:
+        return self._glint_progress
+    def _set_glint_progress(self, v: float) -> None:
+        self._glint_progress = v
+        self.update()
+    glintProgress = Property(float, _get_glint_progress, _set_glint_progress)
+
+    def play_glint(self):
+        self._glint_progress = 0.0
+        self._glint_anim.stop()
+        self._glint_anim.start()
+
+    def enterEvent(self, event):
+        self._hover_anim.stop()
+        self._hover_anim.setDirection(QAbstractAnimation.Direction.Forward)
+        self._hover_anim.start()
+        return super().enterEvent(event)
+
+    def leaveEvent(self, event):
+        self._hover_anim.stop()
+        self._hover_anim.setDirection(QAbstractAnimation.Direction.Backward)
+        self._hover_anim.start()
+        return super().leaveEvent(event)
+
+    def mousePressEvent(self, event):
+        self.clicked.emit()
+        return super().mousePressEvent(event)
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        r = self.rect().adjusted(0, 0, -1, -1)
+
+        if self._checked:
+            accent = QColor(self._accent if hasattr(self, '_accent') else '#7380ff')
+            fill = QColor(accent)
+            fill.setAlpha(25)
+            p.setBrush(fill)
+            p.setPen(Qt.PenStyle.NoPen)
+            p.drawRoundedRect(r, 8, 8)
+
+        if self._hover_progress > 0:
+            hl = QColor(255, 255, 255)
+            hl.setAlpha(int(8 * self._hover_progress))
+            p.setBrush(hl)
+            p.setPen(Qt.PenStyle.NoPen)
+            p.drawRoundedRect(r, 8, 8)
+
+        border = QColor(self._accent if hasattr(self, '_accent') else '#7380ff')
+        border.setAlpha(80 if self._checked else 25)
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.setPen(QPen(border, 1))
+        p.drawRoundedRect(r, 8, 8)
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.setPen(Qt.PenStyle.NoPen)
+
+        if self._glint_progress > 0:
+            clip = QPainterPath()
+            clip.addRoundedRect(r, 8, 8)
+            p.save()
+            p.setClipPath(clip)
+            grad = QLinearGradient(
+                r.left(), r.top(),
+                r.right(), r.top(),
+            )
+            pos = self._glint_progress
+            grad.setColorAt(max(0, pos - 0.4), QColor(255, 255, 255, 0))
+            grad.setColorAt(pos, QColor(255, 255, 255, 60))
+            grad.setColorAt(min(1, pos + 0.4), QColor(255, 255, 255, 0))
+            p.setBrush(grad)
+            p.setPen(Qt.PenStyle.NoPen)
+            p.drawRoundedRect(r, 8, 8)
+            p.restore()
+
+        p.setPen(QColor(200, 200, 200) if self._checked else QColor(140, 140, 140))
+        f = self.font()
+        f.setPointSize(9)
+        f.setWeight(QFont.Weight.Bold if self._checked else QFont.Weight.Medium)
+        p.setFont(f)
+        p.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, self._text)
+        p.end()
+
+    def set_accent(self, c):
+        self._accent = c
+        self.update()
+
+
+class _SettingsTabBar(QWidget):
+    tab_changed = Signal(int)
+
+    def __init__(self, tabs: list[str], parent=None):
+        super().__init__(parent)
+        self._current = 0
+        self._btns: list[_SettingsTabButton] = []
+        root = QHBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(4)
+        _accent_prop = QColor('#7380ff')
+        for i, text in enumerate(tabs):
+            btn = _SettingsTabButton(text)
+            self._btns.append(btn)
+            btn._accent = _accent_prop
+            root.addWidget(btn, 1)
+            if i == 0:
+                btn._checked = True
+                btn.update()
+            btn.clicked.connect(lambda i=i: self._on_click(i))
+
+    def _on_click(self, idx: int):
+        if idx == self._current:
+            return
+        self._btns[self._current]._checked = False
+        self._btns[self._current].update()
+        self._current = idx
+        self._btns[idx]._checked = True
+        self._btns[idx].update()
+        self._btns[idx].play_glint()
+        self.tab_changed.emit(idx)
+
+    def set_accent(self, c: QColor):
+        for btn in self._btns:
+            btn.set_accent(c)
+
+
 class MainWindow(QMainWindow):
     def __init__(
         self,
@@ -4165,7 +4319,6 @@ class MainWindow(QMainWindow):
         self._mods_subtitle_label: QLabel | None = None
         self._mods_add_btn: QPushButton | None = None
         self.power_aura: PowerAuraWidget | None = None
-        self._files_title_label: QLabel | None = None
         self._editor_title_label: QLabel | None = None
         self._logs_title_label: QLabel | None = None
         self._logs_refresh_btn: QPushButton | None = None
@@ -5212,7 +5365,7 @@ class MainWindow(QMainWindow):
         title.setProperty("class", "title")
         row.addWidget(title)
 
-        author = QLabel("by peshk0v")
+        author = QLabel("by peshk0v ✦ forked from goshkow")
         author.setProperty("class", "muted")
         author.setContentsMargins(0, 2, 0, 0)
         row.addWidget(author)
@@ -6575,16 +6728,13 @@ class MainWindow(QMainWindow):
     def _build_files_page(self) -> QWidget:
         page = QWidget()
         page.setProperty("class", "pageRoot")
+        page.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         root = QVBoxLayout(page)
-        root.setContentsMargins(1, 0, 1, 0)
-        root.setSpacing(10)
-
-        title = QLabel(self._t("Files"))
-        title.setProperty("class", "title")
-        self._files_title_label = title
-        root.addWidget(title)
+        root.setContentsMargins(1, 12, 1, 0)
+        root.setSpacing(0)
 
         stack = QStackedWidget()
+        stack.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self._file_mode_stack = stack
 
         chooser_scroll = QScrollArea()
@@ -6593,9 +6743,10 @@ class MainWindow(QMainWindow):
         chooser_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         chooser_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         chooser_scroll.setProperty("class", "pageCanvas")
+        chooser_scroll.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         chooser_host = QWidget()
         chooser_host.setProperty("class", "pageCanvas")
-        chooser_host.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        chooser_host.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         chooser_host_layout = QVBoxLayout(chooser_host)
         chooser_host_layout.setContentsMargins(1, 0, 1, 12)
         chooser_host_layout.setSpacing(0)
@@ -6673,6 +6824,7 @@ class MainWindow(QMainWindow):
         for index, (label, description, kind, icon_name) in enumerate(file_modes):
             card = ClickableCard()
             card.setMinimumHeight(126)
+            card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
             card_layout = QVBoxLayout(card)
             card_layout.setContentsMargins(16, 12, 16, 12)
             card_layout.setSpacing(8)
@@ -6918,6 +7070,9 @@ class MainWindow(QMainWindow):
         stack.addWidget(advanced_page)
         self._files_mode_opacity_effect = None
         root.addWidget(stack, 1)
+        stack.setCurrentIndex(1)
+        stack.setCurrentIndex(0)
+        page.layout().activate()
         return page
 
     def _build_logs_page(self) -> QWidget:
@@ -6931,32 +7086,31 @@ class MainWindow(QMainWindow):
         self._current_log_source = self._logs_page.current_log_source
         return self._logs_page
 
-    def _build_settings_page(self) -> QWidget:
-        from functools import partial
+    # ── Settings sub-tab builders ───────────────────────────────────────────────
 
+    def _build_app_settings_page(self) -> tuple[QWidget, dict]:
         page = QWidget()
-        page.setObjectName("SettingsPage")
         page.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, False)
-        root = QVBoxLayout(page)
-        root.setContentsMargins(0, 0, 0, 0)
-        root.setSpacing(0)
         scroll = QScrollArea()
         scroll.setObjectName("SettingsScroll")
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         canvas = QWidget()
         canvas.setObjectName("SettingsCanvas")
         layout = QVBoxLayout(canvas)
         layout.setContentsMargins(24, 24, 24, 24)
         layout.setSpacing(16)
         scroll.setWidget(canvas)
+        root = QVBoxLayout(page)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
         root.addWidget(scroll, 1)
 
-        ctrl: dict[str, object] = {}
-        page._settings_ctrl = ctrl
+        ctrl: dict = {}
 
-        def _segment(items: list[tuple[str, str]], current: str, key: str) -> tuple[QWidget, QButtonGroup]:
+        def _segment(items, current, key):
             seg = QWidget()
             seg.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, False)
             row = QHBoxLayout(seg)
@@ -6977,7 +7131,7 @@ class MainWindow(QMainWindow):
             ctrl[key] = group
             return seg, group
 
-        def _section(title: str) -> QVBoxLayout:
+        def _section(title):
             frame = QFrame()
             frame.setProperty("class", "settingsSection")
             fl = QVBoxLayout(frame)
@@ -6992,9 +7146,7 @@ class MainWindow(QMainWindow):
         settings = self.context.settings.get()
         ui_language = settings.language
 
-        # --- Application section ---
         app_section = _section(self._t("Application"))
-
         mode_items = [
             (self._t("Light"), "light"),
             (self._t("Dark"), "dark"),
@@ -7056,7 +7208,66 @@ class MainWindow(QMainWindow):
         app_section.addWidget(QLabel(self._t("Update branch")))
         app_section.addWidget(branch_w)
 
-        # --- Zapret section ---
+        layout.addStretch(1)
+        return page, ctrl
+
+    def _build_zapret_settings_page(self) -> tuple[QWidget, dict]:
+        page = QWidget()
+        page.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, False)
+        scroll = QScrollArea()
+        scroll.setObjectName("SettingsScroll")
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        canvas = QWidget()
+        canvas.setObjectName("SettingsCanvas")
+        layout = QVBoxLayout(canvas)
+        layout.setContentsMargins(24, 24, 24, 24)
+        layout.setSpacing(16)
+        scroll.setWidget(canvas)
+        root = QVBoxLayout(page)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+        root.addWidget(scroll, 1)
+
+        ctrl: dict = {}
+
+        def _segment(items, current, key):
+            seg = QWidget()
+            seg.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, False)
+            row = QHBoxLayout(seg)
+            row.setContentsMargins(0, 0, 0, 0)
+            row.setSpacing(6)
+            group = QButtonGroup(seg)
+            for i, (label, value) in enumerate(items):
+                btn = QPushButton(label)
+                btn.setCheckable(True)
+                btn.setFixedHeight(30)
+                btn.setProperty("class", "settingsSegment")
+                btn.setCursor(Qt.CursorShape.PointingHandCursor)
+                btn.setChecked(value == current)
+                btn._seg_value = value
+                group.addButton(btn, i)
+                row.addWidget(btn)
+            group.setExclusive(True)
+            ctrl[key] = group
+            return seg, group
+
+        def _section(title):
+            frame = QFrame()
+            frame.setProperty("class", "settingsSection")
+            fl = QVBoxLayout(frame)
+            fl.setContentsMargins(16, 14, 16, 14)
+            fl.setSpacing(10)
+            lbl = QLabel(title)
+            lbl.setProperty("class", "title")
+            fl.addWidget(lbl)
+            layout.addWidget(frame)
+            return fl
+
+        settings = self.context.settings.get()
+
         zapret_section = _section("Zapret")
         ipset_items = [("loaded", "loaded"), ("none", "none"), ("any", "any")]
         zapret_section.addWidget(QLabel("IPSet mode"))
@@ -7077,7 +7288,66 @@ class MainWindow(QMainWindow):
         zapret_section.addWidget(QLabel(self._t("Exclude UDP ports")))
         zapret_section.addWidget(udp_excl)
 
-        # --- TG WS Proxy section ---
+        layout.addStretch(1)
+        return page, ctrl
+
+    def _build_tg_settings_page(self) -> tuple[QWidget, dict]:
+        page = QWidget()
+        page.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, False)
+        scroll = QScrollArea()
+        scroll.setObjectName("SettingsScroll")
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        canvas = QWidget()
+        canvas.setObjectName("SettingsCanvas")
+        layout = QVBoxLayout(canvas)
+        layout.setContentsMargins(24, 24, 24, 24)
+        layout.setSpacing(16)
+        scroll.setWidget(canvas)
+        root = QVBoxLayout(page)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+        root.addWidget(scroll, 1)
+
+        ctrl: dict = {}
+
+        def _segment(items, current, key):
+            seg = QWidget()
+            seg.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, False)
+            row = QHBoxLayout(seg)
+            row.setContentsMargins(0, 0, 0, 0)
+            row.setSpacing(6)
+            group = QButtonGroup(seg)
+            for i, (label, value) in enumerate(items):
+                btn = QPushButton(label)
+                btn.setCheckable(True)
+                btn.setFixedHeight(30)
+                btn.setProperty("class", "settingsSegment")
+                btn.setCursor(Qt.CursorShape.PointingHandCursor)
+                btn.setChecked(value == current)
+                btn._seg_value = value
+                group.addButton(btn, i)
+                row.addWidget(btn)
+            group.setExclusive(True)
+            ctrl[key] = group
+            return seg, group
+
+        def _section(title):
+            frame = QFrame()
+            frame.setProperty("class", "settingsSection")
+            fl = QVBoxLayout(frame)
+            fl.setContentsMargins(16, 14, 16, 14)
+            fl.setSpacing(10)
+            lbl = QLabel(title)
+            lbl.setProperty("class", "title")
+            fl.addWidget(lbl)
+            layout.addWidget(frame)
+            return fl
+
+        settings = self.context.settings.get()
+
         tg_section = _section("TG WS Proxy")
         tg_host = QLineEdit()
         tg_host.setText(settings.tg_proxy_host or "")
@@ -7152,26 +7422,55 @@ class MainWindow(QMainWindow):
         tg_section.addWidget(tg_pool)
 
         layout.addStretch(1)
+        return page, ctrl
 
-        # --- Logs and Files section ---
-        logs_files_section = _section(self._t("Logs and Files"))
-        logs_files_tabs = QTabWidget()
-        logs_files_tabs.setDocumentMode(True)
-        logs_files_tabs.setObjectName("SettingsLogsFilesTabs")
-        logs_files_tabs.tabBar().setUsesScrollButtons(False)
-        logs_page = self._build_logs_page()
-        logs_files_tabs.addTab(logs_page, self._t("Logs"))
-        files_page = self._build_files_page()
-        logs_files_tabs.addTab(files_page, self._t("Files"))
-        logs_files_section.addWidget(logs_files_tabs)
+    def _build_files_settings_page(self) -> tuple[QWidget, dict]:
+        return self._build_files_page(), {}
 
-        tools_section = _section(self._t("Tools"))
-        def _make_tool_btn(text: str, slot) -> QPushButton:
+    def _build_logs_settings_page(self) -> tuple[QWidget, dict]:
+        return self._build_logs_page(), {}
+
+    def _build_tools_settings_page(self) -> tuple[QWidget, dict]:
+        page = QWidget()
+        page.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, False)
+        scroll = QScrollArea()
+        scroll.setObjectName("SettingsScroll")
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        canvas = QWidget()
+        canvas.setObjectName("SettingsCanvas")
+        layout = QVBoxLayout(canvas)
+        layout.setContentsMargins(24, 24, 24, 24)
+        layout.setSpacing(16)
+        scroll.setWidget(canvas)
+        root = QVBoxLayout(page)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+        root.addWidget(scroll, 1)
+
+        ctrl: dict = {}
+
+        def _section(title):
+            frame = QFrame()
+            frame.setProperty("class", "settingsSection")
+            fl = QVBoxLayout(frame)
+            fl.setContentsMargins(16, 14, 16, 14)
+            fl.setSpacing(10)
+            lbl = QLabel(title)
+            lbl.setProperty("class", "title")
+            fl.addWidget(lbl)
+            layout.addWidget(frame)
+            return fl
+
+        def _make_tool_btn(text, slot):
             btn = QPushButton(text)
             btn.setMinimumHeight(34)
             btn.clicked.connect(slot)
             return btn
 
+        tools_section = _section(self._t("Tools"))
         tools_section.addWidget(_make_tool_btn(
             self._t("Find best configuration"),
             self._run_general_tests_popup,
@@ -7190,28 +7489,13 @@ class MainWindow(QMainWindow):
         update_layout = QHBoxLayout(update_row)
         update_layout.setContentsMargins(0, 0, 0, 0)
         update_layout.setSpacing(6)
-
-        check_btn = _make_tool_btn(
-            self._t("Check updates"),
-            self._check_updates_popup,
-        )
+        check_btn = _make_tool_btn(self._t("Check updates"), self._check_updates_popup)
         update_layout.addWidget(check_btn, 1)
-
-        file_btn = _make_tool_btn(
-            self._t("Install from file"),
-            self._update_from_file,
-        )
+        file_btn = _make_tool_btn(self._t("Install from file"), self._update_from_file)
         update_layout.addWidget(file_btn, 1)
-
         tools_section.addWidget(update_row)
-        tools_section.addWidget(_make_tool_btn(
-            self._t("Rebuild merged"),
-            self._rebuild_runtime,
-        ))
-        tools_section.addWidget(_make_tool_btn(
-            self._t("Refresh all"),
-            self.refresh_all,
-        ))
+        tools_section.addWidget(_make_tool_btn(self._t("Rebuild merged"), self._rebuild_runtime))
+        tools_section.addWidget(_make_tool_btn(self._t("Refresh all"), self.refresh_all))
 
         restart_btn = QPushButton(self._t("Configure again"))
         restart_btn.setObjectName("RestartOnboardingButton")
@@ -7245,10 +7529,60 @@ class MainWindow(QMainWindow):
         credits.setWordWrap(True)
         layout.addWidget(credits)
 
+        layout.addStretch(1)
+        return page, ctrl
+
+    # ── Main settings page builder ─────────────────────────────────────────────
+
+    def _build_settings_page(self) -> QWidget:
+        page = QWidget()
+        page.setObjectName("SettingsPage")
+        page.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, False)
+
+        root = QVBoxLayout(page)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+        tab_bar = _SettingsTabBar([
+            self._t("Application"),
+            "Zapret",
+            "TG WS Proxy",
+            self._t("Files"),
+            self._t("Logs"),
+            self._t("Tools"),
+        ])
+        tab_bar.setObjectName("SettingsTabBar")
+        root.addWidget(tab_bar)
+
+        # use single shared ctrl dict for all sub-tabs that have settings
+        all_ctrl: dict = {}
+
+        self._settings_stack = QStackedWidget()
+        self._settings_stack.setObjectName("SettingsStack")
+        self._settings_stack.setFrameShape(QFrame.Shape.NoFrame)
+        root.addWidget(self._settings_stack, 1)
+
+        builders = [
+            self._build_app_settings_page,
+            self._build_zapret_settings_page,
+            self._build_tg_settings_page,
+            self._build_files_settings_page,
+            self._build_logs_settings_page,
+            self._build_tools_settings_page,
+        ]
+        for builder in builders:
+            sub_page, sub_ctrl = builder()
+            all_ctrl.update(sub_ctrl)
+            self._settings_stack.addWidget(sub_page)
+
+        page._settings_ctrl = all_ctrl
+
+        tab_bar.tab_changed.connect(self._settings_stack.setCurrentIndex)
+
         # --- Auto-save connections ---
         def _theme_changed() -> None:
-            mode_grp = ctrl.get("theme_mode")
-            pal_grp = ctrl.get("accent_palette")
+            mode_grp = all_ctrl.get("theme_mode")
+            pal_grp = all_ctrl.get("accent_palette")
             mode = ""
             accent = "#7380ff"
             if isinstance(mode_grp, QButtonGroup):
@@ -7266,7 +7600,7 @@ class MainWindow(QMainWindow):
                 QTimer.singleShot(200, self._animate_settings_saved)
 
         def _lang_changed() -> None:
-            grp = ctrl.get("language")
+            grp = all_ctrl.get("language")
             if isinstance(grp, QButtonGroup):
                 checked = grp.checkedButton()
                 if checked is not None and hasattr(checked, "_seg_value"):
@@ -7287,35 +7621,35 @@ class MainWindow(QMainWindow):
             debounce.stop()
             debounce.start()
 
-        def _make_button_handler(key: str) -> None:
+        def _make_button_handler(key: str):
             def handler(btn: QAbstractButton) -> None:
                 if hasattr(btn, "_seg_value"):
-                    ctrl[f"_last_{key}"] = str(btn._seg_value)
+                    all_ctrl[f"_last_{key}"] = str(btn._seg_value)
                 self._save_settings_page(page)
             return handler
 
-        mode_grp = ctrl.get("theme_mode")
+        mode_grp = all_ctrl.get("theme_mode")
         if isinstance(mode_grp, QButtonGroup):
             mode_grp.idClicked.connect(_theme_changed)
-        pal_grp = ctrl.get("accent_palette")
+        pal_grp = all_ctrl.get("accent_palette")
         if isinstance(pal_grp, QButtonGroup):
             pal_grp.idClicked.connect(_theme_changed)
-        lang_grp = ctrl.get("language")
+        lang_grp = all_ctrl.get("language")
         if isinstance(lang_grp, QButtonGroup):
             lang_grp.idClicked.connect(_lang_changed)
         for key in ("autostart", "tray", "auto_components", "check_updates", "tg_cfproxy", "tg_cfproxy_priority"):
-            cb = ctrl.get(key)
+            cb = all_ctrl.get(key)
             if isinstance(cb, QCheckBox):
                 cb.stateChanged.connect(_ctrl_changed)
         for seg_key in ("update_branch", "ipset_mode", "gaming_mode", "tg_media_mode"):
-            grp = ctrl.get(seg_key)
+            grp = all_ctrl.get(seg_key)
             if isinstance(grp, QButtonGroup):
                 grp.buttonClicked.connect(_make_button_handler(seg_key))
         for key in ("udp_exclude", "tg_host", "tg_port", "tg_secret", "tg_cf_domain", "tg_fake_tls", "tg_buf", "tg_pool"):
-            inp = ctrl.get(key)
+            inp = all_ctrl.get(key)
             if isinstance(inp, QLineEdit):
                 inp.textChanged.connect(_schedule_ctrl_save)
-        tg_dc = ctrl.get("tg_dc")
+        tg_dc = all_ctrl.get("tg_dc")
         if isinstance(tg_dc, QTextEdit):
             tg_dc.textChanged.connect(_schedule_ctrl_save)
 
@@ -7364,6 +7698,11 @@ class MainWindow(QMainWindow):
         if isinstance(cb, QCheckBox):
             cb.setChecked(settings.check_updates_on_start)
         _set_seg("update_branch", settings.update_branch)
+
+        tab_bar = page.findChild(_SettingsTabBar, "SettingsTabBar")
+        if tab_bar is not None:
+            accent_color = QColor(settings.accent_color)
+            tab_bar.set_accent(accent_color)
 
         _set_seg("ipset_mode", settings.zapret_ipset_mode)
         _set_seg("gaming_mode", settings.zapret_game_filter_mode)
@@ -8705,6 +9044,9 @@ class MainWindow(QMainWindow):
         sidebar = self.findChild(SidebarPanel, "Sidebar")
         if sidebar is not None:
             sidebar.set_theme(theme)
+        tab_bar = self.findChild(_SettingsTabBar, "SettingsTabBar")
+        if tab_bar is not None:
+            tab_bar.set_accent(QColor(accent))
         for btn in self._nav_buttons:
             if isinstance(btn, AnimatedNavButton):
                 btn.set_nav_theme(theme)
@@ -9062,8 +9404,6 @@ class MainWindow(QMainWindow):
                     "You can add a folder, ZIP, selected files, or a full GitHub repository. The app will keep general files, lists, and compatible runtime configs.",
                 )
             )
-        if self._files_title_label is not None:
-            self._files_title_label.setText(self._t("Files"))
         if self._files_intro_label is not None:
             self._files_intro_label.setText(
                 self._t(
