@@ -962,6 +962,126 @@ class ServiceToggleCard(QFrame):
         super().paintEvent(event)
 
 
+class ExpandToggleButton(QPushButton):
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._accent = QColor("#7380ff")
+        self._expanded = False
+        self._light = False
+        self._hover_progress = 0.0
+        self._pulse_progress = 0.0
+        self._hover_anim: QPropertyAnimation | None = None
+        self._pulse_anim: QPropertyAnimation | None = None
+        self.setMouseTracking(True)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setFlat(True)
+
+    def set_accent(self, color: QColor) -> None:
+        self._accent = QColor(color)
+        self.update()
+
+    def set_expanded_state(self, expanded: bool) -> None:
+        self._expanded = expanded
+        self.update()
+
+    def set_light_theme(self, light: bool) -> None:
+        self._light = light
+        self.update()
+
+    def play_press_pulse(self) -> None:
+        if self._pulse_anim is not None:
+            self._pulse_anim.stop()
+        self._pulse_anim = QPropertyAnimation(self, b"pulseProgress", self)
+        self._pulse_anim.setDuration(350)
+        self._pulse_anim.setStartValue(1.0)
+        self._pulse_anim.setKeyValueAt(0.15, 1.0)
+        self._pulse_anim.setEndValue(0.0)
+        self._pulse_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._pulse_anim.start()
+
+    def _get_pulse(self) -> float:
+        return self._pulse_progress
+    def _set_pulse(self, v: float) -> None:
+        self._pulse_progress = float(v)
+        self.update()
+    pulseProgress = Property(float, _get_pulse, _set_pulse)
+
+    def _get_hover(self) -> float:
+        return self._hover_progress
+    def _set_hover(self, v: float) -> None:
+        self._hover_progress = float(v)
+        self.update()
+    hoverProgress = Property(float, _get_hover, _set_hover)
+
+    def _animate_hover(self, target: float) -> None:
+        if self._hover_anim is not None:
+            self._hover_anim.stop()
+        self._hover_anim = QPropertyAnimation(self, b"hoverProgress", self)
+        self._hover_anim.setDuration(180)
+        self._hover_anim.setEndValue(target)
+        self._hover_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._hover_anim.start()
+
+    def enterEvent(self, event: QEvent) -> None:
+        super().enterEvent(event)
+        self._animate_hover(1.0)
+
+    def leaveEvent(self, event: QEvent) -> None:
+        super().leaveEvent(event)
+        self._animate_hover(0.0)
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:
+        super().mousePressEvent(event)
+        if event.button() == Qt.MouseButton.LeftButton and self.isEnabled():
+            self.play_press_pulse()
+
+    def paintEvent(self, event: QPaintEvent) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        r = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+
+        accent = QColor(self._accent)
+        if self._expanded:
+            bg = QColor(accent)
+            if self._hover_progress > 0.01:
+                bg = bg.lighter(100 + int(8 * self._hover_progress))
+            text_color = QColor("#ffffff")
+        else:
+            base_alpha = 14 if self._light else 8
+            alpha = int(base_alpha * (0.5 + 0.5 * self._hover_progress) + 10 * self._hover_progress)
+            bg = QColor(255, 255, 255, alpha)
+            text_color = QColor(accent)
+            if self._hover_progress > 0.01:
+                text_color = text_color.lighter(100 + int(10 * self._hover_progress))
+
+        radius = 7.0
+        pen_width = 1.0
+        if not self._expanded:
+            border = QColor(accent)
+            border.setAlpha(int(50 + 100 * self._hover_progress))
+            painter.setPen(QPen(border, pen_width))
+            painter.setBrush(bg)
+            painter.drawRoundedRect(r, radius, radius)
+        else:
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(bg)
+            painter.drawRoundedRect(r, radius, radius)
+
+        pulse = self._pulse_progress
+        if pulse > 0.01:
+            flash = QColor(accent)
+            flash.setAlpha(int(55 * pulse))
+            painter.setBrush(flash)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.drawRoundedRect(r, radius, radius)
+
+        painter.setPen(text_color)
+        font = painter.font()
+        font.setPixelSize(12)
+        font.setWeight(QFont.Weight.DemiBold)
+        painter.setFont(font)
+        painter.drawText(r, Qt.AlignmentFlag.AlignCenter, self.text())
+        painter.end()
 
 
 class ServiceCategoryCard(BaseServiceCard):
@@ -984,6 +1104,7 @@ class ServiceCategoryCard(BaseServiceCard):
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, False)
 
         self._expanded = False
+        self._expand_anim: QPropertyAnimation | None = None
 
         root = QVBoxLayout(self)
         root.setContentsMargins(16, 16, 16, 16)
@@ -1027,6 +1148,13 @@ class ServiceCategoryCard(BaseServiceCard):
 
         container_layout.addWidget(self._clickable_area)
 
+        # Separator between description and services list
+        self._separator = QFrame(self._services_container)
+        self._separator.setFrameShape(QFrame.Shape.HLine)
+        self._separator.setFixedHeight(1)
+        self._separator.setVisible(False)
+        container_layout.addWidget(self._separator)
+
         # Services toggle container (hidden when collapsed)
         self._services_toggle_widget = QWidget(self._services_container)
         self._services_toggle_widget.setStyleSheet("background: transparent;")
@@ -1050,10 +1178,8 @@ class ServiceCategoryCard(BaseServiceCard):
         expand_row.setContentsMargins(0, 4, 0, 0)
         expand_row.setSpacing(0)
         expand_row.addStretch(1)
-        self._expand_btn = QPushButton()
-        self._expand_btn.setFixedSize(140, 32)
-        self._expand_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._expand_btn.setFlat(True)
+        self._expand_btn = ExpandToggleButton()
+        self._expand_btn.setFixedSize(150, 34)
         self._expand_btn.setText("Show services")
         self._expand_btn.clicked.connect(self._toggle_expand)
         expand_row.addWidget(self._expand_btn, 0, Qt.AlignmentFlag.AlignCenter)
@@ -1130,11 +1256,44 @@ class ServiceCategoryCard(BaseServiceCard):
 
     def _toggle_expand(self) -> None:
         self._expanded = not self._expanded
-        self._services_toggle_widget.setVisible(self._expanded)
+
+        if self._expand_anim is not None:
+            self._expand_anim.stop()
+            self._expand_anim = None
+
+        toggle = self._services_toggle_widget
+        sep = self._separator
+
+        if self._expanded:
+            count = self._services_grid.count()
+            target = count * 44 + 6
+            target = max(target, 1)
+            toggle.show()
+            sep.show()
+            toggle.setMaximumHeight(0)
+            self._expand_anim = QPropertyAnimation(toggle, b"maximumHeight", self)
+            self._expand_anim.setDuration(300)
+            self._expand_anim.setStartValue(0)
+            self._expand_anim.setEndValue(target)
+            self._expand_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        else:
+            toggle.setMaximumHeight(toggle.height())
+            self._expand_anim = QPropertyAnimation(toggle, b"maximumHeight", self)
+            self._expand_anim.setDuration(250)
+            self._expand_anim.setStartValue(toggle.height())
+            self._expand_anim.setEndValue(0)
+            self._expand_anim.setEasingCurve(QEasingCurve.Type.InCubic)
+            self._expand_anim.finished.connect(self._finish_collapse)
+
+        self._expand_anim.start()
         self._expand_btn.setText("Hide services" if self._expanded else "Show services")
         self._sync_expand_button_style()
+
+    def _finish_collapse(self) -> None:
         if not self._expanded:
-            self._services_scroll.verticalScrollBar().setValue(0)
+            self._services_toggle_widget.hide()
+            self._separator.hide()
+            self._services_toggle_widget.setMaximumHeight(16777215)
 
     def set_service_toggles(self, presets: list[ServicePreset], pixmaps: dict[str, QPixmap], selected_ids: set[str]) -> None:
         for preset in presets:
@@ -1163,41 +1322,20 @@ class ServiceCategoryCard(BaseServiceCard):
         self.service_toggled.emit(service_id, selected)
 
     def _sync_expand_button_style(self) -> None:
-        onboarding = self._visual_scope == "onboarding"
+        light = self._visual_scope == "onboarding" or is_light_theme(self._theme)
+        self._expand_btn.set_accent(self._card_accent())
+        self._expand_btn.set_expanded_state(self._expanded)
+        self._expand_btn.set_light_theme(light)
+
+    def _sync_separator_style(self) -> None:
         accent = self._card_accent()
-        selected = bool(self._selected)
-        light = onboarding or is_light_theme(self._theme)
-
-        if self._expanded:
-            bg_color = accent.name(QColor.NameFormat.HexArgb)
-            text_color = "#ffffff"
-            hover_bg = QColor(accent).lighter(110).name(QColor.NameFormat.HexArgb)
-        else:
-            if light:
-                bg_color = "rgba(0, 0, 0, 0.05)"
-                text_color = "#3a4a62"
-                hover_bg = "rgba(0, 0, 0, 0.08)"
-            else:
-                bg_color = "rgba(255, 255, 255, 0.08)"
-                text_color = "#d2d9e5" if selected else "#8d99aa"
-                hover_bg = "rgba(255, 255, 255, 0.12)"
-
-        self._expand_btn.setStyleSheet(
-            f"QPushButton {{"
-            f"  background: {bg_color};"
-            f"  color: {text_color};"
-            f"  border: none;"
-            f"  border-radius: 6px;"
-            f"  font-size: 12px;"
-            f"  font-weight: 600;"
-            f"  padding: 6px 12px;"
-            f"}}"
-            f"QPushButton:hover {{"
-            f"  background: {hover_bg};"
-            f"}}"
-            f"QPushButton:pressed {{"
-            f"  background: {QColor(accent).darker(110).name(QColor.NameFormat.HexArgb) if self._expanded else hover_bg};"
-            f"}}"
+        light = self._visual_scope == "onboarding" or is_light_theme(self._theme)
+        color = QColor(accent)
+        color.setAlpha(40 if light else 50)
+        self._separator.setStyleSheet(
+            "QFrame { background: transparent; border: none; border-top: 1px solid "
+            f"{color.name(QColor.NameFormat.HexArgb)};"
+            " margin: 2px 0; }"
         )
 
     def _sync_style(self) -> None:
@@ -1228,6 +1366,7 @@ class ServiceCategoryCard(BaseServiceCard):
             self._selected_label.setPixmap(QPixmap())
             self._selected_label.setStyleSheet("background: transparent;")
         self._sync_expand_button_style()
+        self._sync_separator_style()
 
 
 class ServiceGridPanel(QWidget):
