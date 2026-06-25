@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import time
 from dataclasses import asdict, fields, is_dataclass
 from datetime import datetime
 from pathlib import Path
@@ -384,7 +385,17 @@ class StorageManager:
             with temp_path.open("w", encoding="utf-8") as file:
                 json.dump(data, file, indent=2, ensure_ascii=False)
                 file.write("\n")
-            temp_path.replace(path)
+            for attempt in range(3):
+                try:
+                    temp_path.replace(path)
+                    break
+                except PermissionError:
+                    if attempt < 2:
+                        time.sleep(0.1)
+                    else:
+                        with path.open("w", encoding="utf-8") as f:
+                            json.dump(data, f, indent=2, ensure_ascii=False)
+                            f.write("\n")
         finally:
             if temp_path.exists():
                 try:

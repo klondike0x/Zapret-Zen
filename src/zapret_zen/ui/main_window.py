@@ -1350,6 +1350,14 @@ class AnimatedPowerButton(QToolButton):
         self._wave_strength_anim: QPropertyAnimation | None = None
         self._glint_anim: QPropertyAnimation | None = None
         self._burst_anim: QPropertyAnimation | None = None
+        self._rotation_angle = 0.0
+        self._partial_phase = 0.0
+        self._spinner_timer = QTimer(self)
+        self._spinner_timer.setInterval(32)
+        self._spinner_timer.timeout.connect(self._advance_spinner)
+        self._partial_timer = QTimer(self)
+        self._partial_timer.setInterval(42)
+        self._partial_timer.timeout.connect(self._advance_partial_pulse)
 
     def set_power_theme(self, mode: str, accent_color: str = "#7380ff") -> None:
         self._theme_name = mode
@@ -1399,6 +1407,35 @@ class AnimatedPowerButton(QToolButton):
         anim.setEasingCurve(QEasingCurve.Type.InOutCubic)
         anim.start()
         self._scale_anim = anim
+
+    def set_spinner_active(self, active: bool) -> None:
+        if active:
+            if not self._spinner_timer.isActive():
+                self._spinner_timer.start()
+        else:
+            self._spinner_timer.stop()
+            self._rotation_angle = 0.0
+            if self._visual_mode == "loading" and not self._active:
+                self._visual_mode = "off"
+            self.update()
+
+    def set_partial_state(self, partial: bool) -> None:
+        self._visual_mode = "partial" if partial else ("on" if self._active else "off")
+        if partial:
+            if not self._partial_timer.isActive():
+                self._partial_timer.start()
+        else:
+            self._partial_timer.stop()
+            self._partial_phase = 0.0
+        self.update()
+
+    def _advance_spinner(self) -> None:
+        self._rotation_angle = (self._rotation_angle + 18.0) % 360.0
+        self.update()
+
+    def _advance_partial_pulse(self) -> None:
+        self._partial_phase = (self._partial_phase + 0.0105) % 1.0
+        self.update()
 
     def enterEvent(self, event: QEvent) -> None:
         self._animate_hover(1.0)
@@ -1526,6 +1563,70 @@ class AnimatedPowerButton(QToolButton):
             painter.drawEllipse(point, max(1.0, dot_radius), max(1.0, dot_radius))
         painter.restore()
 
+    def _paint_spinner_arc(self, painter: QPainter, center: QPointF, radius: float) -> None:
+        pen_width = 4.5
+        ring_radius = max(6.0, radius - pen_width / 2)
+        rect = QRectF(
+            center.x() - ring_radius,
+            center.y() - ring_radius,
+            ring_radius * 2,
+            ring_radius * 2,
+        )
+        arc_len = 110.0
+        path = QPainterPath()
+        path.arcMoveTo(rect, self._rotation_angle)
+        path.arcTo(rect, self._rotation_angle, arc_len)
+        color = QColor(self._on_border)
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        fade = QColor(color)
+        fade.setAlpha(50)
+        pen = QPen(fade, pen_width + 5.0, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
+        painter.strokePath(path, pen)
+        pen.setWidthF(pen_width)
+        pen.setColor(color)
+        painter.strokePath(path, pen)
+        painter.restore()
+
+    def _paint_partial_segments(self, painter: QPainter, center: QPointF, radius: float) -> None:
+        pen_width = 5.0
+        ring_radius = max(8.0, radius - pen_width / 2)
+        rect = QRectF(
+            center.x() - ring_radius,
+            center.y() - ring_radius,
+            ring_radius * 2,
+            ring_radius * 2,
+        )
+        n = 8
+        span = 360.0 / n
+        if self._light_theme:
+            lit_color = QColor("#c77908")
+            dim_color = QColor("#c77908")
+        else:
+            lit_color = QColor("#f0a020")
+            dim_color = QColor("#f0a020")
+        dim_color.setAlpha(30)
+        phase_deg = self._partial_phase * 360.0
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        for i in range(n):
+            seg_center = i * span
+            diff = abs((seg_center - phase_deg) % 360)
+            diff = min(diff, 360 - diff)
+            lit = diff < span * 2
+            if lit:
+                brightness = max(0.0, 1.0 - diff / (span * 2))
+                c = QColor(lit_color)
+                c.setAlpha(int(200 * brightness))
+            else:
+                c = dim_color
+            path = QPainterPath()
+            path.arcMoveTo(rect, seg_center - span / 2)
+            path.arcTo(rect, seg_center - span / 2, span)
+            pen = QPen(c, pen_width, Qt.PenStyle.SolidLine, Qt.PenCapStyle.FlatCap)
+            painter.strokePath(path, pen)
+        painter.restore()
+
     def paintEvent(self, event: QEvent) -> None:
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
@@ -1580,7 +1681,7 @@ class AnimatedPowerButton(QToolButton):
 
         if self._hover_progress > 0.001:
             if self._light_theme:
-                if self._active or self._visual_mode == "loading":
+                if self._active or self._visual_mode in ("loading", "partial"):
                     glow_color = QColor(232, 243, 255, int(62 * self._hover_progress))
                 else:
                     glow_color = QColor(109, 154, 255, int(34 * self._hover_progress))
@@ -1610,6 +1711,8 @@ class AnimatedPowerButton(QToolButton):
         icon_size = 54 if self._active else 50
         if self._visual_mode == "loading":
             icon_size = 52
+        elif self._visual_mode == "partial":
+            icon_size = 52
         pixmap = self.icon().pixmap(icon_size, icon_size)
         target = QRectF(center.x() - icon_size / 2.0, center.y() - icon_size / 2.0, icon_size, icon_size)
         painter.drawPixmap(target, pixmap, QRectF(0, 0, pixmap.width(), pixmap.height()))
@@ -1617,6 +1720,10 @@ class AnimatedPowerButton(QToolButton):
         on_color = self._on_top if self._active else off_top
         self._paint_glint(painter, center, radius)
         self._paint_burst(painter, center, on_color)
+        if self._visual_mode == "loading":
+            self._paint_spinner_arc(painter, center, radius)
+        elif self._visual_mode == "partial":
+            self._paint_partial_segments(painter, center, radius)
 
     def _get_visual_scale(self) -> float:
         return self._visual_scale
@@ -2759,6 +2866,17 @@ class ContentGlowWidget(QWidget):
         inner_path = QPainterPath()
         inner_path.addRoundedRect(inner, 16, 16)
 
+        # Window shadow: multi-layer stroke around the frame
+        shadow_path = QPainterPath()
+        shadow_path.addRoundedRect(inner.adjusted(-0.5, -0.5, 0.5, 0.5), 16, 16)
+        layers = [(10, 8), (6, 16), (3, 30)]
+        for width, alpha in layers:
+            pen = QPen(QColor(0, 0, 0, alpha), width)
+            pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+            painter.setPen(pen)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.strokePath(shadow_path, pen)
+
         # Accent glow in content area
         painter.setClipPath(inner_path)
         glow = QRadialGradient(center_x, center_y, max(rect.width() * 0.85, rect.height() * 1.0))
@@ -2768,7 +2886,6 @@ class ContentGlowWidget(QWidget):
         glow.setColorAt(0.6, QColor(c.red(), c.green(), c.blue(), a(0.8)))
         glow.setColorAt(1.0, QColor(c.red(), c.green(), c.blue(), 0))
         painter.fillRect(rect, glow)
-
 
 class OnboardingFrame(QFrame):
     glowChanged = Signal()
@@ -4737,35 +4854,7 @@ class MainWindow(QMainWindow):
         frame.setObjectName("RootFrame")
         self._frame = frame
 
-        # Shadow background — QGraphicsBlurEffect gives real Gaussian blur
-        shadow_bg = QFrame(shell)
-        shadow_bg.setObjectName("WindowShadowBg")
-        shadow_bg.setStyleSheet("""
-            QFrame#WindowShadowBg {
-                background: rgba(0, 0, 0, 55);
-                border-radius: 16px;
-            }
-        """)
-        shadow_blur = QGraphicsBlurEffect()
-        shadow_blur.setBlurRadius(35.0)
-        shadow_bg.setGraphicsEffect(shadow_blur)
-        shadow_bg.lower()
-        self._shadow_bg = shadow_bg
-
-        class _ShadowSync(QObject):
-            def __init__(self, shadow, target):
-                super().__init__(target)
-                self._shadow = shadow
-                self._target = target
-                target.installEventFilter(self)
-            def set_offset(self, ox, oy):
-                g = self._target.geometry()
-                self._shadow.setGeometry(g.x() + ox, g.y() + oy, g.width(), g.height())
-            def eventFilter(self, obj, event):
-                if event.type() in (QEvent.Type.Resize, QEvent.Type.Move):
-                    self.set_offset(0, 6)
-                return super().eventFilter(obj, event)
-        self._shadow_sync = _ShadowSync(shadow_bg, frame)
+        self._shadow_effect = None
 
         root_frame = QVBoxLayout(frame)
         root_frame.setContentsMargins(0, 0, 0, 0)
@@ -4803,14 +4892,11 @@ class MainWindow(QMainWindow):
                 return super().eventFilter(obj, event)
         _GlowResizer(glow, shell)
         glow.glowChanged.connect(self._sync_shadow_position)
-
         self.setCentralWidget(shell)
         self._build_loading_overlay(shell)
 
     def _sync_shadow_position(self) -> None:
-        ox = int((self._pages_host._glow_x - 0.5) * 8)
-        oy = int((self._pages_host._glow_y - 0.5) * 8 + 6)
-        self._shadow_sync.set_offset(ox, oy)
+        pass
 
     def _build_loading_overlay(self, parent: QWidget) -> None:
         overlay = QFrame(parent)
@@ -5816,16 +5902,6 @@ class MainWindow(QMainWindow):
         power_stage_layout.addStretch(1)
 
         power_block_layout.addWidget(power_stage, 0, Qt.AlignmentFlag.AlignHCenter)
-
-        status_label = QLabel()
-        status_label.setObjectName("PowerStatusLabel")
-        status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        status_label.setProperty("class", "muted")
-        status_label.setContentsMargins(0, 2, 0, 0)
-        status_label.setMaximumHeight(20)
-        status_label.setCursor(Qt.CursorShape.ArrowCursor)
-        power_block_layout.addWidget(status_label, 0, Qt.AlignmentFlag.AlignHCenter)
-        self._power_status_label = status_label
 
         self._power_aura_host = top
         self._power_block = power_block
@@ -7970,7 +8046,7 @@ class MainWindow(QMainWindow):
         self.pages.insertWidget(4, new_page)
         if was_current:
             self.pages.setCurrentWidget(new_page)
-            self._sync_nav_highlight()
+            self._sync_nav_highlight(animated=True)
 
     def _refresh_current_page_after_theme_change(self) -> None:
         if not hasattr(self, "pages"):
@@ -8498,8 +8574,12 @@ class MainWindow(QMainWindow):
             self._github_sidebar_btn.setIcon(self._icon("github.svg"))
             self._github_sidebar_btn.set_button_theme(theme)
             self._github_sidebar_btn.set_accent_color(accent)
-        for overlay in self._scroll_fade_overlays:
-            overlay.set_theme(theme)
+        for overlay in self._scroll_fade_overlays[:]:
+            try:
+                overlay.set_theme(theme)
+            except RuntimeError:
+                self._scroll_fade_overlays.remove(overlay)
+                continue
             if getattr(overlay, "_scrollable", None) is getattr(self, "_file_tag_scroll", None):
                 overlay.set_surface_color(_files_inner_surface_color(theme))
             elif getattr(overlay, "_scrollable", None) is getattr(self, "_services_scroll", None):
@@ -9720,8 +9800,8 @@ class MainWindow(QMainWindow):
         self._autostart_in_progress = False
         self.power_button.setEnabled(bool(self._startup_snapshot_ready))
         self._update_power_icon()
-        if self._power_status_label is not None:
-            self._power_status_label.setText("")
+        if isinstance(self.power_button, AnimatedPowerButton):
+            self.power_button.set_spinner_active(False)
         self.refresh_all()
         if self._pending_info_message is not None:
             title, text = self._pending_info_message
@@ -9731,15 +9811,11 @@ class MainWindow(QMainWindow):
     def _advance_loading_caption(self) -> None:
         if not self._toggle_in_progress:
             return
-        base = self._t("Connecting") if self._loading_action == "connect" else self._t("Disconnecting")
-        dots_frames = ["", ".", "..", "...", "..", "."]
-        full_text = f"{base}{dots_frames[self._loading_frame % len(dots_frames)]}"
         self._loading_frame += 1
-        if self._power_status_label is not None:
-            self._power_status_label.setText(full_text)
         self.power_button.setProperty("state", "loading")
         if isinstance(self.power_button, AnimatedPowerButton):
             self.power_button.set_loading_state(True, animate=True)
+            self.power_button.set_spinner_active(True)
         if self.power_aura is not None:
             self.power_aura.set_idle_pulse_enabled(False)
             self.power_aura.set_status_glow_enabled(True)
@@ -11148,6 +11224,7 @@ class MainWindow(QMainWindow):
             self._update_power_icon()
             if isinstance(self.power_button, AnimatedPowerButton):
                 self.power_button.set_loading_state(True, animate=not self._page_transition_running)
+                self.power_button.set_spinner_active(True)
             if self.power_aura is not None:
                 self.power_aura.set_idle_pulse_enabled(False)
                 self.power_aura.set_status_glow_enabled(True)
@@ -11155,8 +11232,6 @@ class MainWindow(QMainWindow):
             self._set_badge("zapret", self._t("Loading"), "status_warn.svg")
             self._set_badge("tg", self._t("Loading"), "status_warn.svg")
             self._set_badge("mods", self._t("Loading"), "status_mod.svg")
-            if getattr(self, "_power_status_label", None) is not None:
-                self._power_status_label.setText("")
             return
         if self._autostart_in_progress:
             self.power_button.setEnabled(False)
@@ -11164,6 +11239,7 @@ class MainWindow(QMainWindow):
             self._update_power_icon()
             if isinstance(self.power_button, AnimatedPowerButton):
                 self.power_button.set_loading_state(True, animate=not self._page_transition_running)
+                self.power_button.set_spinner_active(True)
             if self.power_aura is not None:
                 self.power_aura.set_idle_pulse_enabled(False)
                 self.power_aura.set_status_glow_enabled(True)
@@ -11171,8 +11247,6 @@ class MainWindow(QMainWindow):
             self._set_badge("zapret", self._t("Starting"), "status_warn.svg")
             self._set_badge("tg", self._t("Starting"), "status_warn.svg")
             self._set_badge("mods", self._t("Loading"), "status_mod.svg")
-            if getattr(self, "_power_status_label", None) is not None:
-                self._power_status_label.setText("")
             return
         if self.general_combo.isVisible():
             self._refresh_general_combo(settings.selected_zapret_general)
@@ -11185,12 +11259,20 @@ class MainWindow(QMainWindow):
         any_running = len(running_ids) > 0
         fully_running = bool(active_ids) and set(active_ids) == running_ids
 
-        self.power_button.setProperty("state", "on" if fully_running else "off")
+        partially_running = any_running and not fully_running
+        if partially_running:
+            state_str = "partial"
+        elif fully_running:
+            state_str = "on"
+        else:
+            state_str = "off"
+        self.power_button.setProperty("state", state_str)
         self._update_power_icon()
         self.power_button.setEnabled(not self._toggle_in_progress)
         if isinstance(self.power_button, AnimatedPowerButton):
             animate_power = not self._page_transition_running
             self.power_button.set_active_state(fully_running, animate=animate_power)
+            self.power_button.set_partial_state(partially_running)
         if self.power_aura is not None:
             self.power_aura.set_idle_pulse_enabled(fully_running and not self._toggle_in_progress)
             self.power_aura.set_status_glow_enabled(fully_running or self._toggle_in_progress)
