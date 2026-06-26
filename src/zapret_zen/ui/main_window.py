@@ -459,6 +459,27 @@ class AnimatedNavButton(QToolButton):
             icon_size,
         )
         painter.drawPixmap(target, pixmap, QRectF(0, 0, pixmap.width(), pixmap.height()))
+        if not pixmap.isNull():
+            outline_color = QColor("#ffffff") if not self._light_theme else QColor("#000000")
+            outline_color.setAlphaF(0.18)
+            swell = 1
+            osize = icon_size + swell * 2
+            outline = QPixmap(osize, osize)
+            outline.fill(Qt.GlobalColor.transparent)
+            op = QPainter(outline)
+            op.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+            for dx, dy in ((0, -1), (0, 1), (-1, 0), (1, 0)):
+                op.drawPixmap(swell + dx, swell + dy, pixmap)
+            op.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
+            op.fillRect(outline.rect(), outline_color)
+            op.end()
+            outline_target = QRectF(
+                (self.width() - osize) / 2.0 + self._icon_dx + base_icon_dx,
+                (self.height() - osize) / 2.0 + self._icon_dy,
+                osize,
+                osize,
+            )
+            painter.drawPixmap(outline_target.toRect(), outline)
 
     def _get_hover_progress(self) -> float:
         return self._hover_progress
@@ -615,6 +636,28 @@ class GitHubSidebarButton(QToolButton):
         painter.setOpacity(opacity)
         source = QRectF(0.0, 0.0, float(pixmap.width()), float(pixmap.height()))
         painter.drawPixmap(target, pixmap, source)
+        painter.setOpacity(1.0)
+        if not pixmap.isNull():
+            outline_color = QColor("#ffffff") if not is_light_theme(self._theme_name) else QColor("#000000")
+            outline_color.setAlphaF(0.18)
+            swell = 1
+            osize = icon_size + swell * 2
+            outline = QPixmap(osize, osize)
+            outline.fill(Qt.GlobalColor.transparent)
+            op = QPainter(outline)
+            op.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+            for dx, dy in ((0, -1), (0, 1), (-1, 0), (1, 0)):
+                op.drawPixmap(swell + dx, swell + dy, pixmap)
+            op.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
+            op.fillRect(outline.rect(), outline_color)
+            op.end()
+            ot = QRectF(
+                (self.width() - osize) / 2.0,
+                (self.height() - osize) / 2.0,
+                osize,
+                osize,
+            )
+            painter.drawPixmap(ot.toRect(), outline)
 
     def _get_hover_progress(self) -> float:
         return self._hover_progress
