@@ -1317,11 +1317,21 @@ class InstallerWindow(QMainWindow):
                 sources.append(Path(sys.executable))
             except Exception:
                 pass
-            # Nuitka onefile temp extraction parent may also be accessible
             try:
                 argv0 = Path(sys.argv[0]).resolve()
                 if argv0 != sources[-1]:
                     sources.append(argv0)
+            except Exception:
+                pass
+            try:
+                import ctypes
+                kernel32 = ctypes.windll.kernel32
+                buf = ctypes.create_unicode_buffer(1024)
+                n = kernel32.GetModuleFileNameW(None, buf, len(buf))
+                if n > 0:
+                    proc_path = Path(buf[:n]).resolve()
+                    if proc_path not in sources:
+                        sources.append(proc_path)
             except Exception:
                 pass
             for source in sources:
@@ -1343,9 +1353,9 @@ class InstallerWindow(QMainWindow):
             _installer_log("register_uninstaller_exe", dest=str(uninstaller_exe))
         else:
             _installer_log("register_uninstaller_skipped", reason="exe_copy_failed", dest=str(uninstaller_exe))
-            self._create_ps_uninstaller(app_exe)
+        self._create_ps_uninstaller(app_exe, register=not copied)
 
-    def _create_ps_uninstaller(self, app_exe: Path) -> None:
+    def _create_ps_uninstaller(self, app_exe: Path, register: bool = False) -> None:
         install_dir = self.install_path
         ps_path = install_dir / "uninstall_zapretzen.ps1"
         escaped = str(install_dir).replace("'", "''")
@@ -1390,9 +1400,10 @@ Start-Process cmd.exe -ArgumentList '/c', $batch -WindowStyle Hidden
             install_dir.mkdir(parents=True, exist_ok=True)
             ps_path.write_text(ps_content, encoding="utf-8")
             if ps_path.exists():
-                uninstall_cmd = f'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "{ps_path}"'
                 _installer_log("register_ps_uninstaller", dest=str(ps_path))
-                _write_uninstall_registry(install_dir, ps_path, app_exe, override_cmd=uninstall_cmd)
+                if register:
+                    uninstall_cmd = f'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "{ps_path}"'
+                    _write_uninstall_registry(install_dir, ps_path, app_exe, override_cmd=uninstall_cmd)
         except Exception as ps_err:
             _installer_log("create_ps_uninstaller_failed", error=str(ps_err))
 
