@@ -238,13 +238,11 @@ jobs:
         run: |
           $tag = "${{ steps.meta.outputs.tag }}"
           $exists = $false
-          try {
-            gh release view $tag --json url 2>&1 | Out-Null
-            if ($LASTEXITCODE -eq 0) {
-              $exists = $true
-              Write-Host "Release $tag already exists"
-            }
-          } catch {
+          gh release view $tag --json url 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            $exists = $true
+            Write-Host "Release $tag already exists"
+          } else {
             Write-Host "Release $tag does not exist"
           }
           "exists=$($exists.ToString().ToLower())" >> $env:GITHUB_OUTPUT
