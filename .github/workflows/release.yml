@@ -237,15 +237,19 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           $tag = "${{ steps.meta.outputs.tag }}"
-          $exists = $false
-          gh release view $tag --json url 2>$null
-          if ($LASTEXITCODE -eq 0) {
-            $exists = $true
-            Write-Host "Release $tag already exists"
-          } else {
-            Write-Host "Release $tag does not exist"
+          $exists = "false"
+          try {
+            $list = gh release list --json tagName --limit 200 2>$null | ConvertFrom-Json
+            if ($null -ne $list -and $list.tagName -contains $tag) {
+              $exists = "true"
+              Write-Host "Release $tag already exists"
+            } else {
+              Write-Host "Release $tag does not exist"
+            }
+          } catch {
+            Write-Host "Could not check releases, assuming does not exist"
           }
-          "exists=$($exists.ToString().ToLower())" >> $env:GITHUB_OUTPUT
+          "exists=$exists" >> $env:GITHUB_OUTPUT
 
       - name: Read release notes for new release
         id: notes
