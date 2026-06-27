@@ -462,24 +462,9 @@ class AnimatedNavButton(QToolButton):
         if not pixmap.isNull():
             outline_color = QColor("#ffffff") if not self._light_theme else QColor("#000000")
             outline_color.setAlphaF(0.18)
-            swell = 1
-            osize = icon_size + swell * 2
-            outline = QPixmap(osize, osize)
-            outline.fill(Qt.GlobalColor.transparent)
-            op = QPainter(outline)
-            op.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
-            for dx, dy in ((0, -1), (0, 1), (-1, 0), (1, 0)):
-                op.drawPixmap(swell + dx, swell + dy, pixmap)
-            op.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
-            op.fillRect(outline.rect(), outline_color)
-            op.end()
-            outline_target = QRectF(
-                (self.width() - osize) / 2.0 + self._icon_dx + base_icon_dx,
-                (self.height() - osize) / 2.0 + self._icon_dy,
-                osize,
-                osize,
-            )
-            painter.drawPixmap(outline_target.toRect(), outline)
+            painter.setPen(QPen(outline_color, 1))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawRoundedRect(target.adjusted(-0.5, -0.5, 0.5, 0.5), 3, 3)
 
     def _get_hover_progress(self) -> float:
         return self._hover_progress
@@ -635,29 +620,14 @@ class GitHubSidebarButton(QToolButton):
             pixmap = tinted
         painter.setOpacity(opacity)
         source = QRectF(0.0, 0.0, float(pixmap.width()), float(pixmap.height()))
-        painter.drawPixmap(target, pixmap, source)
+            painter.drawPixmap(target, pixmap, source)
         painter.setOpacity(1.0)
         if not pixmap.isNull():
             outline_color = QColor("#ffffff") if not is_light_theme(self._theme_name) else QColor("#000000")
             outline_color.setAlphaF(0.18)
-            swell = 1
-            osize = icon_size + swell * 2
-            outline = QPixmap(osize, osize)
-            outline.fill(Qt.GlobalColor.transparent)
-            op = QPainter(outline)
-            op.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
-            for dx, dy in ((0, -1), (0, 1), (-1, 0), (1, 0)):
-                op.drawPixmap(swell + dx, swell + dy, pixmap)
-            op.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceIn)
-            op.fillRect(outline.rect(), outline_color)
-            op.end()
-            ot = QRectF(
-                (self.width() - osize) / 2.0,
-                (self.height() - osize) / 2.0,
-                osize,
-                osize,
-            )
-            painter.drawPixmap(ot.toRect(), outline)
+            painter.setPen(QPen(outline_color, 1))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawRoundedRect(target.adjusted(-0.5, -0.5, 0.5, 0.5), 3, 3)
 
     def _get_hover_progress(self) -> float:
         return self._hover_progress
@@ -4388,6 +4358,11 @@ class MainWindow(QMainWindow):
         self._last_prompted_update_version = ""
         self._resume_component_ids: list[str] = []
         self._resume_restart_pending = False
+        self._partial_restart_count = 0
+        self._partial_restart_timer = QTimer(self)
+        self._partial_restart_timer.setSingleShot(True)
+        self._partial_restart_timer.setInterval(3000)
+        self._partial_restart_timer.timeout.connect(self._auto_restart_partial)
         self._file_mode_stack: QStackedWidget | None = None
         self._file_home_page: QWidget | None = None
         self._files_home_scroll: QScrollArea | None = None
@@ -10289,6 +10264,8 @@ class MainWindow(QMainWindow):
         active_ids = self._master_active_components()
         running_ids = {cid for cid in active_ids if states.get(cid) and states[cid].status == "running"}
         self._loading_action = "disconnect" if running_ids else "connect"
+        self._partial_restart_count = 0
+        self._partial_restart_timer.stop()
         self._toggle_in_progress = True
         self.power_button.setEnabled(False)
         if isinstance(self.power_button, AnimatedPowerButton):
@@ -10299,6 +10276,22 @@ class MainWindow(QMainWindow):
         self._loading_timer.start()
         self._advance_loading_caption()
         self._submit_backend_task("toggle_master_runtime")
+
+    def _auto_restart_partial(self) -> None:
+        if self._toggle_in_progress or not self._startup_snapshot_ready:
+            return
+        if self._partial_restart_count >= 3:
+            return
+        states = self._component_states()
+        active_ids = self._master_active_components()
+        running_ids = {cid for cid in active_ids if states.get(cid) and states[cid].status == "running"}
+        if running_ids and len(running_ids) < len(active_ids):
+            self._partial_restart_count += 1
+            for cid in list(running_ids):
+                self.context.processes.stop_component(cid)
+            for cid in active_ids:
+                self.context.processes.start_component(cid)
+            self._mark_dirty("dashboard", "components", "tray")
 
     def _toggle_master_runtime_worker(self) -> None:
         try:
@@ -11795,6 +11788,11 @@ class MainWindow(QMainWindow):
             animate_power = not self._page_transition_running
             self.power_button.set_active_state(fully_running, animate=animate_power)
             self.power_button.set_partial_state(partially_running)
+        if partially_running and self._partial_restart_count < 3 and not self._toggle_in_progress:
+            if not self._partial_restart_timer.isActive():
+                self._partial_restart_timer.start()
+        else:
+            self._partial_restart_timer.stop()
         if self.power_aura is not None:
             self.power_aura.set_idle_pulse_enabled(fully_running and not self._toggle_in_progress)
             self.power_aura.set_status_glow_enabled(fully_running or self._toggle_in_progress)
