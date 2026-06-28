@@ -427,14 +427,18 @@ def _build_base_css() -> tuple[str, str]:
         background: #151f33;
     }
     QToolButton[class="power"] {
-        border-radius: 180px;
+        min-width: 132px;
+        min-height: 132px;
+        max-width: 132px;
+        max-height: 132px;
+        border-radius: 66px;
         background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #7380ff, stop:0.48 #5f6cf7, stop:1 #4551cb);
-        border: 0px;
+        border: 2px solid #7b87ff;
         padding: 0px;
     }
     QToolButton[class="power"][state="off"] {
         background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #324a73, stop:0.55 #283b5c, stop:1 #1d2b44);
-        border: 0px;
+        border: 2px solid #35517f;
     }
     QToolButton[class="power"]:hover {
         background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #8591ff, stop:0.48 #6d79ff, stop:1 #505ce0);
@@ -1052,14 +1056,18 @@ def _build_base_css() -> tuple[str, str]:
         background: #ffffff;
     }
     QToolButton[class="power"] {
-        border-radius: 180px;
+        min-width: 132px;
+        min-height: 132px;
+        max-width: 132px;
+        max-height: 132px;
+        border-radius: 66px;
         background: #6471f8;
-        border: 0px;
+        border: 2px solid #7b87ff;
         padding: 0px;
     }
     QToolButton[class="power"][state="off"] {
         background: #e6eef9;
-        border: 0px;
+        border: 2px solid #bfd2f0;
     }
     QToolButton[class="power"]:hover {
         background: #7480ff;

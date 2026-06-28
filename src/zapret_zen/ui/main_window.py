@@ -6201,11 +6201,12 @@ class MainWindow(QMainWindow):
         self.power_aura.lower()
 
         power_stage = QWidget(power_block)
+        power_stage.setFixedSize(224, 188)
         power_stage.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, False)
         power_stage.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         power_stage.setStyleSheet("background: transparent;")
         power_stage_layout = QVBoxLayout(power_stage)
-        power_stage_layout.setContentsMargins(0, 0, 0, 0)
+        power_stage_layout.setContentsMargins(0, 28, 0, 28)
         power_stage_layout.setSpacing(0)
         power_stage_layout.addStretch(1)
         power_button_row = QHBoxLayout()
@@ -6215,8 +6216,8 @@ class MainWindow(QMainWindow):
         self.power_button = AnimatedPowerButton(power_stage)
         self.power_button.setProperty("class", "power")
         self.power_button.setIcon(self._icon("power.svg"))
-        self.power_button.setIconSize(QSize(48, 48))
-        self.power_button.setFixedSize(210, 210)
+        self.power_button.setIconSize(QSize(42, 42))
+        self.power_button.setFixedSize(132, 132)
         self.power_button.setEnabled(False)
         self.power_button.clicked.connect(self._toggle_master_runtime)
         self._attach_button_animations(self.power_button)
@@ -6226,7 +6227,7 @@ class MainWindow(QMainWindow):
         power_stage_layout.addLayout(power_button_row)
         power_stage_layout.addStretch(1)
 
-        power_block_layout.addWidget(power_stage, 1)
+        power_block_layout.addWidget(power_stage, 0, Qt.AlignmentFlag.AlignHCenter)
 
         self._power_aura_host = top
         self._power_block = power_block
