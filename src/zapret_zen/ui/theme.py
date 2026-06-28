@@ -230,6 +230,11 @@ def _build_base_css() -> tuple[str, str]:
         border: 1px solid #243550;
         border-radius: 16px;
     }
+    QFrame[class="modBadge"] {
+        background: qlineargradient(x1:0, y1:1, x2:1, y2:0, stop:0 #131d30, stop:0.68 #162238, stop:1 #1a2842);
+        border: 1px solid #243550;
+        border-radius: 14px;
+    }
     QFrame[class="modHero"] {
         background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #17253d, stop:1 #131d30);
         border: 1px solid #2a436a;
@@ -404,13 +409,13 @@ def _build_base_css() -> tuple[str, str]:
         border: 1px solid #4f73b3;
     }
     QPushButton[class="primary"] {
-        background: #5865f2;
-        border-color: #6773ff;
+        background: __ACCENT__;
+        border-color: __ACCENT__;
         color: #ffffff;
         font-weight: 700;
     }
     QPushButton[class="primary"]:hover {
-        background: #5865f2;
+        background: __ACCENT__;
     }
     QPushButton[class="danger"] {
         background: #151f33;
@@ -422,18 +427,14 @@ def _build_base_css() -> tuple[str, str]:
         background: #151f33;
     }
     QToolButton[class="power"] {
-        min-width: 132px;
-        min-height: 132px;
-        max-width: 132px;
-        max-height: 132px;
-        border-radius: 66px;
+        border-radius: 180px;
         background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #7380ff, stop:0.48 #5f6cf7, stop:1 #4551cb);
-        border: 2px solid #7b87ff;
+        border: 0px;
         padding: 0px;
     }
     QToolButton[class="power"][state="off"] {
         background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #324a73, stop:0.55 #283b5c, stop:1 #1d2b44);
-        border: 2px solid #35517f;
+        border: 0px;
     }
     QToolButton[class="power"]:hover {
         background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #8591ff, stop:0.48 #6d79ff, stop:1 #505ce0);
@@ -497,9 +498,9 @@ def _build_base_css() -> tuple[str, str]:
         background: #1a2740;
     }
     QPushButton[class="settingsSegment"]:checked {
-        background: #3b66b0;
+        background: __ACCENT__ !important;
         color: #ffffff;
-        border-color: #4f73d9;
+        border-color: __ACCENT__ !important;
     }
     QLineEdit, QComboBox, QTextEdit, QTableWidget {
         background: #111a2b;
@@ -524,8 +525,8 @@ def _build_base_css() -> tuple[str, str]:
         background: rgba(83, 108, 148, 0.18);
     }
     QCheckBox::indicator:checked {
-        border: 1px solid #90a5ff;
-        background: #5865f2;
+        border: 1px solid __ACCENT__;
+        background: __ACCENT__;
         __CHECK_ICON__
     }
     QComboBox::drop-down {
@@ -794,6 +795,11 @@ def _build_base_css() -> tuple[str, str]:
         border: 1px solid #d2ddeb;
         border-radius: 16px;
     }
+    QFrame[class="modBadge"] {
+        background: #ffffff;
+        border: 1px solid #d2ddeb;
+        border-radius: 14px;
+    }
     QFrame[class="modHero"] {
         background: #ffffff;
         border: 1px solid #cad7ea;
@@ -995,9 +1001,9 @@ def _build_base_css() -> tuple[str, str]:
         background: #e6eef9;
     }
     QPushButton[class="settingsSegment"]:checked {
-        background: #4f73d9;
+        background: __ACCENT__ !important;
         color: #ffffff;
-        border-color: #4f73d9;
+        border-color: __ACCENT__ !important;
     }
     QToolButton[class="action"] {
         min-width: 26px;
@@ -1028,13 +1034,13 @@ def _build_base_css() -> tuple[str, str]:
         border: 1px solid #8ea9df;
     }
     QPushButton[class="primary"] {
-        background: #5865f2;
-        border-color: #6773ff;
+        background: __ACCENT__;
+        border-color: __ACCENT__;
         color: #ffffff;
         font-weight: 700;
     }
     QPushButton[class="primary"]:hover {
-        background: #5865f2;
+        background: __ACCENT__;
     }
     QPushButton[class="danger"] {
         background: #ffffff;
@@ -1046,18 +1052,14 @@ def _build_base_css() -> tuple[str, str]:
         background: #ffffff;
     }
     QToolButton[class="power"] {
-        min-width: 132px;
-        min-height: 132px;
-        max-width: 132px;
-        max-height: 132px;
-        border-radius: 66px;
+        border-radius: 180px;
         background: #6471f8;
-        border: 2px solid #7b87ff;
+        border: 0px;
         padding: 0px;
     }
     QToolButton[class="power"][state="off"] {
         background: #e6eef9;
-        border: 2px solid #bfd2f0;
+        border: 0px;
     }
     QToolButton[class="power"]:hover {
         background: #7480ff;
@@ -1088,8 +1090,8 @@ def _build_base_css() -> tuple[str, str]:
         background: #eef4ff;
     }
     QCheckBox::indicator:checked {
-        border: 1px solid #7f96db;
-        background: #5865f2;
+        border: 1px solid __ACCENT__;
+        background: __ACCENT__;
         __CHECK_ICON__
     }
     QComboBox::drop-down {
@@ -1456,7 +1458,7 @@ def is_light_theme(theme: str) -> bool:
     return td.is_light if td else False
 
 
-def build_stylesheet(theme: str, chevron_icon: str = "", check_icon: str = "") -> str:
+def build_stylesheet(theme: str, chevron_icon: str = "", check_icon: str = "", accent: str | None = None) -> str:
     td = _get_theme(theme)
     css = td.stylesheet if td else ""
     if not css:
@@ -1470,4 +1472,48 @@ def build_stylesheet(theme: str, chevron_icon: str = "", check_icon: str = "") -
         normalized_check = check_icon.replace("\\", "/")
         check_rule = f'image: url("{normalized_check}");'
     css = css.replace("__COMBO_ARROW__", arrow_rule)
-    return css.replace("__CHECK_ICON__", check_rule)
+    css = css.replace("__CHECK_ICON__", check_rule)
+    if accent:
+        c = QColor(accent)
+        if is_light_theme(theme):
+            effective = accent
+            tint = QColor(
+                int(255 * 0.92 + c.red() * 0.08),
+                int(255 * 0.92 + c.green() * 0.08),
+                int(255 * 0.92 + c.blue() * 0.08),
+            )
+            tint_name = tint.name()
+            css += f"""
+    #RootFrame {{
+        background: {tint_name};
+    }}
+    #TitleBar {{
+        background: {tint_name};
+    }}
+    #Sidebar {{
+        background: {tint_name};
+    }}
+    #ContentSurface {{
+        background: {tint_name};
+    }}
+    """
+        elif theme == "dark":
+            effective = QColor(
+                int(c.red() * 0.35),
+                int(c.green() * 0.35),
+                int(c.blue() * 0.35),
+            ).name()
+        elif theme == "oled":
+            effective = QColor(
+                int(c.red() * 0.20),
+                int(c.green() * 0.20),
+                int(c.blue() * 0.20),
+            ).name()
+        else:
+            effective = QColor(
+                int(c.red() * 0.60),
+                int(c.green() * 0.60),
+                int(c.blue() * 0.60),
+            ).name()
+        css = css.replace("__ACCENT__", effective)
+    return css

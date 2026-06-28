@@ -260,22 +260,33 @@ class SidebarPanel(QFrame):
         self._highlight_fill = QColor(69, 81, 109, 72)
         self._highlight_border = QColor("#4f73b3")
         self._highlight_animation: QPropertyAnimation | None = None
+        self._accent_color = QColor("#7380ff")
+
+    def set_accent_color(self, color: QColor) -> None:
+        self._accent_color = QColor(color)
+        self._recalc_highlight_colors()
+
+    def _recalc_highlight_colors(self) -> None:
+        accent = self._accent_color
+        light = is_light_theme(self._theme_name) if hasattr(self, '_theme_name') else False
+        if light:
+            self._highlight_fill = QColor(accent.red(), accent.green(), accent.blue(), 118)
+            self._highlight_border = QColor(accent.red(), accent.green(), accent.blue(), 200)
+        else:
+            self._highlight_fill = QColor(accent.red(), accent.green(), accent.blue(), 68)
+            self._highlight_border = QColor(accent.red(), accent.green(), accent.blue(), 180)
+        self.update()
 
     def set_theme(self, theme: str) -> None:
+        self._theme_name = theme
         light = is_light_theme(theme)
         if light:
             self._border_color = QColor("#d2ddeb")
-            self._highlight_fill = QColor(191, 211, 243, 118)
-            self._highlight_border = QColor("#9cb7ea")
         elif theme == "night":
             self._border_color = QColor("#24304a")
-            self._highlight_fill = QColor(79, 115, 179, 68)
-            self._highlight_border = QColor("#4f73b3")
         else:
             self._border_color = QColor("#2f333a")
-            self._highlight_fill = QColor(96, 108, 124, 66)
-            self._highlight_border = QColor("#717a87")
-        self.update()
+        self._recalc_highlight_colors()
 
     def paintEvent(self, event: QEvent) -> None:
         super().paintEvent(event)
@@ -321,6 +332,7 @@ class SidebarPanel(QFrame):
         self.update()
 
 
+
 class AnimatedNavButton(QToolButton):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -339,6 +351,11 @@ class AnimatedNavButton(QToolButton):
     def set_nav_theme(self, theme: str) -> None:
         self._theme_name = theme
         self._light_theme = is_light_theme(theme)
+        self.update()
+
+    def setChecked(self, checked: bool) -> None:
+        super().setChecked(checked)
+        self._icon_scale = 1.12 if checked else 1.0
         self.update()
 
     def set_accent_color(self, color: QColor | str) -> None:
@@ -364,12 +381,16 @@ class AnimatedNavButton(QToolButton):
 
     def enterEvent(self, event: QEvent) -> None:
         self._animate_property(b"hoverProgress", self._hover_progress, 1.0, 220)
-        self._animate_property(b"iconScale", self._icon_scale, 1.035, 240)
+        if self.isChecked():
+            self._animate_property(b"iconScale", self._icon_scale, 1.12, 240)
+        else:
+            self._animate_property(b"iconScale", self._icon_scale, 1.035, 240)
         super().enterEvent(event)
 
     def leaveEvent(self, event: QEvent) -> None:
         self._animate_property(b"hoverProgress", self._hover_progress, 0.0, 220)
-        self._animate_property(b"iconScale", self._icon_scale, 1.0, 220)
+        target = 1.12 if self.isChecked() else 1.0
+        self._animate_property(b"iconScale", self._icon_scale, target, 220)
         self._animate_property(b"iconDx", self._icon_dx, 0.0, 180)
         self._animate_property(b"iconDy", self._icon_dy, 0.0, 180)
         super().leaveEvent(event)
@@ -395,44 +416,19 @@ class AnimatedNavButton(QToolButton):
 
         base_icon_dx = float(self.property("baseIconDx") or 0.0)
         if self._light_theme:
-            base_fill = QColor(181, 204, 242, 34)
-            hover_fill = QColor(194, 214, 245, int(30 * self._hover_progress))
-            checked_fill = QColor(0, 0, 0, 0)
-            border = QColor(191, 210, 240, int(88 * self._hover_progress))
-            glow_color = QColor(255, 255, 255, int(44 * self._hover_progress))
+            checked_fill = QColor(self._accent_color)
+            checked_fill.setAlpha(22)
         elif self._theme_name == "night":
-            base_fill = QColor(90, 112, 152, 22)
-            hover_fill = QColor(95, 124, 177, int(26 * self._hover_progress))
-            checked_fill = QColor(0, 0, 0, 0)
-            border = QColor(102, 132, 191, int(84 * self._hover_progress))
-            glow_color = QColor(126, 164, 255, int(58 * self._hover_progress))
+            checked_fill = QColor(self._accent_color)
+            checked_fill.setAlpha(22)
         else:
-            base_fill = QColor(126, 133, 145, 20)
-            hover_fill = QColor(144, 151, 165, int(24 * self._hover_progress))
-            checked_fill = QColor(0, 0, 0, 0)
-            border = QColor(154, 162, 174, int(78 * self._hover_progress))
-            glow_color = QColor(208, 216, 232, int(34 * self._hover_progress))
+            checked_fill = QColor(self._accent_color)
+            checked_fill.setAlpha(18)
 
-        fill = QColor(checked_fill if checked else base_fill)
-        if not checked and self._hover_progress > 0:
-            mix = max(0.0, min(1.0, self._hover_progress))
-            fill = QColor(
-                int(base_fill.red() + (hover_fill.red() - base_fill.red()) * mix),
-                int(base_fill.green() + (hover_fill.green() - base_fill.green()) * mix),
-                int(base_fill.blue() + (hover_fill.blue() - base_fill.blue()) * mix),
-                int(base_fill.alpha() + (hover_fill.alpha() - base_fill.alpha()) * mix),
-            )
-        painter.setPen(QPen(border if (border.alpha() > 0 and not checked) else QColor(0, 0, 0, 0), 1))
+        fill = checked_fill if checked else QColor(0, 0, 0, 0)
+        painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(fill)
         painter.drawRoundedRect(rect, radius, radius)
-
-        if self._hover_progress > 0:
-            glow = QRadialGradient(self._glow_pos, max(self.width(), self.height()) * 0.75)
-            glow.setColorAt(0.0, glow_color)
-            glow.setColorAt(1.0, QColor(glow_color.red(), glow_color.green(), glow_color.blue(), 0))
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(glow)
-            painter.drawRoundedRect(rect, radius, radius)
 
         icon_size = max(20, round(26 * self._icon_scale))
         requested_icon = self.iconSize()
@@ -448,8 +444,17 @@ class AnimatedNavButton(QToolButton):
             tint_painter.drawPixmap(0, 0, pixmap)
             tint_painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceAtop)
             accent = QColor(self._accent_color)
-            accent.setAlphaF(0.45)
-            tint_painter.fillRect(tinted.rect(), accent)
+            if self._light_theme:
+                accent.setAlphaF(0.22)
+                tint_painter.fillRect(tinted.rect(), accent)
+            else:
+                light = QColor(
+                    int(255 - (255 - accent.red()) * 0.18),
+                    int(255 - (255 - accent.green()) * 0.18),
+                    int(255 - (255 - accent.blue()) * 0.18),
+                    200,
+                )
+                tint_painter.fillRect(tinted.rect(), light)
             tint_painter.end()
             pixmap = tinted
         target = QRectF(
@@ -459,12 +464,6 @@ class AnimatedNavButton(QToolButton):
             icon_size,
         )
         painter.drawPixmap(target, pixmap, QRectF(0, 0, pixmap.width(), pixmap.height()))
-        if not pixmap.isNull():
-            outline_color = QColor("#ffffff") if not self._light_theme else QColor("#000000")
-            outline_color.setAlphaF(0.18)
-            painter.setPen(QPen(outline_color, 1))
-            painter.setBrush(Qt.BrushStyle.NoBrush)
-            painter.drawRoundedRect(target.adjusted(-0.5, -0.5, 0.5, 0.5), 3, 3)
 
     def _get_hover_progress(self) -> float:
         return self._hover_progress
@@ -597,6 +596,8 @@ class GitHubSidebarButton(QToolButton):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
         opacity = 0.30 + 0.40 * self._hover_progress
+        if is_light_theme(self._theme_name):
+            opacity = 0.12 + 0.40 * self._hover_progress
         scale = 1.0 + 0.08 * self._hover_progress
         icon_size = int(22 * scale)
         pixmap = self.icon().pixmap(icon_size, icon_size)
@@ -620,14 +621,8 @@ class GitHubSidebarButton(QToolButton):
             pixmap = tinted
         painter.setOpacity(opacity)
         source = QRectF(0.0, 0.0, float(pixmap.width()), float(pixmap.height()))
-            painter.drawPixmap(target, pixmap, source)
+        painter.drawPixmap(target, pixmap, source)
         painter.setOpacity(1.0)
-        if not pixmap.isNull():
-            outline_color = QColor("#ffffff") if not is_light_theme(self._theme_name) else QColor("#000000")
-            outline_color.setAlphaF(0.18)
-            painter.setPen(QPen(outline_color, 1))
-            painter.setBrush(Qt.BrushStyle.NoBrush)
-            painter.drawRoundedRect(target.adjusted(-0.5, -0.5, 0.5, 0.5), 3, 3)
 
     def _get_hover_progress(self) -> float:
         return self._hover_progress
@@ -1604,7 +1599,7 @@ class AnimatedPowerButton(QToolButton):
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
         super().mousePressEvent(event)
-        if event.button() == Qt.MouseButton.LeftButton and self.isEnabled():
+        if event.button() == Qt.MouseButton.LeftButton and self.isEnabled() and not self.isChecked():
             self.play_glint()
 
     def _animate_hover(self, target: float) -> None:
@@ -3998,9 +3993,10 @@ class SettingsDialog(AppDialog):
 class _SettingsTabButton(QWidget):
     clicked = Signal()
 
-    def __init__(self, text: str, parent=None):
+    def __init__(self, text: str, light_theme: bool = False, parent=None):
         super().__init__(parent)
         self._text = text
+        self._light_theme = light_theme
         self._checked = False
         self._hover_progress = 0.0
         self._hover_anim = QPropertyAnimation(self, b"hoverProgress", self)
@@ -4056,10 +4052,23 @@ class _SettingsTabButton(QWidget):
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
         r = self.rect().adjusted(0, 0, -1, -1)
 
+        if self._light_theme:
+            text_unchecked = QColor(70, 70, 70)
+            text_checked = QColor(20, 20, 20)
+            border_checked_alpha = 120
+            border_unchecked_alpha = 60
+            fill_checked_alpha = 40
+        else:
+            text_unchecked = QColor(160, 160, 160)
+            text_checked = QColor(210, 210, 210)
+            border_checked_alpha = 80
+            border_unchecked_alpha = 30
+            fill_checked_alpha = 25
+
         if self._checked:
             accent = QColor(self._accent if hasattr(self, '_accent') else '#7380ff')
             fill = QColor(accent)
-            fill.setAlpha(25)
+            fill.setAlpha(fill_checked_alpha)
             p.setBrush(fill)
             p.setPen(Qt.PenStyle.NoPen)
             p.drawRoundedRect(r, 8, 8)
@@ -4072,7 +4081,7 @@ class _SettingsTabButton(QWidget):
             p.drawRoundedRect(r, 8, 8)
 
         border = QColor(self._accent if hasattr(self, '_accent') else '#7380ff')
-        border.setAlpha(80 if self._checked else 25)
+        border.setAlpha(border_checked_alpha if self._checked else border_unchecked_alpha)
         p.setBrush(Qt.BrushStyle.NoBrush)
         p.setPen(QPen(border, 1))
         p.drawRoundedRect(r, 8, 8)
@@ -4097,7 +4106,7 @@ class _SettingsTabButton(QWidget):
             p.drawRoundedRect(r, 8, 8)
             p.restore()
 
-        p.setPen(QColor(200, 200, 200) if self._checked else QColor(140, 140, 140))
+        p.setPen(text_checked if self._checked else text_unchecked)
         f = self.font()
         f.setPointSize(9)
         f.setWeight(QFont.Weight.Bold if self._checked else QFont.Weight.Medium)
@@ -4113,7 +4122,7 @@ class _SettingsTabButton(QWidget):
 class _SettingsTabBar(QWidget):
     tab_changed = Signal(int)
 
-    def __init__(self, tabs: list[str], parent=None):
+    def __init__(self, tabs: list[str], light_theme: bool = False, parent=None):
         super().__init__(parent)
         self._current = 0
         self._btns: list[_SettingsTabButton] = []
@@ -4122,7 +4131,7 @@ class _SettingsTabBar(QWidget):
         root.setSpacing(4)
         _accent_prop = QColor('#7380ff')
         for i, text in enumerate(tabs):
-            btn = _SettingsTabButton(text)
+            btn = _SettingsTabButton(text, light_theme=light_theme)
             self._btns.append(btn)
             btn._accent = _accent_prop
             root.addWidget(btn, 1)
@@ -4145,6 +4154,11 @@ class _SettingsTabBar(QWidget):
     def set_accent(self, c: QColor):
         for btn in self._btns:
             btn.set_accent(c)
+
+    def set_light_theme(self, light: bool) -> None:
+        for btn in self._btns:
+            btn._light_theme = light
+            btn.update()
 
 
 class MainWindow(QMainWindow):
@@ -4473,6 +4487,8 @@ class MainWindow(QMainWindow):
         self._scroll_fade_overlays: list[ScrollFadeOverlay] = []
         self._smooth_scroll_helpers: list[SmoothScrollController] = []
         self._active_emoji_popup: QWidget | None = None
+
+        self._light_theme = False
 
         self._icons_dir = self.context.paths.ui_assets_dir / "icons"
         self._service_icons_dir = self.context.paths.ui_assets_dir / "service_icons"
@@ -6185,12 +6201,11 @@ class MainWindow(QMainWindow):
         self.power_aura.lower()
 
         power_stage = QWidget(power_block)
-        power_stage.setFixedSize(310, 230)
         power_stage.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, False)
         power_stage.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         power_stage.setStyleSheet("background: transparent;")
         power_stage_layout = QVBoxLayout(power_stage)
-        power_stage_layout.setContentsMargins(0, 15, 0, 15)
+        power_stage_layout.setContentsMargins(0, 0, 0, 0)
         power_stage_layout.setSpacing(0)
         power_stage_layout.addStretch(1)
         power_button_row = QHBoxLayout()
@@ -6201,7 +6216,7 @@ class MainWindow(QMainWindow):
         self.power_button.setProperty("class", "power")
         self.power_button.setIcon(self._icon("power.svg"))
         self.power_button.setIconSize(QSize(48, 48))
-        self.power_button.setFixedSize(200, 200)
+        self.power_button.setFixedSize(360, 360)
         self.power_button.setEnabled(False)
         self.power_button.clicked.connect(self._toggle_master_runtime)
         self._attach_button_animations(self.power_button)
@@ -6211,7 +6226,7 @@ class MainWindow(QMainWindow):
         power_stage_layout.addLayout(power_button_row)
         power_stage_layout.addStretch(1)
 
-        power_block_layout.addWidget(power_stage, 0, Qt.AlignmentFlag.AlignHCenter)
+        power_block_layout.addWidget(power_stage, 1)
 
         self._power_aura_host = top
         self._power_block = power_block
@@ -6222,21 +6237,23 @@ class MainWindow(QMainWindow):
         top_layout.addWidget(power_block, 0, Qt.AlignmentFlag.AlignHCenter)
         top_layout.addStretch(1)
 
-        badges_row = QHBoxLayout()
-        badges_row.setSpacing(10)
-        for key, icon_name, title_text in [
-            ("app", "status_ok.svg", self._t("App")),
-            ("zapret", "status_warn.svg", "Zapret"),
-            ("tg", "status_warn.svg", "TG Proxy"),
-            ("mods", "status_mod.svg", "Mods"),
-        ]:
-            badge = self._build_status_badge(key, icon_name, title_text)
-            badges_row.addWidget(badge)
-        badges_row.setStretch(0, 1)
-        badges_row.setStretch(1, 1)
-        badges_row.setStretch(2, 1)
-        badges_row.setStretch(3, 1)
-        top_layout.addLayout(badges_row)
+        self._mods_badge_card = QFrame()
+        self._mods_badge_card.setProperty("class", "modBadge")
+        self._mods_badge_card.setFixedHeight(28)
+        self._mods_badge_card.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        mods_layout = QHBoxLayout(self._mods_badge_card)
+        mods_layout.setContentsMargins(8, 3, 10, 3)
+        mods_layout.setSpacing(4)
+        self._mods_badge_icon = QLabel()
+        self._mods_badge_icon.setPixmap(self._icon("status_mod.svg").pixmap(14, 14))
+        self._mods_badge_icon.setObjectName("ModBadgeIcon")
+        self._mods_badge_value = QLabel("...")
+        self._mods_badge_value.setProperty("class", "muted")
+        self._mods_badge_value.setObjectName("ModBadgeValue")
+        mods_layout.addWidget(self._mods_badge_icon)
+        mods_layout.addWidget(self._mods_badge_value)
+        top_layout.addWidget(self._mods_badge_card, 0, Qt.AlignmentFlag.AlignRight)
+
         root.addWidget(top)
 
         return page
@@ -7568,7 +7585,7 @@ class MainWindow(QMainWindow):
             self._t("Files"),
             self._t("Logs"),
             self._t("Tools"),
-        ])
+        ], light_theme=self._light_theme)
         tab_bar.setObjectName("SettingsTabBar")
         root.addWidget(tab_bar)
 
@@ -7598,24 +7615,31 @@ class MainWindow(QMainWindow):
         tab_bar.tab_changed.connect(self._settings_stack.setCurrentIndex)
 
         # --- Auto-save connections ---
+
         def _theme_changed() -> None:
-            mode_grp = all_ctrl.get("theme_mode")
-            pal_grp = all_ctrl.get("accent_palette")
-            mode = ""
-            accent = "#7380ff"
-            if isinstance(mode_grp, QButtonGroup):
-                checked = mode_grp.checkedButton()
-                if checked is not None and hasattr(checked, "_seg_value"):
-                    mode = str(checked._seg_value)
-            if isinstance(pal_grp, QButtonGroup):
-                checked = pal_grp.checkedButton()
-                if checked is not None and hasattr(checked, "_palette_value"):
-                    accent = str(checked._palette_value)
-            if mode:
-                self.context.settings.update(theme=mode, accent_color=accent)
-                self._apply_theme()
-                QTimer.singleShot(0, lambda: self._reload_settings_page())
-                QTimer.singleShot(200, self._animate_settings_saved)
+            if getattr(self, '_theme_busy', False):
+                return
+            self._theme_busy = True
+            try:
+                mode_grp = all_ctrl.get("theme_mode")
+                pal_grp = all_ctrl.get("accent_palette")
+                mode = ""
+                accent = "#7380ff"
+                if isinstance(mode_grp, QButtonGroup):
+                    checked = mode_grp.checkedButton()
+                    if checked is not None and hasattr(checked, "_seg_value"):
+                        mode = str(checked._seg_value)
+                if isinstance(pal_grp, QButtonGroup):
+                    checked = pal_grp.checkedButton()
+                    if checked is not None and hasattr(checked, "_palette_value"):
+                        accent = str(checked._palette_value)
+                if mode:
+                    self.context.settings.update(theme=mode, accent_color=accent)
+                    self._apply_theme()
+                    QTimer.singleShot(0, lambda: self._reload_settings_page())
+                    QTimer.singleShot(200, self._animate_settings_saved)
+            finally:
+                self._theme_busy = False
 
         def _lang_changed() -> None:
             grp = all_ctrl.get("language")
@@ -7685,14 +7709,17 @@ class MainWindow(QMainWindow):
         def _set_seg(key: str, value: str) -> None:
             grp = ctrl.get(key)
             if isinstance(grp, QButtonGroup):
+                grp.blockSignals(True)
                 for btn in grp.buttons():
                     if hasattr(btn, "_seg_value") and str(btn._seg_value) == value:
                         btn.setChecked(True)
                         break
+                grp.blockSignals(False)
 
         _set_seg("theme_mode", settings.theme)
         pal_grp = ctrl.get("accent_palette")
         if isinstance(pal_grp, QButtonGroup):
+            pal_grp.blockSignals(True)
             for btn in pal_grp.buttons():
                 hex_color = getattr(btn, "_palette_value", "")
                 is_selected = hex_color == settings.accent_color
@@ -7702,6 +7729,7 @@ class MainWindow(QMainWindow):
                     f"QPushButton {{ background: {hex_color}; border-radius: 8px; border: {3 if is_selected else 2}px solid {'white' if is_selected else 'transparent'}; }}"
                     f"QPushButton:hover {{ border: 3px solid white; }}"
                 )
+            pal_grp.blockSignals(False)
         _set_seg("language", settings.language)
         cb = ctrl.get("autostart")
         if isinstance(cb, QCheckBox):
@@ -7759,6 +7787,16 @@ class MainWindow(QMainWindow):
         inp = ctrl.get("tg_pool")
         if isinstance(inp, QLineEdit):
             inp.setText(str(settings.tg_proxy_pool_size or ""))
+
+        for btn in page.findChildren(QPushButton):
+            if btn.property("class") == "settingsSegment":
+                btn.style().unpolish(btn)
+                btn.style().polish(btn)
+                btn.update()
+        for cb in page.findChildren(QCheckBox):
+            cb.style().unpolish(cb)
+            cb.style().polish(cb)
+            cb.update()
 
     def _save_settings_page(self, page: QWidget) -> None:
         ctrl = getattr(page, "_settings_ctrl", {})
@@ -9045,12 +9083,13 @@ class MainWindow(QMainWindow):
         settings = self.context.settings.get()
         theme = settings.theme
         accent = settings.accent_color
+        self._light_theme = is_light_theme(theme)
         self._icon_cache.clear()
         self._service_icon_cache.clear()
         self._service_check_cache.clear()
         chevron = str((self._icons_dir / "chevron_down.svg").resolve())
         check = str((self._icons_dir / "check.svg").resolve())
-        self.setStyleSheet(build_stylesheet(theme, chevron_icon=chevron, check_icon=check))
+        self.setStyleSheet(build_stylesheet(theme, chevron_icon=chevron, check_icon=check, accent=accent))
         self._update_power_icon()
         if isinstance(self.power_button, AnimatedPowerButton):
             self.power_button.set_power_theme(theme, accent)
@@ -9062,9 +9101,11 @@ class MainWindow(QMainWindow):
         sidebar = self.findChild(SidebarPanel, "Sidebar")
         if sidebar is not None:
             sidebar.set_theme(theme)
+            sidebar.set_accent_color(QColor(accent))
         tab_bar = self.findChild(_SettingsTabBar, "SettingsTabBar")
         if tab_bar is not None:
             tab_bar.set_accent(QColor(accent))
+            tab_bar.set_light_theme(self._light_theme)
         for btn in self._nav_buttons:
             if isinstance(btn, AnimatedNavButton):
                 btn.set_nav_theme(theme)
@@ -9488,19 +9529,13 @@ class MainWindow(QMainWindow):
         self.refresh_services()
         self._rebuild_logs_source_combo()
 
-        title_map = {
-            "app": self._t("App"),
-            "zapret": "Zapret",
-            "tg": "TG Proxy",
-            "mods": "Mods",
-            "theme": self._t("Theme"),
-        }
-        for key, title in title_map.items():
-            badge = self._status_badges.get(key)
-            if badge is None:
-                continue
-            badge.title = title
-            badge.title_label.setText(title)
+        for key in ("app", "zapret", "tg", "mods", "theme"):
+            if key in self._status_badges:
+                badge = self._status_badges[key]
+                titles = {"app": self._t("App"), "zapret": "Zapret", "tg": "TG Proxy", "mods": "Mods", "theme": self._t("Theme")}
+                badge.title = titles[key]
+                badge.title_label.setText(titles[key])
+        self._mark_dirty("dashboard")
 
         if self._tray_show_action is not None:
             self._tray_show_action.setText(self._t("Open"))
@@ -11743,10 +11778,8 @@ class MainWindow(QMainWindow):
             if self.power_aura is not None:
                 self.power_aura.set_idle_pulse_enabled(False)
                 self.power_aura.set_status_glow_enabled(True)
-            self._set_badge("app", self._t("Loading"), "status_warn.svg")
-            self._set_badge("zapret", self._t("Loading"), "status_warn.svg")
-            self._set_badge("tg", self._t("Loading"), "status_warn.svg")
-            self._set_badge("mods", self._t("Loading"), "status_mod.svg")
+            self._mods_badge_value.setText(self._t("Loading"))
+            self._mods_badge_icon.setPixmap(self._icon("status_mod.svg").pixmap(14, 14))
             return
         if self._autostart_in_progress:
             self.power_button.setEnabled(False)
@@ -11758,10 +11791,8 @@ class MainWindow(QMainWindow):
             if self.power_aura is not None:
                 self.power_aura.set_idle_pulse_enabled(False)
                 self.power_aura.set_status_glow_enabled(True)
-            self._set_badge("app", self._t("Starting"), "status_warn.svg")
-            self._set_badge("zapret", self._t("Starting"), "status_warn.svg")
-            self._set_badge("tg", self._t("Starting"), "status_warn.svg")
-            self._set_badge("mods", self._t("Loading"), "status_mod.svg")
+            self._mods_badge_value.setText(self._t("Loading"))
+            self._mods_badge_icon.setPixmap(self._icon("status_mod.svg").pixmap(14, 14))
             return
         if self.general_combo.isVisible():
             self._refresh_general_combo(settings.selected_zapret_general)
@@ -11799,15 +11830,8 @@ class MainWindow(QMainWindow):
 
         enabled_mods = list(settings.enabled_mod_ids or [])
 
-        self._set_badge("app", self._t("Running") if fully_running else (self._t("Partial") if any_running else self._t("Idle")), "status_ok.svg" if fully_running else ("status_warn.svg" if any_running else "status_off.svg"))
-        zapret_text, zapret_icon = self._component_badge_state(components.get("zapret"), zapret_state, any_running)
-        self._set_badge_title("zapret", "Zapret")
-        tg_text, tg_icon = self._component_badge_state(components.get("tg-ws-proxy"), tg_state, any_running)
-        self._set_badge("zapret", zapret_text, zapret_icon)
-        self._set_badge("tg", tg_text, tg_icon)
-        self._set_badge("mods", f"{len(enabled_mods)} {self._t('Active')}", "status_mod.svg")
-
-
+        self._mods_badge_value.setText(f"Mods — {len(enabled_mods)} {self._t('Active')}")
+        self._mods_badge_icon.setPixmap(self._icon("status_mod.svg").pixmap(14, 14))
 
     def _power_status_palette(self, state: str) -> tuple[str, str, int]:
         theme = self.context.settings.get().theme
@@ -13599,19 +13623,6 @@ class MainWindow(QMainWindow):
             icon_row.setSpacing(8)
             icon_row.addWidget(icon, 0, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
             icon_row.addStretch(1)
-            if component.id in {"tg-ws-proxy"}:
-                settings_icon_btn = QToolButton()
-                settings_icon_btn.setProperty("class", "action")
-                settings_icon_btn.setIcon(self._icon("settings.svg"))
-                settings_icon_btn.setIconSize(QSize(16, 16))
-                settings_icon_btn.setFixedSize(30, 30)
-                settings_icon_btn.setToolTip(
-                    self._t("TG WS Proxy settings")
-                )
-                settings_icon_btn.setEnabled(True)
-                settings_icon_btn.clicked.connect(lambda _=False, cid=component.id: self._open_component_settings(cid))
-                self._attach_button_animations(settings_icon_btn)
-                icon_row.addWidget(settings_icon_btn, 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop)
             if component.id in {"zapret", "tg-ws-proxy"}:
                 source_icon_btn = QToolButton()
                 source_icon_btn.setProperty("class", "action")
@@ -13660,10 +13671,6 @@ class MainWindow(QMainWindow):
             details.setWordWrap(True)
             card_layout.addWidget(details)
 
-            enabled_text = self._t("enabled") if component.enabled else self._t("disabled")
-            participation = QLabel(f"{self._t('ON/OFF participation')}: {enabled_text}")
-            participation.setWordWrap(True)
-            card_layout.addWidget(participation)
             if component.id == "zapret":
                 if not self._sorted_general_options() and general_options_from_payload:
                     self._general_options_cache = general_options_from_payload
@@ -13898,7 +13905,7 @@ class MainWindow(QMainWindow):
         if viewport.height() <= 0:
             QTimer.singleShot(0, self._sync_component_card_layout)
             return
-        target_height = 0
+        content_height = 0
         for widget in widgets:
             widget.setMinimumHeight(0)
             widget.setMaximumHeight(16777215)
@@ -13909,11 +13916,14 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass
             widget.adjustSize()
-            target_height = max(
-                target_height,
+            content_height = max(
+                content_height,
                 widget.minimumSizeHint().height(),
                 widget.sizeHint().height(),
             )
+        margins = self._components_cards_layout.contentsMargins()
+        available = viewport.height() - margins.top() - margins.bottom()
+        target_height = max(content_height, available)
         for widget in widgets:
             widget.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
             widget.setFixedHeight(target_height)
