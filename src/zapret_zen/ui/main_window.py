@@ -6216,7 +6216,7 @@ class MainWindow(QMainWindow):
         self.power_button.setProperty("class", "power")
         self.power_button.setIcon(self._icon("power.svg"))
         self.power_button.setIconSize(QSize(48, 48))
-        self.power_button.setFixedSize(360, 360)
+        self.power_button.setFixedSize(210, 210)
         self.power_button.setEnabled(False)
         self.power_button.clicked.connect(self._toggle_master_runtime)
         self._attach_button_animations(self.power_button)
