@@ -4402,6 +4402,8 @@ class MainWindow(QMainWindow):
         self._merge_ensure_in_progress = False
         self._page_refresh_in_progress: set[str] = set()
         self._page_payload_cache: dict[str, object] = {}
+        self._state_generation = 0
+        self._task_generation: dict[str, int] = {}
         self._settings_dialog: SettingsDialog | None = None
         self._settings_dialog_signature: tuple[str, str] | None = None
         self._pending_settings_payload: dict[str, object] | None = None
@@ -4508,6 +4510,8 @@ class MainWindow(QMainWindow):
 
         if isinstance(startup_snapshot, dict):
             self._seed_startup_snapshot(startup_snapshot)
+            self._component_states_cache = {}
+            self._component_defs_cache = {}
 
         self.setFixedSize(860, 520)
         self.setWindowTitle("Zapret-Zen")
@@ -7637,10 +7641,17 @@ class MainWindow(QMainWindow):
                 if mode:
                     self.context.settings.update(theme=mode, accent_color=accent)
                     self._apply_theme()
-                    QTimer.singleShot(0, lambda: self._reload_settings_page())
-                    QTimer.singleShot(200, self._animate_settings_saved)
-            finally:
+                    QTimer.singleShot(0, _finish_theme_switch)
+                else:
+                    self._theme_busy = False
+            except Exception:
                 self._theme_busy = False
+                raise
+
+        def _finish_theme_switch() -> None:
+            self._reload_settings_page()
+            QTimer.singleShot(200, self._animate_settings_saved)
+            self._theme_busy = False
 
         def _lang_changed() -> None:
             grp = all_ctrl.get("language")
@@ -8049,6 +8060,7 @@ class MainWindow(QMainWindow):
             self._autostart_in_progress = True
         self._loading_timer.start()
         self._advance_loading_caption()
+        self._state_generation += 1
         self._submit_backend_task("start_enabled_components", {"autostart_only": autostart_only})
 
     def _tray_select_general(self, general_id: str) -> None:
@@ -8652,12 +8664,14 @@ class MainWindow(QMainWindow):
             raise RuntimeError("Backend worker is not available")
         task_id = self.context.backend.submit(action, payload or {})
         self._backend_tasks[task_id] = action_id or action
+        self._task_generation[task_id] = self._state_generation
         return task_id
 
     def _on_backend_task_finished(self, message: dict) -> None:
         task_id = str(message.get("id", ""))
         action = str(message.get("action", ""))
         action_id = self._backend_tasks.pop(task_id, action)
+        task_gen = self._task_generation.pop(task_id, 0)
         payload = message.get("payload", {})
         service_response_revision = 0
         settings_response_revision = 0
@@ -8690,7 +8704,8 @@ class MainWindow(QMainWindow):
                 self._apply_theme()
         self._restore_optimistic_settings_if_needed()
         self._restore_optimistic_service_selection_if_needed()
-        self._update_runtime_snapshot_from_payload(payload)
+        if task_gen >= self._state_generation:
+            self._update_runtime_snapshot_from_payload(payload)
         self._update_mods_cache_from_payload(payload)
         self._update_general_options_from_payload(payload)
         if action in {"toggle_master_runtime", "start_enabled_components", "start_component", "select_general", "apply_settings", "load_startup_snapshot", "load_components_payload", "select_runtime_mode"}:
@@ -10311,6 +10326,7 @@ class MainWindow(QMainWindow):
         self._loading_frame = 0
         self._loading_timer.start()
         self._advance_loading_caption()
+        self._state_generation += 1
         self._submit_backend_task("toggle_master_runtime")
 
     def _auto_restart_partial(self) -> None:
