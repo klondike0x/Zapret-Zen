@@ -10339,10 +10339,8 @@ class MainWindow(QMainWindow):
         running_ids = {cid for cid in active_ids if states.get(cid) and states[cid].status == "running"}
         if running_ids and len(running_ids) < len(active_ids):
             self._partial_restart_count += 1
-            for cid in list(running_ids):
-                self.context.processes.stop_component(cid)
-            for cid in active_ids:
-                self.context.processes.start_component(cid)
+            self._component_states_cache = {}
+            self._ensure_local_runtime_snapshot()
             self._mark_dirty("dashboard", "components", "tray")
 
     def _toggle_master_runtime_worker(self) -> None:
