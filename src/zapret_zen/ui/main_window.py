@@ -25,7 +25,7 @@ from zapret_zen.services.service_catalog import (
     prioritize_generals_for_services,
     service_ids_in_categories,
 )
-from PySide6.QtCore import QAbstractAnimation, QCoreApplication, QEasingCurve, QEvent, QEventLoop, QObject, QPoint, QPointF, QRect, QRectF, QSize, QSizeF, Qt, QTimer, Signal, QPropertyAnimation, QParallelAnimationGroup, Property, QByteArray
+from PySide6.QtCore import QAbstractAnimation, QCoreApplication, QEasingCurve, QEvent, QEventLoop, QObject, QPoint, QPointF, QRect, QRectF, QSize, QSizeF, Qt, QTimer, Signal, QPropertyAnimation, QParallelAnimationGroup, Property, QByteArray, QVariantAnimation
 from PySide6.QtGui import QAction, QActionGroup, QColor, QCloseEvent, QFont, QFontDatabase, QFontMetrics, QIcon, QImage, QKeyEvent, QLinearGradient, QMouseEvent, QPainter, QPainterPath, QPen, QPixmap, QRadialGradient, QRegion, QTextCharFormat, QTextCursor, QTextDocument
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import (
@@ -336,13 +336,9 @@ class SidebarPanel(QFrame):
 class AnimatedNavButton(QToolButton):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.setMouseTracking(True)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self._hover_progress = 0.0
-        self._icon_dx = 0.0
-        self._icon_dy = 0.0
         self._icon_scale = 1.0
-        self._glow_pos = QPointF(22.0, 22.0)
         self._light_theme = False
         self._theme_name = "night"
         self._accent_color = QColor("#7380ff")
@@ -379,32 +375,18 @@ class AnimatedNavButton(QToolButton):
         self._anims.append(animation)
         animation.start()
 
+    def _hover_scale_target(self) -> float:
+        return 1.12 if self.isChecked() else 1.035
+
     def enterEvent(self, event: QEvent) -> None:
         self._animate_property(b"hoverProgress", self._hover_progress, 1.0, 220)
-        if self.isChecked():
-            self._animate_property(b"iconScale", self._icon_scale, 1.12, 240)
-        else:
-            self._animate_property(b"iconScale", self._icon_scale, 1.035, 240)
+        self._animate_property(b"iconScale", self._icon_scale, self._hover_scale_target(), 240)
         super().enterEvent(event)
 
     def leaveEvent(self, event: QEvent) -> None:
         self._animate_property(b"hoverProgress", self._hover_progress, 0.0, 220)
-        target = 1.12 if self.isChecked() else 1.0
-        self._animate_property(b"iconScale", self._icon_scale, target, 220)
-        self._animate_property(b"iconDx", self._icon_dx, 0.0, 180)
-        self._animate_property(b"iconDy", self._icon_dy, 0.0, 180)
+        self._animate_property(b"iconScale", self._icon_scale, 1.0, 220)
         super().leaveEvent(event)
-
-    def mouseMoveEvent(self, event: QMouseEvent) -> None:
-        pos = event.position()
-        self._glow_pos = QPointF(pos.x(), pos.y())
-        center = QPointF(self.width() / 2.0, self.height() / 2.0)
-        dx = max(-1.0, min(1.0, (pos.x() - center.x()) / max(8.0, center.x())))
-        dy = max(-1.0, min(1.0, (pos.y() - center.y()) / max(8.0, center.y())))
-        self._icon_dx += (dx * 1.1 - self._icon_dx) * 0.18
-        self._icon_dy += (dy * 1.1 - self._icon_dy) * 0.18
-        self.update()
-        super().mouseMoveEvent(event)
 
     def paintEvent(self, event: QEvent) -> None:
         painter = QPainter(self)
@@ -458,8 +440,8 @@ class AnimatedNavButton(QToolButton):
             tint_painter.end()
             pixmap = tinted
         target = QRectF(
-            (self.width() - icon_size) / 2.0 + self._icon_dx + base_icon_dx,
-            (self.height() - icon_size) / 2.0 + self._icon_dy,
+            (self.width() - icon_size) / 2.0 + base_icon_dx,
+            (self.height() - icon_size) / 2.0,
             icon_size,
             icon_size,
         )
@@ -472,20 +454,6 @@ class AnimatedNavButton(QToolButton):
         self._hover_progress = float(value)
         self.update()
 
-    def _get_icon_dx(self) -> float:
-        return self._icon_dx
-
-    def _set_icon_dx(self, value: float) -> None:
-        self._icon_dx = float(value)
-        self.update()
-
-    def _get_icon_dy(self) -> float:
-        return self._icon_dy
-
-    def _set_icon_dy(self, value: float) -> None:
-        self._icon_dy = float(value)
-        self.update()
-
     def _get_icon_scale(self) -> float:
         return self._icon_scale
 
@@ -494,8 +462,6 @@ class AnimatedNavButton(QToolButton):
         self.update()
 
     hoverProgress = Property(float, _get_hover_progress, _set_hover_progress)
-    iconDx = Property(float, _get_icon_dx, _set_icon_dx)
-    iconDy = Property(float, _get_icon_dy, _set_icon_dy)
     iconScale = Property(float, _get_icon_scale, _set_icon_scale)
 
 
@@ -971,9 +937,14 @@ class ServiceToggleCard(QFrame):
 
 
 class ExpandToggleButton(QPushButton):
+    _RADIUS = 14.0
+
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self._accent = QColor("#7380ff")
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.setFixedHeight(44)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setFlat(True)
         self._expanded = False
         self._light = False
         self._hover_progress = 0.0
@@ -1047,6 +1018,7 @@ class ExpandToggleButton(QPushButton):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         r = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+        radius = self._RADIUS
 
         accent = QColor(self._accent)
         if self._expanded:
@@ -1062,12 +1034,10 @@ class ExpandToggleButton(QPushButton):
             if self._hover_progress > 0.01:
                 text_color = text_color.lighter(100 + int(10 * self._hover_progress))
 
-        radius = 7.0
-        pen_width = 1.0
         if not self._expanded:
             border = QColor(accent)
             border.setAlpha(int(50 + 100 * self._hover_progress))
-            painter.setPen(QPen(border, pen_width))
+            painter.setPen(QPen(border, 3.0))
             painter.setBrush(bg)
             painter.drawRoundedRect(r, radius, radius)
         else:
@@ -1182,17 +1152,10 @@ class ServiceCategoryCard(BaseServiceCard):
         self._services_scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
         root.addWidget(self._services_scroll, 1)
 
-        expand_row = QHBoxLayout()
-        expand_row.setContentsMargins(0, 4, 0, 0)
-        expand_row.setSpacing(0)
-        expand_row.addStretch(1)
         self._expand_btn = ExpandToggleButton()
-        self._expand_btn.setFixedSize(150, 34)
         self._expand_btn.setText("Show services")
         self._expand_btn.clicked.connect(self._toggle_expand)
-        expand_row.addWidget(self._expand_btn, 0, Qt.AlignmentFlag.AlignCenter)
-        expand_row.addStretch(1)
-        root.addLayout(expand_row)
+        root.addWidget(self._expand_btn)
 
     def set_card_width(self, width: int) -> None:
         self.setMinimumWidth(max(160, min(width, 320)))
@@ -1294,7 +1257,9 @@ class ServiceCategoryCard(BaseServiceCard):
             self._expand_anim.finished.connect(self._finish_collapse)
 
         self._expand_anim.start()
-        self._expand_btn.setText("Hide services" if self._expanded else "Show services")
+        show = getattr(self, '_expand_show_text', "Show services")
+        hide = getattr(self, '_expand_hide_text', "Hide services")
+        self._expand_btn.setText(hide if self._expanded else show)
         self._sync_expand_button_style()
 
     def _finish_collapse(self) -> None:
@@ -1334,6 +1299,11 @@ class ServiceCategoryCard(BaseServiceCard):
         self._expand_btn.set_accent(self._card_accent())
         self._expand_btn.set_expanded_state(self._expanded)
         self._expand_btn.set_light_theme(light)
+
+    def set_expand_texts(self, show: str, hide: str) -> None:
+        self._expand_show_text = show
+        self._expand_hide_text = hide
+        self._expand_btn.setText(self._expand_hide_text if self._expanded else self._expand_show_text)
 
     def _sync_separator_style(self) -> None:
         accent = self._card_accent()
@@ -3993,10 +3963,11 @@ class SettingsDialog(AppDialog):
 class _SettingsTabButton(QWidget):
     clicked = Signal()
 
-    def __init__(self, text: str, light_theme: bool = False, parent=None):
+    def __init__(self, text: str, light_theme: bool = False, accent: QColor | None = None, parent=None):
         super().__init__(parent)
         self._text = text
         self._light_theme = light_theme
+        self._accent = accent or QColor('#7380ff')
         self._checked = False
         self._hover_progress = 0.0
         self._hover_anim = QPropertyAnimation(self, b"hoverProgress", self)
@@ -4004,11 +3975,12 @@ class _SettingsTabButton(QWidget):
         self._hover_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
         self._hover_anim.setStartValue(0.0)
         self._hover_anim.setEndValue(1.0)
-        self._glint_progress = 0.0
-        self._glint_anim = QPropertyAnimation(self, b"glintProgress", self)
-        self._glint_anim.setDuration(400)
-        self._glint_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
-        self._glint_anim.setEndValue(1.0)
+        self._active_progress = 0.0
+        self._active_anim = QPropertyAnimation(self, b"activeProgress", self)
+        self._active_anim.setDuration(250)
+        self._active_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._active_anim.setStartValue(0.0)
+        self._active_anim.setEndValue(1.0)
         self.setFixedHeight(34)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
 
@@ -4019,17 +3991,21 @@ class _SettingsTabButton(QWidget):
         self.update()
     hoverProgress = Property(float, _get_hover_progress, _set_hover_progress)
 
-    def _get_glint_progress(self) -> float:
-        return self._glint_progress
-    def _set_glint_progress(self, v: float) -> None:
-        self._glint_progress = v
+    def _get_active_progress(self) -> float:
+        return self._active_progress
+    def _set_active_progress(self, v: float) -> None:
+        self._active_progress = v
         self.update()
-    glintProgress = Property(float, _get_glint_progress, _set_glint_progress)
+    activeProgress = Property(float, _get_active_progress, _set_active_progress)
 
-    def play_glint(self):
-        self._glint_progress = 0.0
-        self._glint_anim.stop()
-        self._glint_anim.start()
+    def set_checked(self, checked: bool):
+        self._checked = checked
+        self._active_anim.stop()
+        self._active_anim.setDirection(
+            QAbstractAnimation.Direction.Forward if checked
+            else QAbstractAnimation.Direction.Backward
+        )
+        self._active_anim.start()
 
     def enterEvent(self, event):
         self._hover_anim.stop()
@@ -4055,20 +4031,13 @@ class _SettingsTabButton(QWidget):
         if self._light_theme:
             text_unchecked = QColor(70, 70, 70)
             text_checked = QColor(20, 20, 20)
-            border_checked_alpha = 120
-            border_unchecked_alpha = 60
-            fill_checked_alpha = 40
         else:
             text_unchecked = QColor(160, 160, 160)
             text_checked = QColor(210, 210, 210)
-            border_checked_alpha = 80
-            border_unchecked_alpha = 30
-            fill_checked_alpha = 25
 
-        if self._checked:
-            accent = QColor(self._accent if hasattr(self, '_accent') else '#7380ff')
-            fill = QColor(accent)
-            fill.setAlpha(fill_checked_alpha)
+        if self._active_progress > 0:
+            fill = QColor(self._accent)
+            fill.setAlpha(int(30 * self._active_progress))
             p.setBrush(fill)
             p.setPen(Qt.PenStyle.NoPen)
             p.drawRoundedRect(r, 8, 8)
@@ -4080,31 +4049,19 @@ class _SettingsTabButton(QWidget):
             p.setPen(Qt.PenStyle.NoPen)
             p.drawRoundedRect(r, 8, 8)
 
-        border = QColor(self._accent if hasattr(self, '_accent') else '#7380ff')
-        border.setAlpha(border_checked_alpha if self._checked else border_unchecked_alpha)
+        border = QColor(self._accent)
+        border.setAlpha(30)
         p.setBrush(Qt.BrushStyle.NoBrush)
         p.setPen(QPen(border, 1))
         p.drawRoundedRect(r, 8, 8)
-        p.setBrush(Qt.BrushStyle.NoBrush)
-        p.setPen(Qt.PenStyle.NoPen)
 
-        if self._glint_progress > 0:
-            clip = QPainterPath()
-            clip.addRoundedRect(r, 8, 8)
-            p.save()
-            p.setClipPath(clip)
-            grad = QLinearGradient(
-                r.left(), r.top(),
-                r.right(), r.top(),
-            )
-            pos = self._glint_progress
-            grad.setColorAt(max(0, pos - 0.4), QColor(255, 255, 255, 0))
-            grad.setColorAt(pos, QColor(255, 255, 255, 60))
-            grad.setColorAt(min(1, pos + 0.4), QColor(255, 255, 255, 0))
-            p.setBrush(grad)
+        if self._active_progress > 0:
+            lr = QRect(r.left() + 6, r.bottom() - 3, r.width() - 12, 3)
+            lc = QColor(self._accent)
+            lc.setAlpha(int(255 * self._active_progress))
+            p.setBrush(lc)
             p.setPen(Qt.PenStyle.NoPen)
-            p.drawRoundedRect(r, 8, 8)
-            p.restore()
+            p.drawRoundedRect(lr, 2, 2)
 
         p.setPen(text_checked if self._checked else text_unchecked)
         f = self.font()
@@ -4122,33 +4079,29 @@ class _SettingsTabButton(QWidget):
 class _SettingsTabBar(QWidget):
     tab_changed = Signal(int)
 
-    def __init__(self, tabs: list[str], light_theme: bool = False, parent=None):
+    def __init__(self, tabs: list[str], light_theme: bool = False, accent_color: QColor | None = None, parent=None):
         super().__init__(parent)
         self._current = 0
         self._btns: list[_SettingsTabButton] = []
         root = QHBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(4)
-        _accent_prop = QColor('#7380ff')
         for i, text in enumerate(tabs):
-            btn = _SettingsTabButton(text, light_theme=light_theme)
+            btn = _SettingsTabButton(text, light_theme=light_theme, accent=accent_color)
             self._btns.append(btn)
-            btn._accent = _accent_prop
             root.addWidget(btn, 1)
             if i == 0:
                 btn._checked = True
+                btn._active_progress = 1.0
                 btn.update()
             btn.clicked.connect(lambda i=i: self._on_click(i))
 
     def _on_click(self, idx: int):
         if idx == self._current:
             return
-        self._btns[self._current]._checked = False
-        self._btns[self._current].update()
+        self._btns[self._current].set_checked(False)
         self._current = idx
-        self._btns[idx]._checked = True
-        self._btns[idx].update()
-        self._btns[idx].play_glint()
+        self._btns[idx].set_checked(True)
         self.tab_changed.emit(idx)
 
     def set_accent(self, c: QColor):
@@ -4194,6 +4147,7 @@ class MainWindow(QMainWindow):
         self._close_btn: QToolButton | None = None
         self._toggle_in_progress = False
         self._autostart_in_progress = False
+        self._toggle_pulse_anim: QVariantAnimation | None = None
         self._loading_frame = 0
         self._loading_timer = QTimer(self)
         self._loading_timer.setInterval(220)
@@ -6257,7 +6211,30 @@ class MainWindow(QMainWindow):
         self._mods_badge_value.setObjectName("ModBadgeValue")
         mods_layout.addWidget(self._mods_badge_icon)
         mods_layout.addWidget(self._mods_badge_value)
-        top_layout.addWidget(self._mods_badge_card, 0, Qt.AlignmentFlag.AlignRight)
+
+        self._toggle_status_card = QFrame()
+        self._toggle_status_card.setProperty("class", "modBadge")
+        self._toggle_status_card.setObjectName("ToggleStatusCard")
+        self._toggle_status_card.setFixedHeight(28)
+        self._toggle_status_card.hide()
+        status_layout = QHBoxLayout(self._toggle_status_card)
+        status_layout.setContentsMargins(10, 3, 10, 3)
+        self._toggle_status_dot = QLabel()
+        self._toggle_status_dot.setFixedSize(6, 6)
+        self._toggle_status_dot.setObjectName("ToggleStatusDot")
+        self._toggle_status_label = QLabel("")
+        self._toggle_status_label.setProperty("class", "muted")
+        self._toggle_status_label.setObjectName("ToggleStatusLabel")
+        status_layout.addWidget(self._toggle_status_dot)
+        status_layout.addSpacing(4)
+        status_layout.addWidget(self._toggle_status_label)
+
+        badge_row_layout = QHBoxLayout()
+        badge_row_layout.setContentsMargins(0, 0, 0, 0)
+        badge_row_layout.addWidget(self._toggle_status_card, 0, Qt.AlignmentFlag.AlignLeft)
+        badge_row_layout.addStretch(1)
+        badge_row_layout.addWidget(self._mods_badge_card, 0, Qt.AlignmentFlag.AlignRight)
+        top_layout.addLayout(badge_row_layout)
 
         root.addWidget(top)
 
@@ -6407,6 +6384,7 @@ class MainWindow(QMainWindow):
                 pixmaps[preset.id] = self._service_icon_pixmap(preset, 24, selected=preset.id in selected)
             card.set_service_toggles(cat_presets, pixmaps, selected)
             card.service_toggled.connect(self._on_service_card_toggled)
+            card.set_expand_texts(self._t("Показать сервисы", "Show services"), self._t("Скрыть сервисы", "Hide services"))
             cards.append(card)
         return cards
 
@@ -7583,6 +7561,8 @@ class MainWindow(QMainWindow):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
+        settings = self.context.settings.get()
+        accent_color = QColor(getattr(settings, 'accent_color', '#7380ff'))
         tab_bar = _SettingsTabBar([
             self._t("Application"),
             "Zapret",
@@ -7590,7 +7570,7 @@ class MainWindow(QMainWindow):
             self._t("Files"),
             self._t("Logs"),
             self._t("Tools"),
-        ], light_theme=self._light_theme)
+        ], light_theme=self._light_theme, accent_color=accent_color)
         tab_bar.setObjectName("SettingsTabBar")
         root.addWidget(tab_bar)
 
@@ -8754,6 +8734,9 @@ class MainWindow(QMainWindow):
             if bool(payload.get("theme_changed")) or bool(payload.get("language_changed")):
                 self._schedule_full_locale_theme_refresh()
             self._mark_dirty("dashboard", "services", "components", "mods", "files", "logs", "tray")
+        if action == "start_enabled_components":
+            self._component_states_cache = {}
+            self._ensure_local_runtime_snapshot()
         if action in {"toggle_master_runtime", "start_enabled_components", "select_general"}:
             self._mark_dirty("dashboard", "components", "tray")
             self._ui_signals.toggle_done.emit()
@@ -9060,6 +9043,10 @@ class MainWindow(QMainWindow):
     def _on_backend_task_progress(self, message: dict) -> None:
         action = str(message.get("action", ""))
         payload = message.get("payload", {})
+        if action == "toggle_master_runtime" and isinstance(payload, dict):
+            status = payload.get("status", "")
+            if status:
+                self._update_toggle_status(status)
         if action == "run_general_diagnostics" and isinstance(payload, dict):
             self._ui_signals.general_test_progress.emit(
                 {
@@ -10368,6 +10355,9 @@ class MainWindow(QMainWindow):
         if isinstance(self.power_button, AnimatedPowerButton):
             self.power_button.set_spinner_active(False)
         self.refresh_all()
+        self._toggle_status_card.setVisible(False)
+        self._toggle_status_label.setText("")
+        self._stop_toggle_pulse()
         if self._pending_info_message is not None:
             title, text = self._pending_info_message
             self._pending_info_message = None
@@ -11859,6 +11849,51 @@ class MainWindow(QMainWindow):
         }
         return colors.get(state, colors["off"])
 
+    def _update_toggle_status(self, status_key: str) -> None:
+        labels = {
+            "start_zapret": self._t("Запуск Zapret…", "Starting Zapret…"),
+            "start_tg-ws-proxy": self._t("Запуск TG WS Proxy…", "Starting TG WS Proxy…"),
+            "start_dns-manager": self._t("Настройка DNS…", "Configuring DNS…"),
+            "stop_zapret": self._t("Остановка Zapret…", "Stopping Zapret…"),
+            "stop_tg-ws-proxy": self._t("Остановка TG WS Proxy…", "Stopping TG WS Proxy…"),
+            "stop_dns-manager": self._t("Остановка DNS…", "Stopping DNS…"),
+        }
+        if status_key not in labels:
+            return
+        self._toggle_status_label.setText(labels[status_key])
+        if not self._toggle_status_card.isVisible():
+            self._toggle_status_card.setVisible(True)
+            self._start_toggle_pulse()
+
+    def _start_toggle_pulse(self) -> None:
+        if self._toggle_pulse_anim is not None:
+            self._toggle_pulse_anim.stop()
+        settings = self.context.settings.get()
+        accent = QColor(settings.accent_color)
+
+        def on_value(val: float) -> None:
+            c = QColor(accent)
+            c.setAlphaF(0.3 + 0.7 * val)
+            self._toggle_status_dot.setStyleSheet(
+                f"background: {c.name(QColor.NameFormat.HexArgb)}; border-radius: 3px;"
+            )
+
+        anim = QVariantAnimation(self)
+        anim.setDuration(800)
+        anim.setStartValue(0.0)
+        anim.setEndValue(1.0)
+        anim.setLoopCount(-1)
+        anim.valueChanged.connect(on_value)
+        anim.setEasingCurve(QEasingCurve.Type.SineCurve)
+        anim.start()
+        self._toggle_pulse_anim = anim
+
+    def _stop_toggle_pulse(self) -> None:
+        if self._toggle_pulse_anim is not None:
+            self._toggle_pulse_anim.stop()
+            self._toggle_pulse_anim = None
+        self._toggle_status_dot.setStyleSheet("")
+
     def _inactive_control_style_values(self) -> tuple[str, QColor, QColor]:
         text_color, accent, alpha = self._power_status_palette("off")
         border = QColor(accent)
@@ -12898,6 +12933,7 @@ class MainWindow(QMainWindow):
                 for preset in cat_presets:
                     pixmaps[preset.id] = self._service_icon_pixmap(preset, 24, selected=preset.id in selected)
                 card.refresh_service_toggles(pixmaps, selected)
+                card.set_expand_texts(self._t("Показать сервисы", "Show services"), self._t("Скрыть сервисы", "Hide services"))
             finally:
                 try:
                     card.blockSignals(False)
@@ -12923,6 +12959,7 @@ class MainWindow(QMainWindow):
                 for preset in cat_presets:
                     pixmaps[preset.id] = self._service_icon_pixmap(preset, 24, selected=preset.id in selected)
                 card.refresh_service_toggles(pixmaps, selected)
+                card.set_expand_texts(self._t("Показать сервисы", "Show services"), self._t("Скрыть сервисы", "Hide services"))
             finally:
                 try:
                     card.blockSignals(False)

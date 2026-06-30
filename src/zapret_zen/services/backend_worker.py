@@ -316,6 +316,7 @@ def _handle_toggle_master_runtime(context, payload, emit_progress):
     _sync_telegram_component_from_services(context)
     _sync_dns_manager_component_from_services(context)
     components = context.processes.list_components()
+    comp_by_id = {c.id: c for c in components}
     states = {item.component_id: item for item in context.processes.list_states()}
     active_ids = [c.id for c in components if c.enabled]
     running_ids = {
@@ -325,12 +326,18 @@ def _handle_toggle_master_runtime(context, payload, emit_progress):
     }
     if running_ids:
         for cid in list(running_ids):
+            if emit_progress:
+                emit_progress({"action": "toggle_master_runtime", "status": f"stop_{cid}"})
             context.processes.stop_component(cid)
         mode = "disconnect"
     else:
         for cid in active_ids:
+            if emit_progress:
+                emit_progress({"action": "toggle_master_runtime", "status": f"start_{cid}"})
             context.processes.start_component(cid)
         mode = "connect"
+    if emit_progress:
+        emit_progress({"action": "toggle_master_runtime", "mode": mode})
     result = {"mode": mode}
     result.update(_snapshot(context))
     _attach_telegram_proxy_info(context, result)

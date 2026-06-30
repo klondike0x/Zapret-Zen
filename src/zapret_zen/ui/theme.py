@@ -710,6 +710,18 @@ def _build_base_css() -> tuple[str, str]:
     QMenu::item:selected {
         background: #2b3f63;
     }
+    #ToggleStatusCard {
+        border-radius: 14px;
+    }
+    #ToggleStatusDot {
+        background: transparent;
+        border-radius: 3px;
+    }
+    #ToggleStatusLabel {
+        font-size: 11px;
+        color: #90a1c2;
+        background: transparent;
+    }
     """
 
     light = """
@@ -1278,6 +1290,18 @@ def _build_base_css() -> tuple[str, str]:
     }
     QMenu::item:selected {
         background: #e7efff;
+    }
+    #ToggleStatusCard {
+        border-radius: 14px;
+    }
+    #ToggleStatusDot {
+        background: transparent;
+        border-radius: 3px;
+    }
+    #ToggleStatusLabel {
+        font-size: 11px;
+        color: #6a7b98;
+        background: transparent;
     }
     """
     return night, light
