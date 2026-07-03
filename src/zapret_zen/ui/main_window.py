@@ -28,7 +28,7 @@ from zapret_zen.services.service_catalog import (
     service_ids_in_categories,
 )
 from PySide6.QtCore import QAbstractAnimation, QCoreApplication, QEasingCurve, QEvent, QEventLoop, QObject, QPoint, QPointF, QRect, QRectF, QSize, QSizeF, Qt, QTimer, Signal, QPropertyAnimation, QParallelAnimationGroup, Property, QByteArray, QVariantAnimation
-from PySide6.QtGui import QAction, QActionGroup, QBitmap, QColor, QCloseEvent, QFont, QFontDatabase, QFontMetrics, QIcon, QImage, QKeyEvent, QLinearGradient, QMouseEvent, QPainter, QPainterPath, QPen, QPixmap, QRadialGradient, QRegion, QTextCharFormat, QTextCursor, QTextDocument
+from PySide6.QtGui import QAction, QActionGroup, QColor, QCloseEvent, QFont, QFontDatabase, QFontMetrics, QIcon, QImage, QKeyEvent, QLinearGradient, QMouseEvent, QPainter, QPainterPath, QPen, QPixmap, QRadialGradient, QRegion, QTextCharFormat, QTextCursor, QTextDocument
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -14384,22 +14384,22 @@ class MainWindow(QMainWindow):
             icon_row.setSpacing(0)
 
             if has_favicon:
-                pix = QPixmap(fav_path)
+                src = QPixmap(fav_path)
+                img = QImage(56, 56, QImage.Format.Format_ARGB32_Premultiplied)
+                img.fill(QColor(0, 0, 0, 0))
+                p = QPainter(img)
+                p.setRenderHint(QPainter.RenderHint.Antialiasing)
+                path = QPainterPath()
+                path.addRoundedRect(0, 0, 56, 56, 14, 14)
+                p.setClipPath(path)
+                p.drawPixmap(0, 0, src.scaled(56, 56, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+                p.end()
                 icon_label = QLabel()
                 icon_label.setFixedSize(56, 56)
-                icon_label.setPixmap(pix.scaled(56, 56, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+                icon_label.setPixmap(QPixmap.fromImage(img))
                 icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
                 icon_label.setStyleSheet("border: none; background: transparent;")
                 icon_row.addWidget(icon_label, 1, Qt.AlignmentFlag.AlignCenter)
-                mask_bm = QBitmap(56, 56)
-                mask_bm.fill(Qt.GlobalColor.color0)
-                mp = QPainter(mask_bm)
-                mp.setRenderHint(QPainter.RenderHint.Antialiasing)
-                mp.setBrush(Qt.GlobalColor.color1)
-                mp.setPen(Qt.PenStyle.NoPen)
-                mp.drawRoundedRect(0, 0, 56, 56, 15, 15)
-                mp.end()
-                icon_label.setMask(mask_bm)
             else:
                 emoji_btn = EmojiBadgeButton(str(mod["emoji"]))
                 emoji_btn.setToolTip(self._t("Choose emoji"))
