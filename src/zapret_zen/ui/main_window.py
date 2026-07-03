@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import ctypes
+import json
 import math
 import os
 import platform
+import random
 import re
 import time
 import sys
@@ -26,7 +28,7 @@ from zapret_zen.services.service_catalog import (
     service_ids_in_categories,
 )
 from PySide6.QtCore import QAbstractAnimation, QCoreApplication, QEasingCurve, QEvent, QEventLoop, QObject, QPoint, QPointF, QRect, QRectF, QSize, QSizeF, Qt, QTimer, Signal, QPropertyAnimation, QParallelAnimationGroup, Property, QByteArray, QVariantAnimation
-from PySide6.QtGui import QAction, QActionGroup, QColor, QCloseEvent, QFont, QFontDatabase, QFontMetrics, QIcon, QImage, QKeyEvent, QLinearGradient, QMouseEvent, QPainter, QPainterPath, QPen, QPixmap, QRadialGradient, QRegion, QTextCharFormat, QTextCursor, QTextDocument
+from PySide6.QtGui import QAction, QActionGroup, QBitmap, QColor, QCloseEvent, QFont, QFontDatabase, QFontMetrics, QIcon, QImage, QKeyEvent, QLinearGradient, QMouseEvent, QPainter, QPainterPath, QPen, QPixmap, QRadialGradient, QRegion, QTextCharFormat, QTextCursor, QTextDocument
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -334,6 +336,8 @@ class SidebarPanel(QFrame):
 
 
 class AnimatedNavButton(QToolButton):
+    _BASE_ICON_SIZE = 26.0
+
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -343,6 +347,8 @@ class AnimatedNavButton(QToolButton):
         self._theme_name = "night"
         self._accent_color = QColor("#7380ff")
         self._anims: list[QPropertyAnimation] = []
+        self._tilt_x = 0.0
+        self._tilt_y = 0.0
 
     def set_nav_theme(self, theme: str) -> None:
         self._theme_name = theme
@@ -351,8 +357,7 @@ class AnimatedNavButton(QToolButton):
 
     def setChecked(self, checked: bool) -> None:
         super().setChecked(checked)
-        self._icon_scale = 1.12 if checked else 1.0
-        self.update()
+        self._animate_property(b"iconScale", self._icon_scale, 1.12 if checked else 1.0, 300)
 
     def set_accent_color(self, color: QColor | str) -> None:
         if isinstance(color, str):
@@ -370,7 +375,7 @@ class AnimatedNavButton(QToolButton):
         animation.setStartValue(start)
         animation.setEndValue(end)
         animation.setDuration(duration)
-        animation.setEasingCurve(QEasingCurve.Type.InOutCubic)
+        animation.setEasingCurve(QEasingCurve.Type.OutBack)
         animation.finished.connect(lambda: self._anims.remove(animation) if animation in self._anims else None)
         self._anims.append(animation)
         animation.start()
@@ -379,13 +384,17 @@ class AnimatedNavButton(QToolButton):
         return 1.12 if self.isChecked() else 1.035
 
     def enterEvent(self, event: QEvent) -> None:
-        self._animate_property(b"hoverProgress", self._hover_progress, 1.0, 220)
-        self._animate_property(b"iconScale", self._icon_scale, self._hover_scale_target(), 240)
+        self._animate_property(b"hoverProgress", self._hover_progress, 1.0, 280)
+        self._animate_property(b"iconScale", self._icon_scale, self._hover_scale_target(), 300)
+        self._animate_property(b"tiltX", self._tilt_x, random.uniform(-1.0, 1.0), 350)
+        self._animate_property(b"tiltY", self._tilt_y, random.uniform(-1.0, 1.0), 350)
         super().enterEvent(event)
 
     def leaveEvent(self, event: QEvent) -> None:
-        self._animate_property(b"hoverProgress", self._hover_progress, 0.0, 220)
-        self._animate_property(b"iconScale", self._icon_scale, 1.0, 220)
+        self._animate_property(b"hoverProgress", self._hover_progress, 0.0, 260)
+        self._animate_property(b"iconScale", self._icon_scale, 1.0, 260)
+        self._animate_property(b"tiltX", self._tilt_x, 0.0, 260)
+        self._animate_property(b"tiltY", self._tilt_y, 0.0, 260)
         super().leaveEvent(event)
 
     def paintEvent(self, event: QEvent) -> None:
@@ -412,10 +421,7 @@ class AnimatedNavButton(QToolButton):
         painter.setBrush(fill)
         painter.drawRoundedRect(rect, radius, radius)
 
-        icon_size = max(20, round(26 * self._icon_scale))
-        requested_icon = self.iconSize()
-        if requested_icon.isValid():
-            icon_size = max(18, round(max(requested_icon.width(), requested_icon.height()) * self._icon_scale))
+        icon_size = round(self._BASE_ICON_SIZE)
         pixmap = self.icon().pixmap(icon_size, icon_size)
         if not pixmap.isNull():
             tinted = QPixmap(pixmap.size())
@@ -439,13 +445,23 @@ class AnimatedNavButton(QToolButton):
                 tint_painter.fillRect(tinted.rect(), light)
             tint_painter.end()
             pixmap = tinted
-        target = QRectF(
-            (self.width() - icon_size) / 2.0 + base_icon_dx,
-            (self.height() - icon_size) / 2.0,
-            icon_size,
-            icon_size,
-        )
-        painter.drawPixmap(target, pixmap, QRectF(0, 0, pixmap.width(), pixmap.height()))
+
+            cx = self.width() / 2.0 + base_icon_dx
+            cy = self.height() / 2.0
+            half = icon_size / 2.0
+            painter.save()
+            painter.translate(cx, cy)
+            painter.scale(self._icon_scale, self._icon_scale)
+            painter.rotate(self._tilt_x * 8.0)
+            painter.rotate(self._tilt_y * 6.0)
+            shadow = QPainterPath()
+            shadow.addRoundedRect(QRectF(-half, -half + 1, icon_size, icon_size), 3, 3)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor(0, 0, 0, 35))
+            painter.drawPath(shadow)
+            ir = QRect(round(-half), round(-half), icon_size, icon_size)
+            painter.drawPixmap(ir, pixmap)
+            painter.restore()
 
     def _get_hover_progress(self) -> float:
         return self._hover_progress
@@ -461,8 +477,24 @@ class AnimatedNavButton(QToolButton):
         self._icon_scale = float(value)
         self.update()
 
+    def _get_tilt_x(self) -> float:
+        return self._tilt_x
+
+    def _set_tilt_x(self, value: float) -> None:
+        self._tilt_x = float(value)
+        self.update()
+
+    def _get_tilt_y(self) -> float:
+        return self._tilt_y
+
+    def _set_tilt_y(self, value: float) -> None:
+        self._tilt_y = float(value)
+        self.update()
+
     hoverProgress = Property(float, _get_hover_progress, _set_hover_progress)
     iconScale = Property(float, _get_icon_scale, _set_icon_scale)
+    tiltX = Property(float, _get_tilt_x, _set_tilt_x)
+    tiltY = Property(float, _get_tilt_y, _set_tilt_y)
 
 
 class ClickSelectComboBox(QComboBox):
@@ -2712,6 +2744,17 @@ def _load_ui_font_family(ui_assets_dir: Path) -> str:
     return family
 
 
+def _load_headers_font_family(ui_assets_dir: Path) -> str:
+    font_path = ui_assets_dir / "fonts" / "Headers.otf"
+    family = "Headers"
+    if font_path.exists():
+        font_id = QFontDatabase.addApplicationFont(str(font_path))
+        families = QFontDatabase.applicationFontFamilies(font_id) if font_id >= 0 else []
+        if families:
+            family = str(families[0])
+    return family
+
+
 def _onboarding_text_color(theme: str) -> str:
     return "#16202f" if is_light_theme(theme) else "#f6f8fc"
 
@@ -4127,6 +4170,7 @@ class MainWindow(QMainWindow):
         base_font = QFont(_load_ui_font_family(context.paths.ui_assets_dir), 10)
         base_font.setStyleStrategy(QFont.StyleStrategy.PreferAntialias | QFont.StyleStrategy.PreferQuality)
         base_font.setHintingPreference(QFont.HintingPreference.PreferNoHinting)
+        self._headers_font_family = _load_headers_font_family(context.paths.ui_assets_dir)
         app = QApplication.instance()
         if app is not None:
             app.setFont(base_font)
@@ -6735,6 +6779,7 @@ class MainWindow(QMainWindow):
         self._mods_title_label = self._mods_page._title_label
         self._mods_subtitle_label = self._mods_page._subtitle_label
         self._mods_add_btn = self._mods_page._add_btn
+        self._mods_add_btn.clicked.connect(self._import_mod_any)
         self.mods_summary_chip = self._mods_page.summary_chip
         self.mods_enabled_chip = self._mods_page.enabled_chip
         self.mods_import_hint = self._mods_page.import_hint
@@ -13653,58 +13698,12 @@ class MainWindow(QMainWindow):
             card.setMinimumWidth(360)
             card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Maximum)
             self._components_card_by_id[component.id] = card
-            icon = QLabel()
-            if component.id in {"tg-ws-proxy", "dns-manager"}:
-                icon_size = 38
-            else:
-                icon_size = 36
-            icon_slot = QSize(icon_size, icon_size)
-            icon.setFixedSize(icon_slot)
-            raw_icon_pixmap = self._icon(icons.get(component.id, "components.svg")).pixmap(icon_size, icon_size)
-            icon.setPixmap(
-                self._compose_icon_slot_pixmap(
-                    raw_icon_pixmap,
-                    icon_slot,
-                    1.0,
-                    0.0,
-                    0.0,
-                )
-            )
-            icon_row = QHBoxLayout()
-            icon_row.setContentsMargins(0, 6, 0, 0)
-            icon_row.setSpacing(8)
-            icon_row.addWidget(icon, 0, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
-            icon_row.addStretch(1)
-            if component.id in {"zapret", "tg-ws-proxy"}:
-                source_icon_btn = QToolButton()
-                source_icon_btn.setProperty("class", "action")
-                source_icon_btn.setIcon(self._icon("external.svg"))
-                source_icon_btn.setIconSize(QSize(16, 16))
-                source_icon_btn.setFixedSize(30, 30)
-                source_icon_btn.setToolTip(self._t("Source"))
-                source_icon_btn.clicked.connect(lambda _=False, url=component.source: self._open_update_link(url))
-                self._attach_button_animations(source_icon_btn)
-                icon_row.addWidget(source_icon_btn, 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop)
-                update_icon_btn = QToolButton()
-                update_icon_btn.setProperty("class", "action")
-                update_icon_btn.setIcon(self._icon("refresh.svg"))
-                update_icon_btn.setIconSize(QSize(16, 16))
-                update_icon_btn.setFixedSize(30, 30)
-                update_icon_btn.setToolTip(
-                    self._t("Update Zapret")
-                    if component.id == "zapret"
-                    else self._t("Update TG WS Proxy")
-                )
-                update_icon_btn.clicked.connect(
-                    self._update_zapret_runtime if component.id == "zapret" else self._update_tg_ws_proxy_runtime
-                )
-                self._attach_button_animations(update_icon_btn)
-                icon_row.addWidget(update_icon_btn, 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop)
-            card_layout.addLayout(icon_row)
-
             title = QLabel(display_name)
-            title.setProperty("class", "title")
             title.setWordWrap(True)
+            title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            theme = self.context.settings.get().theme
+            title_color = "#f5f7fc" if not is_light_theme(theme) else "#1a2332"
+            title.setStyleSheet(f"font-family: '{self._headers_font_family}'; font-size: 32pt; font-weight: 400; color: {title_color}; margin-top: 16px;")
             card_layout.addWidget(title)
 
             description_text = descriptions.get(component.id, component.description)
@@ -14232,18 +14231,33 @@ class MainWindow(QMainWindow):
             indexed = index_map.get(mod_id)
             enabled = bool(_field(installed_item, "enabled", False))
             state = "enabled" if enabled else "installed"
+            mod_path = str(_field(installed_item, "path", "") or "")
+            meta = {}
+            if mod_path:
+                meta_path = os.path.join(mod_path, "mod.json")
+                if os.path.isfile(meta_path):
+                    try:
+                        with open(meta_path, "r", encoding="utf-8") as f:
+                            meta = json.loads(f.read())
+                    except Exception:
+                        pass
+            mod_name = str(meta.get("name", _field(indexed or installed_item, "name", mod_id) or mod_id))
+            mod_author = str(meta.get("author", _field(indexed or installed_item, "author", self._t("unknown")) or self._t("unknown")))
+            mod_version = str(meta.get("version", _field(installed_item, "version", _field(indexed or installed_item, "version", ""))))
+            mod_desc = str(meta.get("description", _field(indexed or installed_item, "description", "") or self._t("Local mod without description.")))
             combined.append(
                 {
                     "id": mod_id,
-                    "name": str(_field(indexed or installed_item, "name", mod_id) or mod_id),
-                    "description": str(_field(indexed or installed_item, "description", "") or self._t("Local mod without description.")),
-                    "subtitle": f"{self._t('Author')}: {str(_field(indexed or installed_item, 'author', self._t('unknown')) or self._t('unknown'))} | {self._t('Version')}: {str(_field(installed_item, 'version', _field(indexed or installed_item, 'version', '')))}",
+                    "name": mod_name,
+                    "description": mod_desc,
+                    "subtitle": f"{self._t('Author')}: {mod_author} | {self._t('Version')}: {mod_version}",
                     "state": state,
                     "enabled": enabled,
                     "changelog": str(_field(indexed or installed_item, "changelog", "") or ""),
                     "emoji": self._resolve_mod_emoji(mod_id, str(_field(installed_item, "emoji", "") or "")),
                     "installed": True,
                     "order": order,
+                    "path": mod_path,
                 }
             )
 
@@ -14346,26 +14360,59 @@ class MainWindow(QMainWindow):
             icon_wrap = QFrame()
             icon_wrap.setProperty("class", "")
             icon_wrap.setFixedSize(60, 60)
-            palette_bg, palette_border, palette_fg = self._mod_badge_palette(str(mod["emoji"]))
-            palette_bg, palette_border, palette_fg = self._theme_adjusted_badge_palette(palette_bg, palette_border, palette_fg)
-            icon_wrap.setStyleSheet(
-                f"QFrame {{ background: {palette_bg}; border: 1px solid {palette_border}; border-radius: 16px; }}"
-            )
+
+            mod_path = str(mod.get("path", "") or "")
+            fav_path = os.path.join(mod_path, "favicon.png") if mod_path else ""
+            has_favicon = bool(mod_path and os.path.isfile(fav_path))
+
+            if has_favicon:
+                _palette_keys = ["✨", "🪄", "🔥", "⚡", "🧩", "🎮", "🌐", "🛡️", "🚀", "💎", "📦", "🧪"]
+                palette_bg, palette_border, palette_fg = self._mod_badge_palette(_palette_keys[hash(mod_id + "_favicon") % len(_palette_keys)])
+                palette_bg, palette_border, palette_fg = self._theme_adjusted_badge_palette(palette_bg, palette_border, palette_fg)
+                icon_wrap.setStyleSheet(
+                    f"QFrame {{ background: {palette_bg}; border: 1px solid {palette_border}; border-radius: 16px; }}"
+                )
+            else:
+                palette_bg, palette_border, palette_fg = self._mod_badge_palette(str(mod["emoji"]))
+                palette_bg, palette_border, palette_fg = self._theme_adjusted_badge_palette(palette_bg, palette_border, palette_fg)
+                icon_wrap.setStyleSheet(
+                    f"QFrame {{ background: {palette_bg}; border: 1px solid {palette_border}; border-radius: 16px; }}"
+                )
+
             icon_row = QVBoxLayout(icon_wrap)
             icon_row.setContentsMargins(2, 2, 2, 2)
             icon_row.setSpacing(0)
-            emoji_btn = EmojiBadgeButton(str(mod["emoji"]))
-            emoji_btn.setToolTip(self._t("Choose emoji"))
-            emoji_btn.setFixedSize(48, 48)
-            emoji_btn.setStyleSheet("border: none; background: transparent;")
-            emoji_btn.setEmojiColor(palette_fg)
-            badge_dx, badge_dy = self._mod_badge_offset(str(mod["emoji"]))
-            emoji_btn.setEmojiOffset(badge_dx, badge_dy)
-            if mod_id == "unified-by-peshk0v":
-                emoji_btn.setEnabled(False)
+
+            if has_favicon:
+                pix = QPixmap(fav_path)
+                icon_label = QLabel()
+                icon_label.setFixedSize(56, 56)
+                icon_label.setPixmap(pix.scaled(56, 56, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+                icon_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+                icon_label.setStyleSheet("border: none; background: transparent;")
+                icon_row.addWidget(icon_label, 1, Qt.AlignmentFlag.AlignCenter)
+                mask_bm = QBitmap(56, 56)
+                mask_bm.fill(Qt.GlobalColor.color0)
+                mp = QPainter(mask_bm)
+                mp.setRenderHint(QPainter.RenderHint.Antialiasing)
+                mp.setBrush(Qt.GlobalColor.color1)
+                mp.setPen(Qt.PenStyle.NoPen)
+                mp.drawRoundedRect(0, 0, 56, 56, 15, 15)
+                mp.end()
+                icon_label.setMask(mask_bm)
             else:
-                emoji_btn.clicked.connect(lambda _=False, mid=mod_id, btn=emoji_btn: self._open_mod_emoji_menu(mid, btn))
-            icon_row.addWidget(emoji_btn, 1, Qt.AlignmentFlag.AlignCenter)
+                emoji_btn = EmojiBadgeButton(str(mod["emoji"]))
+                emoji_btn.setToolTip(self._t("Choose emoji"))
+                emoji_btn.setFixedSize(48, 48)
+                emoji_btn.setStyleSheet("border: none; background: transparent;")
+                emoji_btn.setEmojiColor(palette_fg)
+                badge_dx, badge_dy = self._mod_badge_offset(str(mod["emoji"]))
+                emoji_btn.setEmojiOffset(badge_dx, badge_dy)
+                if mod_id == "unified-by-peshk0v":
+                    emoji_btn.setEnabled(False)
+                else:
+                    emoji_btn.clicked.connect(lambda _=False, mid=mod_id, btn=emoji_btn: self._open_mod_emoji_menu(mid, btn))
+                icon_row.addWidget(emoji_btn, 1, Qt.AlignmentFlag.AlignCenter)
             left_col.addWidget(icon_wrap, 0, Qt.AlignmentFlag.AlignHCenter)
 
             body = QVBoxLayout()

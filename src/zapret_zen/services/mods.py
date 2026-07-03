@@ -4,7 +4,9 @@ from dataclasses import asdict
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlparse
+import json
 import re
+import random
 import shutil
 import tempfile
 import zipfile
@@ -20,7 +22,7 @@ from zapret_zen.services.storage import StorageManager
 
 
 class ModsManager:
-    METADATA_FILENAME = "zapret-zen-mod.json"
+    METADATA_FILENAME = "mod.json"
     UNKNOWN_AUTHOR = "неизвестен"
     ALLOWED_MOD_SUFFIXES = {".txt", ".ps1", ".bat"}
     _EMOJI_CHOICES = ["✨", "🪄", "🔥", "⚡", "🧩", "🎮", "🌐", "🛡️", "🚀", "💎", "📦", "🧪"]
@@ -57,8 +59,59 @@ class ModsManager:
         return [ModIndexItem(**item) for item in raw]
 
     def list_installed(self) -> list[InstalledMod]:
+        self._auto_register_mods()
         raw = self.storage.read_json(self._installed_path, default=[]) or []
         return [InstalledMod(**item) for item in raw]
+
+    def _auto_register_mods(self) -> None:
+        mods_dir = self.storage.paths.mods_dir
+        if not mods_dir.exists():
+            return
+        installed = self.storage.read_json(self._installed_path, default=[]) or []
+        if not isinstance(installed, list):
+            installed = []
+        registered_ids = {item.get("id") for item in installed if isinstance(item, dict)}
+        changed = False
+        for mod_dir in sorted(mods_dir.iterdir()):
+            if not mod_dir.is_dir():
+                continue
+            mod_id = mod_dir.name
+            if mod_id in registered_ids or mod_id == "unified-by-peshk0v":
+                continue
+            meta_path = mod_dir / self.METADATA_FILENAME
+            if not meta_path.is_file():
+                continue
+            try:
+                meta = json.loads(meta_path.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            if not isinstance(meta, dict):
+                continue
+            general_scripts = sorted(
+                script.name for script in mod_dir.glob("*.bat") if script.is_file() and not script.name.lower().startswith("service")
+            )
+            lists_exist = (mod_dir / "lists").is_dir() and any((mod_dir / "lists").iterdir())
+            if not general_scripts and not lists_exist:
+                continue
+            entry = InstalledMod(
+                id=mod_id,
+                version=str(meta.get("version", datetime.utcnow().strftime("%Y.%m.%d"))),
+                path=str(mod_dir),
+                name=str(meta.get("name", mod_id)),
+                author=str(meta.get("author", self.UNKNOWN_AUTHOR)),
+                description=str(meta.get("description", "")),
+                source_url=str(meta.get("source_url", "")),
+                enabled=False,
+                source_type="zapret_bundle",
+                general_scripts=general_scripts,
+                emoji=random.choice(self._EMOJI_CHOICES) if mod_id != "unified-by-peshk0v" else "🪄",
+            )
+            installed.append(asdict(entry))
+            changed = True
+            registered_ids.add(mod_id)
+            self.logging.log("info", "Auto-registered mod from disk", mod_id=mod_id, path=str(mod_dir))
+        if changed:
+            self.storage.write_json(self._installed_path, installed)
 
     def move(self, mod_id: str, direction: int) -> list[InstalledMod]:
         installed = self.list_installed()
