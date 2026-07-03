@@ -57,3 +57,15 @@ class BasePage(QFrame):
 
     def _register_smooth_scroll(self, scroll: QScrollArea, **kwargs: Any) -> None:
         self._host._register_smooth_scroll(scroll, **kwargs)
+
+    def _submit_backend_task(self, action: str, payload: dict[str, Any] | None = None, *, action_id: str = "") -> str:
+        return self._host._submit_backend_task(action, payload, action_id=action_id)
+
+    def _show_error(self, title: str, message: str) -> None:
+        self._host._show_error(title, message)
+
+    def _show_info(self, title: str, message: str) -> None:
+        self._host._show_info(title, message)
+
+    def _ask_yes_no(self, title: str, message: str) -> bool:
+        return self._host._ask_yes_no(title, message)
