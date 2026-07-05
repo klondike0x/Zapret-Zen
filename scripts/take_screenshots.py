@@ -19,49 +19,43 @@ RADIUS = 18
 PAGES = [(0, "dashboard"), (1, "services"), (3, "mods")]
 THEMES = ["light", "dark"]
 
+# Real catalog data from https://raw.githubusercontent.com/peshk0v/Zapret-Hub-Zen-Mods/refs/heads/main/catalog.json
 _CATALOG_DATA = [
     {
-        "Title": "Unified Pack",
-        "Description": "Объединённый набор правил для обхода блокировок популярных сервисов: Discord, YouTube, Twitter/X, Reddit и других.",
+        "Title": "SoundCloud",
+        "Description": "Обход блокировок сервиса SoundCloud.",
         "Author": "peshk0v",
-        "Tag": "unified-by-peshk0v",
-        "Version": "1.9.9",
+        "Tag": "SoundCloud-by-peshk0v",
+        "Version": "1.0.2"
     },
     {
-        "Title": "Gaming Pack",
-        "Description": "Правила для игровых сервисов: Steam, Epic Games, Ubisoft Connect, Rockstar Launcher, Minecraft.",
+        "Title": "Roblox",
+        "Description": "Обход блокировок игры Roblox для тех регионов в которых он замедляется.",
         "Author": "peshk0v",
-        "Tag": "gaming-by-peshk0v",
-        "Version": "2.1.0",
+        "Tag": "Roblox-by-peshk0v",
+        "Version": "1.0.1"
     },
     {
-        "Title": "Social Pack",
-        "Description": "Базовый набор для социальных сетей и мессенджеров: Telegram, VK, Instagram.",
-        "Author": "community",
-        "Tag": "social-by-community",
-        "Version": "1.3.0",
-    },
-    {
-        "Title": "Cloudflare Bypass",
-        "Description": "Дополнительные стратегии обхода для сервисов, защищённых Cloudflare.",
+        "Title": "Twitch",
+        "Description": "Обход блокировок платформы для прямых трансляций Twitch.",
         "Author": "peshk0v",
-        "Tag": "cloudflare-bypass",
-        "Version": "1.0.5",
+        "Tag": "Twitch-by-peshk0v",
+        "Version": "1.0.1"
     },
     {
-        "Title": "Media Pack",
-        "Description": "Правила для стриминговых сервисов: Twitch, YouTube, Kick, SoundCloud.",
-        "Author": "modder_x",
-        "Tag": "media-streaming",
-        "Version": "0.8.2",
+        "Title": "X",
+        "Description": "Обход блокировок платформы X (бывший Twitter).",
+        "Author": "peshk0v",
+        "Tag": "X-by-peshk0v",
+        "Version": "1.0.1"
     },
     {
-        "Title": "DPI Light",
-        "Description": "Минимальный набор правил для обхода DPI без лишних стратегий.",
-        "Author": "light-user",
-        "Tag": "dpi-light",
-        "Version": "1.0.0",
-    },
+        "Title": "Minecraft",
+        "Description": "Обход блокировок сайтов для загрузки модов, таких как Modrinth и CurseForge",
+        "Author": "peshk0v",
+        "Tag": "Minecraft-by-peshk0v",
+        "Version": "1.0.0"
+    }
 ]
 
 
@@ -136,13 +130,10 @@ def main():
         mods_page = window._mods_page
         mods_page._catalog_data = list(_CATALOG_DATA)
         mods_page._catalog_loaded = True
-        mods_page._catalog_installed_ids = {"unified-by-peshk0v", "gaming-by-peshk0v"}
-        mods_page._catalog_installed_versions = {"unified-by-peshk0v": "1.9.9", "gaming-by-peshk0v": "2.1.0"}
         mods_page._show_catalog()
 
     def close_mods_catalog():
-        mods_page = window._mods_page
-        mods_page._show_local()
+        window._mods_page._show_local()
 
     theme_queue = list(THEMES)
     page_queue = []
