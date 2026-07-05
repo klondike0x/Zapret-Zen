@@ -454,11 +454,6 @@ class AnimatedNavButton(QToolButton):
             painter.scale(self._icon_scale, self._icon_scale)
             painter.rotate(self._tilt_x * 8.0)
             painter.rotate(self._tilt_y * 6.0)
-            shadow = QPainterPath()
-            shadow.addRoundedRect(QRectF(-half, -half + 1, icon_size, icon_size), 3, 3)
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(QColor(0, 0, 0, 35))
-            painter.drawPath(shadow)
             ir = QRect(round(-half), round(-half), icon_size, icon_size)
             painter.drawPixmap(ir, pixmap)
             painter.restore()
@@ -4363,6 +4358,7 @@ class MainWindow(QMainWindow):
         self._tray_general_action_group: QActionGroup | None = None
         self._update_check_in_progress = False
         self._update_prepare_dialog: AppDialog | None = None
+        self._component_update_queue: list = []
         self._update_check_dialog: AppDialog | None = None
         self._update_check_label: QLabel | None = None
         self._component_update_dialog: AppDialog | None = None
@@ -5091,6 +5087,12 @@ class MainWindow(QMainWindow):
         if not self._onboarding_active:
             QTimer.singleShot(3600, self._maybe_run_first_general_autotest)
         QTimer.singleShot(4800, self._check_updates_on_start)
+        QTimer.singleShot(5600, self._check_component_updates_background)
+
+    def _check_component_updates_background(self) -> None:
+        if self._launch_hidden:
+            return
+        self._submit_backend_task("check_component_updates")
 
     def _runtime_window_icon(self) -> QIcon:
         png_path = self._icons_dir / "app.png"
@@ -8895,6 +8897,24 @@ class MainWindow(QMainWindow):
                 self._show_error("TG WS Proxy", message)
             self._mark_dirty("dashboard", "components", "files", "logs")
             return
+        if action == "check_component_updates":
+            updates = payload.get("updates", {}) if isinstance(payload, dict) else {}
+            if not isinstance(updates, dict) or not updates:
+                return
+            settings = self.context.settings.get()
+            dismissed = dict(settings.dismissed_component_updates)
+            pending = []
+            for component_id, info in updates.items():
+                if not isinstance(info, dict):
+                    continue
+                latest = str(info.get("latest_version", "")).strip()
+                if latest and dismissed.get(component_id) != latest:
+                    pending.append((component_id, info))
+            if pending:
+                self._component_update_queue = pending
+                self._component_update_queue_index = 0
+                QTimer.singleShot(0, self._show_next_component_update)
+            return
 
     def _on_backend_task_failed(self, message: dict) -> None:
         task_id = str(message.get("id", ""))
@@ -9614,40 +9634,17 @@ class MainWindow(QMainWindow):
             return emoji
         return self._available_mod_emojis()[abs(hash(mod_id)) % len(self._available_mod_emojis())]
 
-    def _mod_badge_palette(self, emoji: str) -> tuple[str, str, str]:
-        palettes = {
-            "✨": ("#3b3115", "#d0b14d", "#fff5c7"),
-            "🪄": ("#2a2444", "#7562df", "#f0ebff"),
-            "🔥": ("#3b231f", "#cf6f4b", "#ffe7dd"),
-            "⚡": ("#3a311b", "#cfa84d", "#fff2cc"),
-            "🧩": ("#18343a", "#4ba1b3", "#dff9ff"),
-            "🎮": ("#302345", "#8d69da", "#f1e6ff"),
-            "🌐": ("#1b3248", "#4d88d8", "#e4f1ff"),
-            "🛡️": ("#203544", "#5f8fb4", "#e7f6ff"),
-            "🚀": ("#35243d", "#b16ac8", "#fdeaff"),
-            "💎": ("#173945", "#5cc6da", "#e3fcff"),
-            "📦": ("#3a2d1f", "#c49858", "#fff0db"),
-            "🧪": ("#233b2d", "#78c48a", "#e7fff0"),
-        }
-        return palettes.get(emoji, palettes["🪄"])
+    def _accent_badge_palette(self) -> tuple[str, str, str]:
+        accent = QColor(self.context.settings.get().accent_color)
+        bg = f"rgba({accent.red()}, {accent.green()}, {accent.blue()}, 25)"
+        border = self.context.settings.get().accent_color
+        fg = border
+        return bg, border, fg
 
     def _mod_badge_offset(self, emoji: str) -> tuple[float, float]:
         if emoji == "🎮":
             return 0.0, -1.0
         return 0.0, 0.0
-
-    def _theme_adjusted_badge_palette(self, bg: str, border: str, fg: str) -> tuple[str, str, str]:
-        theme = self.context.settings.get().theme
-        if not is_light_theme(theme):
-            return bg, border, fg
-        bg_color = QColor(bg)
-        border_color = QColor(border)
-        fg_color = QColor(fg)
-        bg_color = bg_color.lighter(168 if theme == "light" else 160)
-        bg_color.setAlpha(235 if theme == "light" else 222)
-        border_color = border_color.lighter(130)
-        fg_color = fg_color.darker(145)
-        return bg_color.name(QColor.NameFormat.HexArgb), border_color.name(), fg_color.name()
 
     def _emoji_popup_palette(self) -> tuple[str, str, str, str, str]:
         theme = self.context.settings.get().theme
@@ -10808,6 +10805,55 @@ class MainWindow(QMainWindow):
         if not self.context.settings.get().check_updates_on_start:
             return
         self._start_update_check(manual=False)
+
+    def _show_next_component_update(self) -> None:
+        queue = getattr(self, "_component_update_queue", [])
+        if not queue:
+            return
+        component_id, info = queue[0]
+        name = str(info.get("component_name", component_id))
+        current = str(info.get("current_version", ""))
+        latest = str(info.get("latest_version", ""))
+        msg = self._t(
+            f"A new version of {name} is available:\n{current} → {latest}\n\nWould you like to update now?"
+        )
+        dialog = AppDialog(self, self.context, self._t("Update Available"))
+        label = QLabel(msg)
+        label.setWordWrap(True)
+        dialog.body_layout.addWidget(label)
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(8)
+        btn_row.addStretch()
+        update_btn = QPushButton(self._t("Обновить"))
+        update_btn.setObjectName("DialogPrimaryButton")
+        update_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        update_btn.setMinimumHeight(36)
+        update_btn.clicked.connect(lambda: dialog.done(1))
+        btn_row.addWidget(update_btn)
+        dismiss_btn = QPushButton(self._t("Не обновлять"))
+        dismiss_btn.setObjectName("DialogSecondaryButton")
+        dismiss_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        dismiss_btn.setMinimumHeight(36)
+        dismiss_btn.clicked.connect(lambda: dialog.done(2))
+        btn_row.addWidget(dismiss_btn)
+        cancel_btn = QPushButton(self._t("Cancel"))
+        cancel_btn.setObjectName("DialogSecondaryButton")
+        cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        cancel_btn.setMinimumHeight(36)
+        cancel_btn.clicked.connect(dialog.reject)
+        btn_row.addWidget(cancel_btn)
+        dialog.body_layout.addLayout(btn_row)
+        result = dialog.exec()
+        if result == 1:
+            self._start_component_update(component_id)
+        elif result == 2:
+            settings = self.context.settings.get()
+            settings.dismissed_component_updates[component_id] = latest
+            self.context.settings.save()
+        queue.pop(0)
+        self._component_update_queue = queue
+        if queue:
+            QTimer.singleShot(200, self._show_next_component_update)
 
     def _start_update_check(self, manual: bool) -> None:
         if self._update_check_in_progress:
@@ -13727,6 +13773,7 @@ class MainWindow(QMainWindow):
                     self._general_options_cache = general_options_from_payload
                 config_label = QLabel(self._t("Zapret Configuration"))
                 config_label.setProperty("class", "muted")
+                config_label.setContentsMargins(0, 6, 0, 0)
                 card_layout.addWidget(config_label)
                 config_combo = ClickSelectComboBox()
                 config_status = QLabel("")
@@ -13792,6 +13839,7 @@ class MainWindow(QMainWindow):
                 telegram_link.setTextInteractionFlags(Qt.TextInteractionFlag.TextBrowserInteraction)
                 telegram_link.setOpenExternalLinks(False)
                 telegram_link.linkActivated.connect(self._open_external_url)
+                telegram_link.setContentsMargins(0, 6, 0, 0)
                 card_layout.addWidget(telegram_link)
                 connect_btn = QPushButton(self._t("Connect to Telegram"))
                 connect_btn.clicked.connect(self._prompt_tg_proxy_connect)
@@ -13802,6 +13850,7 @@ class MainWindow(QMainWindow):
                 dns_presets = self._dns_presets_cache
                 config_label = QLabel(self._t("DNS Server"))
                 config_label.setProperty("class", "muted")
+                config_label.setContentsMargins(0, 6, 0, 0)
                 card_layout.addWidget(config_label)
                 if dns_presets:
                     dns_combo = ClickSelectComboBox()
@@ -13891,6 +13940,12 @@ class MainWindow(QMainWindow):
         except Exception as error:
             self._close_component_update_dialog()
             self._show_error("TG WS Proxy", str(error))
+
+    def _start_component_update(self, component_id: str) -> None:
+        if component_id == "zapret":
+            self._update_zapret_runtime()
+        elif component_id == "tg_ws_proxy":
+            self._update_tg_ws_proxy_runtime()
 
     def _telegram_download_url(self) -> str:
         machine = platform.machine().lower()
@@ -14365,19 +14420,10 @@ class MainWindow(QMainWindow):
             fav_path = os.path.join(mod_path, "favicon.png") if mod_path else ""
             has_favicon = bool(mod_path and os.path.isfile(fav_path))
 
-            if has_favicon:
-                _palette_keys = ["✨", "🪄", "🔥", "⚡", "🧩", "🎮", "🌐", "🛡️", "🚀", "💎", "📦", "🧪"]
-                palette_bg, palette_border, palette_fg = self._mod_badge_palette(_palette_keys[hash(mod_id + "_favicon") % len(_palette_keys)])
-                palette_bg, palette_border, palette_fg = self._theme_adjusted_badge_palette(palette_bg, palette_border, palette_fg)
-                icon_wrap.setStyleSheet(
-                    f"QFrame {{ background: {palette_bg}; border: 1px solid {palette_border}; border-radius: 16px; }}"
-                )
-            else:
-                palette_bg, palette_border, palette_fg = self._mod_badge_palette(str(mod["emoji"]))
-                palette_bg, palette_border, palette_fg = self._theme_adjusted_badge_palette(palette_bg, palette_border, palette_fg)
-                icon_wrap.setStyleSheet(
-                    f"QFrame {{ background: {palette_bg}; border: 1px solid {palette_border}; border-radius: 16px; }}"
-                )
+            palette_bg, palette_border, palette_fg = self._accent_badge_palette()
+            icon_wrap.setStyleSheet(
+                f"QFrame {{ background: {palette_bg}; border: 1px solid {palette_border}; border-radius: 16px; }}"
+            )
 
             icon_row = QVBoxLayout(icon_wrap)
             icon_row.setContentsMargins(2, 2, 2, 2)

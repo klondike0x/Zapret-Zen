@@ -1029,6 +1029,11 @@ def _handle_update_tg_ws_proxy_runtime(context, payload, emit_progress):
     return result
 
 
+@_register_action("check_component_updates")
+def _handle_check_component_updates(context, payload, emit_progress):
+    return {"updates": context.processes.check_component_updates()}
+
+
 @_register_action("apply_dns_preset")
 def _handle_apply_dns_preset(context, payload, emit_progress):
     preset = str(payload.get("preset", "")).strip()

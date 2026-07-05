@@ -208,6 +208,29 @@ def _build_base_css() -> tuple[str, str]:
     #DialogBody {
         background: transparent;
     }
+    #DialogPrimaryButton {
+        background: qlineargradient(x1:0, y1:1, x2:1, y2:0, stop:0 #294152, stop:1 #3a6179);
+        color: #d5e1f2;
+        border: 1px solid #4e7ea9;
+        border-radius: 10px;
+        padding: 8px 18px;
+        font-weight: 600;
+    }
+    #DialogPrimaryButton:hover {
+        background: qlineargradient(x1:0, y1:1, x2:1, y2:0, stop:0 #345267, stop:1 #47718e);
+        border: 1px solid #6a9bc9;
+    }
+    #DialogSecondaryButton {
+        background: transparent;
+        color: #b0cae6;
+        border: 1px solid #294152;
+        border-radius: 10px;
+        padding: 8px 18px;
+    }
+    #DialogSecondaryButton:hover {
+        background: rgba(255, 255, 255, 0.06);
+        border: 1px solid #3a6179;
+    }
     #SettingsScroll, #SettingsScroll QWidget#qt_scrollarea_viewport {
         background: transparent;
         border: none;
@@ -788,6 +811,29 @@ def _build_base_css() -> tuple[str, str]:
     }
     #DialogBody {
         background: transparent;
+    }
+    #DialogPrimaryButton {
+        background: qlineargradient(x1:0, y1:1, x2:1, y2:0, stop:0 #d6e4f5, stop:1 #eaf0fa);
+        color: #1e2a4a;
+        border: 1px solid #b8cde8;
+        border-radius: 10px;
+        padding: 8px 18px;
+        font-weight: 600;
+    }
+    #DialogPrimaryButton:hover {
+        background: qlineargradient(x1:0, y1:1, x2:1, y2:0, stop:0 #e1edfb, stop:1 #f0f5fd);
+        border: 1px solid #9bb9dd;
+    }
+    #DialogSecondaryButton {
+        background: transparent;
+        color: #4a5a7a;
+        border: 1px solid #d2ddeb;
+        border-radius: 10px;
+        padding: 8px 18px;
+    }
+    #DialogSecondaryButton:hover {
+        background: rgba(0, 0, 0, 0.04);
+        border: 1px solid #b8cde8;
     }
     #SettingsScroll, #SettingsScroll QWidget#qt_scrollarea_viewport {
         background: transparent;

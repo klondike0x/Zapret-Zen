@@ -78,8 +78,6 @@ class ModsPage(BasePage):
 
         self._add_btn = QPushButton(self._t("Добавить", "Add"))
         self._add_btn.setProperty("class", "primary")
-        self._add_btn.setIcon(self._icon("plus.svg"))
-        self._add_btn.setIconSize(self._add_btn.iconSize())
         self._add_btn.setMinimumHeight(38)
         self._attach_button_animations(self._add_btn)
         hero_top.addWidget(self._add_btn)
@@ -266,14 +264,35 @@ class ModsPage(BasePage):
         if tag in self._catalog_installing:
             btn.setText(self._t("Установка...", "Installing..."))
             btn.setEnabled(False)
+            btn.setMinimumHeight(34)
+            btn.setStyleSheet(
+                "QPushButton {"
+                "background: transparent;"
+                "border: 1px solid rgba(128, 128, 128, 120);"
+                "border-radius: 8px;"
+                "padding: 6px 16px;"
+                "color: rgba(128, 128, 128, 200);"
+                "font-weight: 600;"
+                "}"
+            )
         elif tag in self._catalog_installed_ids:
             btn.setText(self._t("Установлено", "Installed"))
             btn.setEnabled(False)
+            btn.setMinimumHeight(34)
+            btn.setStyleSheet(
+                "QPushButton {"
+                "background: transparent;"
+                "border: 1px solid rgba(128, 128, 128, 120);"
+                "border-radius: 8px;"
+                "padding: 6px 16px;"
+                "color: rgba(128, 128, 128, 200);"
+                "font-weight: 600;"
+                "}"
+            )
         else:
             btn.setText(self._t("Установить", "Install"))
             btn.clicked.connect(lambda _=False, t=tag, v=version: self._catalog_install(t, v))
         btn.setProperty("class", "primary")
-        btn.setMinimumHeight(34)
         self._attach_button_animations(btn)
         layout.addWidget(btn)
 
@@ -319,6 +338,7 @@ class ModsPage(BasePage):
         if not self._catalog_loaded:
             self._load_catalog()
         else:
+            self._sync_installed_state()
             self._render_catalog()
 
     def _toggle_catalog(self) -> None:

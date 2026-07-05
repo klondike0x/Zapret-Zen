@@ -1976,6 +1976,26 @@ Get-NetAdapter -ErrorAction SilentlyContinue | ForEach-Object {
     def update_tg_ws_proxy_runtime(self) -> dict[str, str]:
         return self.updates.update_tg_ws_proxy_runtime()
 
+    def check_component_updates(self) -> dict[str, dict[str, str]]:
+        result: dict[str, dict[str, str]] = {}
+        for component_id, fetch_fn, detect_fn in [
+            ("zapret", self.updates.fetch_latest_zapret_release, self.storage._detect_zapret_version),
+            ("tg_ws_proxy", self.updates.fetch_latest_tg_ws_proxy_release, self.storage._detect_tgws_version),
+        ]:
+            try:
+                release = fetch_fn()
+                latest = str(release.get("latest_version", "")).strip()
+                current = detect_fn()
+                if latest and current not in ("", "unknown") and latest != current:
+                    result[component_id] = {
+                        "latest_version": latest,
+                        "current_version": current,
+                        "component_name": "Zapret" if component_id == "zapret" else "TG WS Proxy",
+                    }
+            except Exception:
+                continue
+        return result
+
     def _rebuild_visible_zapret_runtime_snapshot(self) -> None:
         selected = self._resolve_selected_general_option()
         if selected is not None:

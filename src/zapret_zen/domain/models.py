@@ -55,6 +55,7 @@ class AppSettings:
     zapret_udp_exclude_ports: str = "51820"
     selected_dns_preset: str = ""
     apply_update_on_next_launch: bool = False
+    dismissed_component_updates: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
