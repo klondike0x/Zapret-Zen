@@ -8999,11 +8999,11 @@ class MainWindow(QMainWindow):
             and self._onboarding_widget is not None
         )
         self._apply_onboarding_chrome(theme, onboarding_active)
-        text_color = "#000000" if onboarding_active else _onboarding_text_color(theme)
-        muted_color = "#4b5d78" if onboarding_active else _onboarding_muted_color(theme)
+        text_color = _onboarding_text_color(theme)
+        muted_color = _onboarding_muted_color(theme)
         accent = "#4f73d9"
         accent_hover = "#5f83ea"
-        chrome = "#ffffff" if onboarding_active else _chrome_surface_color(theme).name()
+        chrome = _chrome_surface_color(theme).name()
         if onboarding_active:
             self._apply_titlebar_icons_onboard()
         else:
@@ -9118,7 +9118,7 @@ class MainWindow(QMainWindow):
                 title_bar.setAutoFillBackground(False)
                 title_bar.setStyleSheet("")
         else:
-            color = "#ffffff"
+            color = _chrome_surface_color(theme).name()
             root_frame = self.findChild(OnboardingFrame, "RootFrame")
             if root_frame is not None:
                 root_frame.set_onboarding_background(QColor(color), True)

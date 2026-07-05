@@ -59,6 +59,22 @@ RU = _is_ru()
 UNINSTALL_KEY = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\ZapretZen"
 INSTALLER_LOG_PATH = Path(tempfile.gettempdir()) / "zapret_zen_installer.log"
 
+
+def _detect_system_theme() -> str:
+    if not sys.platform.startswith("win"):
+        return "dark"
+    try:
+        with winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER,
+            r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize",
+            0,
+            winreg.KEY_READ,
+        ) as key:
+            value, _ = winreg.QueryValueEx(key, "AppsUseLightTheme")
+            return "light" if int(value) == 1 else "dark"
+    except Exception:
+        return "dark"
+
 _RU_TRANSLATIONS: dict[str, str] = {}
 
 _RU_TRANSLATIONS: dict[str, str] = {
@@ -269,8 +285,9 @@ def app_pixmap(size: int) -> QPixmap:
     return app_icon().pixmap(size, size)
 
 
-def close_icon() -> QIcon:
-    icon_path = resource_root() / "ui_assets" / "icons" / "window_close_light.svg"
+def close_icon(dark: bool = False) -> QIcon:
+    name = "window_close_dark.svg" if dark else "window_close_light.svg"
+    icon_path = resource_root() / "ui_assets" / "icons" / name
     if icon_path.exists():
         icon = QIcon(str(icon_path))
         if not icon.isNull():
@@ -287,8 +304,8 @@ def close_icon() -> QIcon:
     return QIcon(pixmap)
 
 
-def close_pixmap(size: int) -> QPixmap:
-    icon = close_icon()
+def close_pixmap(size: int, dark: bool = False) -> QPixmap:
+    icon = close_icon(dark=dark)
     pixmap = icon.pixmap(size, size)
     if not pixmap.isNull():
         return pixmap
@@ -881,11 +898,13 @@ class InstallerDialog(QDialog):
         parent: QWidget | None = None,
         yes_text: str | None = None,
         no_text: str | None = None,
+        dark: bool | None = None,
     ) -> None:
         super().__init__(parent)
         self._drag_pos = None
         self._result_yes = False
         self._result_mode = "cancel"
+        self._dark = dark if dark is not None else getattr(QApplication.instance(), "_installer_is_dark", False)
         self.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
         self.setModal(True)
         self.setFixedSize(520, 230)
@@ -913,7 +932,7 @@ class InstallerDialog(QDialog):
         title_row.addStretch(1)
         close_btn = QToolButton()
         close_btn.setProperty("role", "close")
-        close_btn.setIcon(QIcon(close_pixmap(14)))
+        close_btn.setIcon(QIcon(close_pixmap(14, dark=self._dark)))
         close_btn.setIconSize(QSize(14, 14))
         close_btn.setFixedSize(26, 26)
         close_btn.clicked.connect(self.reject)
@@ -950,17 +969,35 @@ class InstallerDialog(QDialog):
         body_layout.addLayout(row)
         layout.addWidget(body, 1)
 
-        self.setStyleSheet(
-            """
-            #DlgRoot { background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #f4f7fc, stop:0.72 #f4f7fc, stop:1 #eef4ff); color: #152033; border: 1px solid #c8d7ee; border-radius: 12px; font-family: Segoe UI; font-size: 10pt; }
-            #DlgTitle { background: transparent; border-bottom: 1px solid #d0ddf0; }
-            QLabel { background: transparent; color: #152033; }
-            QPushButton { background: #e6eef9; border: 1px solid #c8d7ee; border-radius: 12px; padding: 8px 14px; min-width: 88px; color: #152033; }
+        self._apply_dialog_theme()
+
+    @staticmethod
+    def _dialog_stylesheet(dark: bool) -> str:
+        if dark:
+            return """
+            #DlgRoot { background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #1e2128, stop:0.72 #1e2128, stop:1 #15171c); color: #e0e4eb; border: 1px solid #2f3440; border-radius: 12px; font-family: Segoe UI; font-size: 10pt; }
+            #DlgTitle { background: transparent; border-bottom: 1px solid #2f3440; }
+            QLabel { background: transparent; color: #e0e4eb; }
+            QPushButton { background: #2a2e38; border: 1px solid #373d4a; border-radius: 12px; padding: 8px 14px; min-width: 88px; color: #e0e4eb; }
             QPushButton#primary { background: #5865f2; border: 1px solid #7481ff; color: #fff; font-weight: 700; }
             QToolButton { border: none; background: transparent; min-width: 26px; min-height: 26px; max-width: 26px; max-height: 26px; border-radius: 12px; padding: 0px; margin: 0px; }
-            QToolButton[role="close"]:hover { background: rgba(170, 84, 97, 0.62); border-radius: 12px; }
+            QToolButton[role="close"]:hover { background: rgba(200, 70, 80, 0.6); border-radius: 12px; }
             """
-        )
+        return """
+        #DlgRoot { background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #f4f7fc, stop:0.72 #f4f7fc, stop:1 #eef4ff); color: #152033; border: 1px solid #c8d7ee; border-radius: 12px; font-family: Segoe UI; font-size: 10pt; }
+        #DlgTitle { background: transparent; border-bottom: 1px solid #d0ddf0; }
+        QLabel { background: transparent; color: #152033; }
+        QPushButton { background: #e6eef9; border: 1px solid #c8d7ee; border-radius: 12px; padding: 8px 14px; min-width: 88px; color: #152033; }
+        QPushButton#primary { background: #5865f2; border: 1px solid #7481ff; color: #fff; font-weight: 700; }
+        QToolButton { border: none; background: transparent; min-width: 26px; min-height: 26px; max-width: 26px; max-height: 26px; border-radius: 12px; padding: 0px; margin: 0px; }
+        QToolButton[role="close"]:hover { background: rgba(170, 84, 97, 0.62); border-radius: 12px; }
+        """
+
+    def _apply_dialog_theme(self) -> None:
+        self.setStyleSheet(self._dialog_stylesheet(self._dark))
+        for btn in self.findChildren(QToolButton):
+            if btn.property("role") == "close":
+                btn.setIcon(QIcon(close_pixmap(14, dark=self._dark)))
 
     def showEvent(self, event: QShowEvent) -> None:
         super().showEvent(event)
@@ -1082,6 +1119,7 @@ class InstallerWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self._drag_pos = None
+        self._is_dark = _detect_system_theme() == "dark"
         self.worker: InstallerWorker | None = None
         self.install_path = default_install_dir()
         self.preserve_existing_data = True
@@ -1092,6 +1130,7 @@ class InstallerWindow(QMainWindow):
         self.setWindowIcon(app_icon())
         self._build_ui()
         self._load_existing_install()
+        self._apply_theme()
 
     def _build_ui(self) -> None:
         root = QWidget()
@@ -1114,6 +1153,12 @@ class InstallerWindow(QMainWindow):
         title_row.addWidget(icon)
         title_row.addWidget(QLabel("Zapret-Zen"))
         title_row.addStretch(1)
+        self._theme_btn = QToolButton()
+        self._theme_btn.setProperty("role", "theme")
+        self._theme_btn.setFixedSize(26, 26)
+        self._theme_btn.clicked.connect(self._toggle_theme)
+        attach_button_animations(self._theme_btn)
+        title_row.addWidget(self._theme_btn)
         close_btn = QToolButton()
         close_btn.setProperty("role", "close")
         close_btn.setIcon(QIcon(close_pixmap(14)))
@@ -1190,26 +1235,7 @@ class InstallerWindow(QMainWindow):
         done_layout.addWidget(finish_btn)
         self.stack.addWidget(self.page_done)
 
-        check_icon = str((resource_root() / "ui_assets" / "icons" / "check.svg").resolve()).replace("\\", "/")
-        self.setStyleSheet(
-            f"""
-            QMainWindow {{ background: transparent; }}
-            QWidget#Root {{ background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #f4f7fc, stop:0.7 #f4f7fc, stop:1 #eef4ff); color: #152033; font-family: Segoe UI; font-size: 10pt; border: 1px solid #c8d7ee; border-radius: 12px; }}
-            #InstallerTitleBar {{ background: transparent; border-bottom: 1px solid #d0ddf0; }}
-            QLabel#title {{ font-size: 18pt; font-weight: 800; color: #0f172a; }}
-            QLabel {{ background: transparent; color: #152033; }}
-            QLineEdit {{ background: #ffffff; color: #152033; border: 1px solid #c8d7ee; border-radius: 10px; padding: 9px; font-size: 11pt; }}
-            QPushButton {{ background: #e6eef9; border: 1px solid #c8d7ee; border-radius: 12px; padding: 10px 14px; font-size: 11pt; color: #152033; }}
-            QPushButton#primary {{ background: #5865f2; border: 1px solid #7481ff; color: #fff; font-weight: 800; }}
-            QCheckBox {{ color: #152033; }}
-            QToolButton {{ border: none; background: transparent; min-width: 26px; min-height: 26px; max-width: 26px; max-height: 26px; border-radius: 12px; padding: 0px; margin: 0px; }}
-            QToolButton[role="close"]:hover {{ background: rgba(170, 84, 97, 0.62); border-radius: 12px; }}
-            QProgressBar {{ background: #e6eef9; border: 1px solid #c8d7ee; border-radius: 10px; text-align: center; }}
-            QProgressBar::chunk {{ background: #5865f2; border-radius: 9px; }}
-            QCheckBox::indicator {{ width: 16px; height: 16px; border-radius: 5px; border: 1px solid #b0c4de; background: #ffffff; }}
-            QCheckBox::indicator:checked {{ background: #5865f2; border: 1px solid #7a86ff; image: url("{check_icon}"); }}
-            """
-        )
+        self._check_icon = str((resource_root() / "ui_assets" / "icons" / "check.svg").resolve()).replace("\\", "/")
 
     def showEvent(self, event: QShowEvent) -> None:
         super().showEvent(event)
@@ -1234,6 +1260,64 @@ class InstallerWindow(QMainWindow):
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
         self._drag_pos = None
         super().mouseReleaseEvent(event)
+
+    @staticmethod
+    def _window_stylesheet(dark: bool, check_icon: str) -> str:
+        if dark:
+            return f"""
+            QMainWindow {{ background: transparent; }}
+            QWidget#Root {{ background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #1e2128, stop:0.7 #1e2128, stop:1 #15171c); color: #e0e4eb; font-family: Segoe UI; font-size: 10pt; border: 1px solid #2f3440; border-radius: 12px; }}
+            #InstallerTitleBar {{ background: transparent; border-bottom: 1px solid #2f3440; }}
+            QLabel#title {{ font-size: 18pt; font-weight: 800; color: #ffffff; }}
+            QLabel {{ background: transparent; color: #e0e4eb; }}
+            QLineEdit {{ background: #252830; color: #e0e4eb; border: 1px solid #373d4a; border-radius: 10px; padding: 9px; font-size: 11pt; }}
+            QPushButton {{ background: #2a2e38; border: 1px solid #373d4a; border-radius: 12px; padding: 10px 14px; font-size: 11pt; color: #e0e4eb; }}
+            QPushButton#primary {{ background: #5865f2; border: 1px solid #7481ff; color: #fff; font-weight: 800; }}
+            QCheckBox {{ color: #e0e4eb; }}
+            QToolButton {{ border: none; background: transparent; min-width: 26px; min-height: 26px; max-width: 26px; max-height: 26px; border-radius: 12px; padding: 0px; margin: 0px; }}
+            QToolButton[role="close"]:hover {{ background: rgba(200, 70, 80, 0.6); border-radius: 12px; }}
+            QToolButton[role="theme"]:hover {{ background: rgba(255, 255, 255, 0.1); border-radius: 12px; }}
+            QProgressBar {{ background: #2a2e38; border: 1px solid #373d4a; border-radius: 10px; text-align: center; }}
+            QProgressBar::chunk {{ background: #5865f2; border-radius: 9px; }}
+            QCheckBox::indicator {{ width: 16px; height: 16px; border-radius: 5px; border: 1px solid #373d4a; background: #252830; }}
+            QCheckBox::indicator:checked {{ background: #5865f2; border: 1px solid #7a86ff; image: url("{check_icon}"); }}
+            """
+        return f"""
+        QMainWindow {{ background: transparent; }}
+        QWidget#Root {{ background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #f4f7fc, stop:0.7 #f4f7fc, stop:1 #eef4ff); color: #152033; font-family: Segoe UI; font-size: 10pt; border: 1px solid #c8d7ee; border-radius: 12px; }}
+        #InstallerTitleBar {{ background: transparent; border-bottom: 1px solid #d0ddf0; }}
+        QLabel#title {{ font-size: 18pt; font-weight: 800; color: #0f172a; }}
+        QLabel {{ background: transparent; color: #152033; }}
+        QLineEdit {{ background: #ffffff; color: #152033; border: 1px solid #c8d7ee; border-radius: 10px; padding: 9px; font-size: 11pt; }}
+        QPushButton {{ background: #e6eef9; border: 1px solid #c8d7ee; border-radius: 12px; padding: 10px 14px; font-size: 11pt; color: #152033; }}
+        QPushButton#primary {{ background: #5865f2; border: 1px solid #7481ff; color: #fff; font-weight: 800; }}
+        QCheckBox {{ color: #152033; }}
+        QToolButton {{ border: none; background: transparent; min-width: 26px; min-height: 26px; max-width: 26px; max-height: 26px; border-radius: 12px; padding: 0px; margin: 0px; }}
+        QToolButton[role="close"]:hover {{ background: rgba(170, 84, 97, 0.62); border-radius: 12px; }}
+        QToolButton[role="theme"]:hover {{ background: rgba(0, 0, 0, 0.06); border-radius: 12px; }}
+        QProgressBar {{ background: #e6eef9; border: 1px solid #c8d7ee; border-radius: 10px; text-align: center; }}
+        QProgressBar::chunk {{ background: #5865f2; border-radius: 9px; }}
+        QCheckBox::indicator {{ width: 16px; height: 16px; border-radius: 5px; border: 1px solid #b0c4de; background: #ffffff; }}
+        QCheckBox::indicator:checked {{ background: #5865f2; border: 1px solid #7a86ff; image: url("{check_icon}"); }}
+        """
+
+    def _apply_theme(self) -> None:
+        self.setStyleSheet(self._window_stylesheet(self._is_dark, self._check_icon))
+        app = QApplication.instance()
+        if app is not None:
+            app._installer_is_dark = self._is_dark
+        for btn in self.findChildren(QToolButton):
+            if btn.property("role") == "close":
+                btn.setIcon(QIcon(close_pixmap(14, dark=self._is_dark)))
+        icon_name = "theme_toggle_dark.svg" if self._is_dark else "theme_toggle.svg"
+        icon_path = resource_root() / "ui_assets" / "icons" / icon_name
+        if icon_path.exists():
+            self._theme_btn.setIcon(QIcon(str(icon_path)))
+            self._theme_btn.setIconSize(QSize(16, 16))
+
+    def _toggle_theme(self) -> None:
+        self._is_dark = not self._is_dark
+        self._apply_theme()
 
     def _load_existing_install(self) -> None:
         existing = _install_dir_from_registry()

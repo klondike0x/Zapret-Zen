@@ -82,7 +82,7 @@ class SettingsManager:
                     settings.accent_color = "#7380ff"
                 changed = True
         elif not old_theme:
-            settings.theme = "light"
+            settings.theme = self._detect_system_theme()
             changed = True
         if old_accent and len(old_accent) == 7 and old_accent[0] == "#":
             settings.accent_color = old_accent
