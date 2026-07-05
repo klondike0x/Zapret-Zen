@@ -8514,6 +8514,14 @@ class MainWindow(QMainWindow):
             self._page_payload_cache.clear()
         elif action in {"toggle_mod", "toggle_component_enabled", "move_mod", "set_mod_emoji", "install_mod", "remove_mod", "import_mod_from_github", "import_mod_from_paths", "import_mod_from_path", "rebuild_merge_runtime", "set_selected_services", "select_runtime_mode"}:
             self._page_payload_cache.clear()
+            if action in {"toggle_mod", "move_mod", "set_mod_emoji", "install_mod", "remove_mod", "import_mod_from_github", "import_mod_from_paths", "import_mod_from_path", "rebuild_merge_runtime"} and isinstance(payload, dict):
+                raw_index = payload.get("index")
+                raw_installed = payload.get("installed")
+                if raw_index is not None or raw_installed is not None:
+                    self._page_payload_cache["mods"] = {
+                        "index": raw_index if isinstance(raw_index, list) else list(self._mods_index_cache),
+                        "installed": raw_installed if raw_installed is not None else dict(self._mods_installed_cache),
+                    }
         if action == "load_startup_snapshot":
             self._startup_snapshot_ready = True
             self._page_payload_cache["components"] = {
@@ -8587,6 +8595,11 @@ class MainWindow(QMainWindow):
             self._mark_dirty("dashboard", "services", "components", "files", "tray")
             return
         if action == "toggle_mod":
+            if isinstance(payload, dict):
+                self._page_payload_cache["mods"] = {
+                    "index": payload.get("index", []),
+                    "installed": payload.get("installed", []),
+                }
             self._mark_dirty("dashboard", "mods", "files", "logs", "tray")
             return
         if action in {"install_mod", "remove_mod", "import_mod_from_github", "import_mod_from_paths", "import_mod_from_path"}:
