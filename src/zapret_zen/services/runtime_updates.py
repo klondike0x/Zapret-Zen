@@ -187,6 +187,10 @@ class RuntimeUpdateManager:
                         runtime_root.mkdir(parents=True, exist_ok=True)
                         target = runtime_root / name
                         shutil.copy2(dest, target)
+                        init_dir = runtime_root / "proxy"
+                        init_dir.mkdir(parents=True, exist_ok=True)
+                        (init_dir / "__init__.py").write_text(f'__version__ = "{latest_version}"\n', encoding="utf-8")
+                        self.storage.ensure_layout()
                         self.logging.log("info", "TG WS Proxy updated", version=latest_version or current_version)
                         self._rebuild_snapshot()
                         return {"status": "updated", "version": latest_version or current_version}

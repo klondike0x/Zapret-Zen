@@ -16,7 +16,7 @@ from datetime import datetime
 from pathlib import Path
 
 from zapret_zen import __version__
-from zapret_zen.domain import ComponentDefinition, ComponentState, FileRecord, NotificationEntry
+from zapret_zen.domain import ComponentDefinition, ComponentState, FileRecord
 from zapret_zen.services.service_catalog import (
     ALWAYS_APPLY_SERVICE_IDS,
     FORTNITE_GENERAL_PRIORITY,
@@ -519,29 +519,6 @@ class ClickSelectComboBox(QComboBox):
                 self.activated.emit(index.row())
                 return True
         return super().eventFilter(watched, event)
-
-
-class NotificationBellButton(QToolButton):
-    def __init__(self, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        self._has_unread = False
-
-    def set_unread(self, has_unread: bool) -> None:
-        if self._has_unread == bool(has_unread):
-            return
-        self._has_unread = bool(has_unread)
-        self.update()
-
-    def paintEvent(self, event: QEvent) -> None:
-        super().paintEvent(event)
-        if not self._has_unread:
-            return
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor("#ef4444"))
-        size = 7
-        painter.drawEllipse(self.width() - 11, 5, size, size)
 
 
 class GitHubSidebarButton(QToolButton):
@@ -4319,10 +4296,6 @@ class MainWindow(QMainWindow):
         self._settings_diag_task_id: str | None = None
         self._settings_diag_cancelled = False
         self._loading_action = "connect"
-        self._notifications_btn: NotificationBellButton | None = None
-        self._notifications_popup: QWidget | None = None
-        self._notifications_popup_last_closed_at = 0.0
-        self._notified_component_errors: set[tuple[str, str]] = set()
         self._windows_taskbar = WindowsTaskbarIntegration()
         self._taskbar_progress_active = False
         self._taskbar_important_attention = False
@@ -4869,9 +4842,8 @@ class MainWindow(QMainWindow):
         if self._content_surface_layout is not None:
             self._content_surface_layout.setContentsMargins(0, 0, 0, 0)
             self._content_surface_layout.setSpacing(0)
-        for widget in (self._sidebar_widget, self._notifications_btn):
-            if widget is not None:
-                widget.setVisible(False)
+        if self._sidebar_widget is not None:
+            self._sidebar_widget.setVisible(False)
         if self._onboarding_service_action_btn is not None:
             self._position_onboarding_service_action()
             self._onboarding_service_action_btn.raise_()
@@ -5409,16 +5381,6 @@ class MainWindow(QMainWindow):
         row.addWidget(author)
         row.addStretch(1)
 
-        notifications_btn = NotificationBellButton()
-        notifications_btn.setProperty("class", "action")
-        notifications_btn.setIcon(self._icon("bell.svg"))
-        notifications_btn.setIconSize(QSize(16, 16))
-        notifications_btn.setToolTip(self._t("Notifications"))
-        notifications_btn.clicked.connect(self._toggle_notifications_popup)
-        self._notifications_btn = notifications_btn
-        row.addWidget(notifications_btn)
-        self._refresh_notifications_badge()
-
         min_btn = self._window_btn("", "min")
         self._min_btn = min_btn
         min_btn.setIconSize(QSize(15, 15))
@@ -5467,58 +5429,14 @@ class MainWindow(QMainWindow):
         else:
             self._windows_taskbar.set_progress_state(hwnd, WindowsTaskbarIntegration.TBPF_NOPROGRESS)
 
-    def _has_unread_important_notifications(self) -> bool:
-        try:
-            return any((not item.read) and str(item.level).lower() == "error" for item in self.context.notifications.list())
-        except Exception:
-            return False
-
-    def _refresh_windows_notification_attention(self) -> None:
-        important = self._has_unread_important_notifications()
-        self._taskbar_important_attention = important
-        hwnd = self._window_hwnd()
-        if not hwnd:
-            return
-        if important:
-            if not self._taskbar_progress_active:
-                self._windows_taskbar.set_progress_value(hwnd, 100, 100)
-                self._windows_taskbar.set_progress_state(hwnd, WindowsTaskbarIntegration.TBPF_PAUSED)
-            self._windows_taskbar.flash_attention(hwnd)
-        else:
-            self._windows_taskbar.clear_flash(hwnd)
-            if not self._taskbar_progress_active:
-                self._windows_taskbar.set_progress_state(hwnd, WindowsTaskbarIntegration.TBPF_NOPROGRESS)
-
-    def _request_windows_attention(self) -> None:
-        hwnd = self._window_hwnd()
-        if hwnd:
-            self._windows_taskbar.flash_attention(hwnd)
-
-    def _refresh_notifications_badge(self) -> None:
-        if self._notifications_btn is None:
-            return
-        try:
-            self._notifications_btn.set_unread(self.context.notifications.unread_count() > 0)
-        except Exception:
-            self._notifications_btn.set_unread(False)
-        self._refresh_windows_notification_attention()
-
-    def _add_notification(
-        self,
-        level: str,
-        title: str,
-        message: str,
-        *,
-        source: str = "app",
-        details: dict[str, object] | None = None,
-    ) -> None:
-        try:
-            self.context.notifications.add(level, title, message, source=source, details=details or {})
-        except Exception:
-            return
-        self._refresh_notifications_badge()
-        if str(level).lower() == "error":
-            self._request_windows_attention()
+    def _toast_notification(self, level: str, title: str, message: str) -> None:
+        icon_map = {
+            "error": QSystemTrayIcon.MessageIcon.Critical,
+            "warning": QSystemTrayIcon.MessageIcon.Warning,
+            "success": QSystemTrayIcon.MessageIcon.Information,
+            "info": QSystemTrayIcon.MessageIcon.Information,
+        }
+        self.tray_icon.showMessage(title, message, icon_map.get(level, QSystemTrayIcon.MessageIcon.Information), 5000)
 
     def _notify_component_errors_from_payload(self, payload: object) -> None:
         if not isinstance(payload, dict):
@@ -5540,16 +5458,10 @@ class MainWindow(QMainWindow):
             if state.status != "error" or not state.last_error:
                 continue
             translated_error = self._translate_component_error(state.last_error)
-            signature = (state.component_id, state.last_error.strip())
-            if signature in self._notified_component_errors:
-                continue
-            self._notified_component_errors.add(signature)
-            self._add_notification(
+            self._toast_notification(
                 "error",
                 self._t("Component failed to start"),
                 f"{self._component_display_name(state.component_id)}: {translated_error}",
-                source=state.component_id,
-                details={"dedupe_key": f"component-error:{state.component_id}:{state.last_error.strip()}"},
             )
 
     def _notify_telegram_proxy_status_from_payload(self, payload: object) -> None:
@@ -5558,29 +5470,25 @@ class MainWindow(QMainWindow):
         info = payload.get("telegram_proxy")
         if not isinstance(info, dict) or not bool(info.get("missing")):
             return
-        self._add_notification(
+        self._toast_notification(
             "warning",
             self._t("Telegram Desktop was not found"),
             self._t(
                 "Telegram Desktop не найден на компьютере. Откройте раздел компонентов, скачайте Telegram Desktop и после установки нажмите «Подключить к Telegram».",
                 "Telegram Desktop was not found on this PC. Open Components, download Telegram Desktop, and after installation press 'Connect to Telegram'.",
             ),
-            source="tg-ws-proxy",
-            details={"dedupe_key": "telegram-desktop-missing"},
         )
 
     def _notify_zapret_restart_from_payload(self, payload: object) -> None:
         if not isinstance(payload, dict) or not bool(payload.get("zapret_restarted")):
             return
-        self._add_notification(
+        self._toast_notification(
             "success",
             self._t("Zapret restarted"),
             self._t(
                 "Zapret пересобран и запущен заново с вашими текущими настройками.",
                 "Zapret was rebuilt and started again with your current settings.",
             ),
-            source="zapret",
-            details={"dedupe_key": "zapret-reconfigured-restarted"},
         )
 
     def _component_display_name(self, component_id: str) -> str:
@@ -5612,139 +5520,6 @@ class MainWindow(QMainWindow):
         if "no general script found" in lowered:
             return self._t("Zapret configuration was not found.")
         return text
-
-    def _show_notifications_popup(self) -> None:
-        if self._notifications_btn is None:
-            return
-        if time.monotonic() - self._notifications_popup_last_closed_at < 0.18:
-            return
-        if self._notifications_popup is not None and self._notifications_popup.isVisible():
-            self._notifications_popup.close()
-            return
-
-        flags = Qt.WindowType.Popup | Qt.WindowType.FramelessWindowHint | Qt.WindowType.NoDropShadowWindowHint
-        popup = QWidget(self, flags)
-        popup.setObjectName("NotificationsWindow")
-        popup.setFixedSize(326, 248)
-        popup.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
-        popup.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
-        popup.setAutoFillBackground(False)
-        popup.setStyleSheet(self.styleSheet())
-
-        root_layout = QVBoxLayout(popup)
-        root_layout.setContentsMargins(0, 0, 0, 0)
-        root_layout.setSpacing(0)
-        panel = QFrame(popup)
-        panel.setObjectName("NotificationsPopup")
-        panel.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        root_layout.addWidget(panel)
-
-        layout = QVBoxLayout(panel)
-        layout.setContentsMargins(12, 12, 12, 12)
-        layout.setSpacing(10)
-
-        title = QLabel(self._t("Notifications"))
-        title.setProperty("class", "title")
-        layout.addWidget(title)
-
-        scroll = QScrollArea()
-        scroll.setObjectName("NotificationsScroll")
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.Shape.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        canvas = QWidget()
-        canvas.setObjectName("NotificationsCanvas")
-        canvas_layout = QVBoxLayout(canvas)
-        canvas_layout.setContentsMargins(0, 0, 0, 68)
-        canvas_layout.setSpacing(8)
-
-        entries = list(reversed(self.context.notifications.list()))
-        if not entries:
-            empty = QLabel(self._t("Quiet for now. No errors or important events."))
-            empty.setProperty("class", "muted")
-            empty.setWordWrap(True)
-            canvas_layout.addWidget(empty)
-        else:
-            for entry in entries:
-                canvas_layout.addWidget(self._build_notification_item(entry))
-        canvas_layout.addStretch(1)
-        scroll.setWidget(canvas)
-        theme = self.context.settings.get().theme
-        scroll.setStyleSheet(
-            "QScrollArea#NotificationsScroll, "
-            "QScrollArea#NotificationsScroll > QWidget#qt_scrollarea_viewport, "
-            "QWidget#NotificationsCanvas { background: transparent; border: none; }"
-        )
-        popup_fade = ScrollFadeOverlay(scroll)
-        popup_fade.set_surface_color(_dialog_surface_color(theme))
-        popup._scroll_fade_overlay = popup_fade  # type: ignore[attr-defined]
-        self._register_smooth_scroll(scroll)
-        layout.addWidget(scroll, 1)
-
-        self._notifications_popup = popup
-        popup.destroyed.connect(self._on_notifications_popup_destroyed)
-        pos = self._notifications_btn.mapToGlobal(QPoint(0, self._notifications_btn.height() + 8))
-        popup.move(pos.x() - popup.width() + self._notifications_btn.width(), pos.y())
-        popup.show()
-        _disable_native_window_rounding(popup)
-        try:
-            self.context.notifications.mark_all_read()
-        except Exception:
-            pass
-        self._refresh_notifications_badge()
-
-    def _toggle_notifications_popup(self) -> None:
-        if self._notifications_popup is not None and self._notifications_popup.isVisible():
-            self._notifications_popup.close()
-            return
-        self._show_notifications_popup()
-
-    def _on_notifications_popup_destroyed(self, *_args: object) -> None:
-        self._notifications_popup = None
-        self._notifications_popup_last_closed_at = time.monotonic()
-
-    def _build_notification_item(self, entry: NotificationEntry) -> QWidget:
-        card = QFrame()
-        card.setProperty("class", "notificationCard")
-        row = QHBoxLayout(card)
-        row.setContentsMargins(10, 9, 10, 9)
-        row.setSpacing(9)
-
-        dot = QLabel()
-        dot.setFixedSize(8, 8)
-        dot_color = {
-            "error": "#ef4444",
-            "warning": "#f59e0b",
-            "success": "#22c55e",
-            "info": "#60a5fa",
-        }.get(entry.level, "#60a5fa")
-        dot.setStyleSheet(f"background: {dot_color}; border-radius: 4px;")
-        row.addWidget(dot, 0, Qt.AlignmentFlag.AlignTop)
-
-        text_col = QVBoxLayout()
-        text_col.setContentsMargins(0, 0, 0, 0)
-        text_col.setSpacing(4)
-        header = QLabel(entry.title)
-        header.setProperty("class", "title")
-        header.setWordWrap(True)
-        body = QLabel(entry.message or self._t("No details"))
-        body.setProperty("class", "muted")
-        body.setWordWrap(True)
-        meta = QLabel(self._format_notification_time(entry.created_at))
-        meta.setProperty("class", "muted")
-        text_col.addWidget(header)
-        text_col.addWidget(body)
-        text_col.addWidget(meta)
-        row.addLayout(text_col, 1)
-        return card
-
-    def _format_notification_time(self, value: str) -> str:
-        try:
-            dt = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
-            return dt.strftime("%d.%m %H:%M")
-        except Exception:
-            return str(value)[:16]
 
     def _build_tools_menu(self) -> QMenu:
         menu = QMenu(self)
@@ -7155,7 +6930,6 @@ class MainWindow(QMainWindow):
 
     def _build_app_settings_page(self) -> tuple[QWidget, dict]:
         page = QWidget()
-        page.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, False)
         scroll = QScrollArea()
         scroll.setObjectName("SettingsScroll")
         scroll.setWidgetResizable(True)
@@ -7278,7 +7052,6 @@ class MainWindow(QMainWindow):
 
     def _build_zapret_settings_page(self) -> tuple[QWidget, dict]:
         page = QWidget()
-        page.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, False)
         scroll = QScrollArea()
         scroll.setObjectName("SettingsScroll")
         scroll.setWidgetResizable(True)
@@ -7358,7 +7131,6 @@ class MainWindow(QMainWindow):
 
     def _build_tg_settings_page(self) -> tuple[QWidget, dict]:
         page = QWidget()
-        page.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, False)
         scroll = QScrollArea()
         scroll.setObjectName("SettingsScroll")
         scroll.setWidgetResizable(True)
@@ -7497,7 +7269,6 @@ class MainWindow(QMainWindow):
 
     def _build_tools_settings_page(self) -> tuple[QWidget, dict]:
         page = QWidget()
-        page.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, False)
         scroll = QScrollArea()
         scroll.setObjectName("SettingsScroll")
         scroll.setWidgetResizable(True)
@@ -7602,7 +7373,6 @@ class MainWindow(QMainWindow):
     def _build_settings_page(self) -> QWidget:
         page = QWidget()
         page.setObjectName("SettingsPage")
-        page.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, False)
 
         root = QVBoxLayout(page)
         root.setContentsMargins(0, 0, 0, 0)
@@ -8764,15 +8534,13 @@ class MainWindow(QMainWindow):
                 actual_autostart = self.context.autostart.set_enabled(desired_autostart)
                 if actual_autostart != desired_autostart:
                     self.context.settings.update(autostart_windows=actual_autostart)
-                    self._add_notification(
+                    self._toast_notification(
                         "error",
                         self._t("Windows autostart"),
                         self._t(
                             "Не удалось включить автозапуск. Проверьте права Windows или политики безопасности.",
                             "Could not enable autostart. Check Windows permissions or security policies.",
                         ),
-                        source="settings",
-                        details={"dedupe_key": "settings-autostart-failed"},
                     )
             if bool(payload.get("theme_changed")):
                 self._apply_theme()
@@ -8876,10 +8644,10 @@ class MainWindow(QMainWindow):
                 self._show_info("Zapret", self._t("The latest Zapret version is already installed."))
             elif status == "updated":
                 self._show_info("Zapret", self._t("Zapret was updated successfully."))
-                self._add_notification("success", "Zapret", self._t("Zapret was updated successfully."), source="zapret")
+                self._toast_notification("success", "Zapret", self._t("Zapret was updated successfully."))
             else:
                 message = str(payload.get("error", self._t("Failed to update Zapret.")))
-                self._add_notification("error", "Zapret", message, source="zapret", details={"dedupe_key": f"update-error:zapret:{message}"})
+                self._toast_notification("error", "Zapret", message)
                 self._show_error("Zapret", message)
             self._mark_dirty("dashboard", "components", "files", "logs")
             return
@@ -8890,10 +8658,10 @@ class MainWindow(QMainWindow):
                 self._show_info("TG WS Proxy", self._t("The latest TG WS Proxy version is already installed."))
             elif status == "updated":
                 self._show_info("TG WS Proxy", self._t("TG WS Proxy was updated successfully."))
-                self._add_notification("success", "TG WS Proxy", self._t("TG WS Proxy was updated successfully."), source="tg-ws-proxy")
+                self._toast_notification("success", "TG WS Proxy", self._t("TG WS Proxy was updated successfully."))
             else:
                 message = str(payload.get("error", self._t("Failed to update TG WS Proxy.")))
-                self._add_notification("error", "TG WS Proxy", message, source="tg-ws-proxy", details={"dedupe_key": f"update-error:tg-ws-proxy:{message}"})
+                self._toast_notification("error", "TG WS Proxy", message)
                 self._show_error("TG WS Proxy", message)
             self._mark_dirty("dashboard", "components", "files", "logs")
             return
@@ -8972,13 +8740,7 @@ class MainWindow(QMainWindow):
         if action in {"update_zapret_runtime", "update_tg_ws_proxy_runtime"}:
             self._close_component_update_dialog()
         title = self._backend_error_title(source)
-        self._add_notification(
-            "error",
-            title,
-            error,
-            source=source,
-            details={"dedupe_key": f"backend-error:{source}:{action}:{error}"},
-        )
+        self._toast_notification("error", title, error)
         self._show_error(title, error)
 
     def _backend_error_source(self, action: str, fallback: str = "") -> str:
@@ -9203,11 +8965,7 @@ class MainWindow(QMainWindow):
             self._file_tag_canvas.setStyleSheet(f"background: {tag_surface}; border: none;")
         self._sync_nav_highlight(animated=False)
         self._apply_titlebar_icons(theme)
-        if getattr(self, "_notifications_btn", None) is not None:
-            self._notifications_btn.setIcon(self._icon("bell.svg"))
-
         self._sync_onboarding_back_button_style()
-        self._refresh_notifications_badge()
         self._apply_onboarding_style()
         self._apply_file_search_style()
         if self._file_search_toggle is not None:
@@ -9487,8 +9245,6 @@ class MainWindow(QMainWindow):
                 btn.setToolTip(nav_tooltips[index])
 
 
-        if getattr(self, "_notifications_btn", None) is not None:
-            self._notifications_btn.setToolTip(self._t("Notifications"))
         if getattr(self, "_settings_btn", None) is not None:
             self._settings_btn.setToolTip(self._t("Settings"))
         if getattr(self, "_onboarding_back_btn", None) is not None:
@@ -10913,7 +10669,7 @@ class MainWindow(QMainWindow):
                 )
             else:
                 message = str(release.get("error", self._t("Failed to check for updates.")))
-                self._add_notification("error", self._t("Updates"), message, source="updates")
+                self._toast_notification("error", self._t("Updates"), message)
                 self._show_error(
                     self._t("Updates"),
                     message,
@@ -11174,7 +10930,7 @@ class MainWindow(QMainWindow):
             self._update_prepare_dialog = None
         if not isinstance(payload, dict) or not payload.get("ok"):
             message = str((payload or {}).get("error", self._t("Failed to prepare the update."))) if isinstance(payload, dict) else self._t("Failed to prepare the update.")
-            self._add_notification("error", self._t("Updates"), message, source="updates")
+            self._toast_notification("error", self._t("Updates"), message)
             self._show_error(
                 self._t("Updates"),
                 message,
@@ -11187,15 +10943,10 @@ class MainWindow(QMainWindow):
         try:
             self.context.updates.launch_update(prepared)
         except Exception as error:
-            self._add_notification("error", self._t("Updates"), str(error), source="updates")
+            self._toast_notification("error", self._t("Updates"), str(error))
             self._show_error(self._t("Updates"), str(error))
             return
-        self._add_notification(
-            "success",
-            self._t("Updates"),
-            self._t("Update is prepared, restarting the app."),
-            source="updates",
-        )
+        self._toast_notification("success", self._t("Updates"), self._t("Update is prepared, restarting the app."))
         self._quit_for_update()
 
     def _run_diagnostics_popup(self) -> None:
@@ -12218,8 +11969,6 @@ class MainWindow(QMainWindow):
                     self._pages_shell.setVisible(False)
                 if self._sidebar_widget is not None:
                     self._sidebar_widget.setVisible(False)
-                if getattr(self, "_notifications_btn", None) is not None:
-                    self._notifications_btn.setVisible(False)
             else:
                 self._reset_onboarding_intro_state()
                 self._prepare_onboarding_services_stage()
@@ -12247,8 +11996,6 @@ class MainWindow(QMainWindow):
                 self._content_surface_layout.setSpacing(8)
         if self._sidebar_widget is not None:
             self._sidebar_widget.setVisible(not visible)
-        if getattr(self, "_notifications_btn", None) is not None:
-            self._notifications_btn.setVisible(not visible)
         if not visible and self._onboarding_service_action_btn is not None:
             self._onboarding_service_action_btn.hide()
         if not visible and self._onboarding_back_btn is not None:
@@ -13403,7 +13150,9 @@ class MainWindow(QMainWindow):
         self._general_test_progress_bar = None
         self._clear_windows_taskbar_progress()
         if self.isMinimized() or not self.isActiveWindow():
-            self._request_windows_attention()
+            hwnd = self._window_hwnd()
+            if hwnd:
+                self._windows_taskbar.flash_attention(hwnd)
 
         checked = results if isinstance(results, list) else []
         working: list[str] = []

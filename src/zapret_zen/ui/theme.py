@@ -231,7 +231,7 @@ def _build_base_css() -> tuple[str, str]:
         background: rgba(255, 255, 255, 0.06);
         border: 1px solid #3a6179;
     }
-    #SettingsScroll, #SettingsScroll QWidget#qt_scrollarea_viewport {
+    #SettingsScroll, #SettingsScroll QWidget#qt_scrollarea_viewport, #SettingsCanvas, #SettingsStack {
         background: transparent;
         border: none;
     }
@@ -267,20 +267,6 @@ def _build_base_css() -> tuple[str, str]:
         background: #141f32;
         border: 1px solid #284061;
         border-radius: 16px;
-    }
-    QFrame#NotificationsPopup {
-        background: #141f32;
-        border: 1px solid #304463;
-        border-radius: 14px;
-    }
-    QFrame[class="notificationCard"] {
-        background: #17233a;
-        border: 1px solid #2e4269;
-        border-radius: 12px;
-    }
-    QScrollArea#NotificationsScroll, QWidget#NotificationsCanvas {
-        background: transparent;
-        border: none;
     }
     QFrame[class="modIconWrap"] {
         background: #1b2b45;
@@ -345,11 +331,15 @@ def _build_base_css() -> tuple[str, str]:
         color: #d7e1f2;
         line-height: 1.3em;
     }
-    #ModsScroll, #ModsCanvas, #ComponentsScroll, #ComponentsCanvas {
+    #ModsScroll, #ModsCanvas, #ComponentsScroll, #ComponentsCanvas, #ModsCatalogScroll, #ModsCatalogCanvas {
         background: transparent;
         border: none;
     }
     #ComponentsScroll QScrollBar, #ComponentsCanvas QScrollBar, #ComponentsScroll QWidget#qt_scrollarea_viewport, #ComponentsCanvas QWidget#qt_scrollarea_viewport {
+        background: transparent;
+        border: none;
+    }
+    #ModsCatalogScroll > QWidget#qt_scrollarea_viewport {
         background: transparent;
         border: none;
     }
@@ -835,7 +825,7 @@ def _build_base_css() -> tuple[str, str]:
         background: rgba(0, 0, 0, 0.04);
         border: 1px solid #b8cde8;
     }
-    #SettingsScroll, #SettingsScroll QWidget#qt_scrollarea_viewport {
+    #SettingsScroll, #SettingsScroll QWidget#qt_scrollarea_viewport, #SettingsCanvas, #SettingsStack {
         background: transparent;
         border: none;
     }
@@ -871,20 +861,6 @@ def _build_base_css() -> tuple[str, str]:
         background: #ffffff;
         border: 1px solid #d6e1f0;
         border-radius: 16px;
-    }
-    QFrame#NotificationsPopup {
-        background: #ffffff;
-        border: 1px solid #c9d7eb;
-        border-radius: 14px;
-    }
-    QFrame[class="notificationCard"] {
-        background: #f8fbff;
-        border: 1px solid #d3e0ef;
-        border-radius: 12px;
-    }
-    QScrollArea#NotificationsScroll, QWidget#NotificationsCanvas {
-        background: transparent;
-        border: none;
     }
     QFrame[class="modIconWrap"] {
         background: #edf3ff;
@@ -949,11 +925,15 @@ def _build_base_css() -> tuple[str, str]:
         color: #2a3648;
         line-height: 1.3em;
     }
-    #ModsScroll, #ModsCanvas, #ComponentsScroll, #ComponentsCanvas {
+    #ModsScroll, #ModsCanvas, #ComponentsScroll, #ComponentsCanvas, #ModsCatalogScroll, #ModsCatalogCanvas {
         background: transparent;
         border: none;
     }
     #ComponentsScroll QScrollBar, #ComponentsCanvas QScrollBar, #ComponentsScroll QWidget#qt_scrollarea_viewport, #ComponentsCanvas QWidget#qt_scrollarea_viewport {
+        background: transparent;
+        border: none;
+    }
+    #ModsCatalogScroll > QWidget#qt_scrollarea_viewport {
         background: transparent;
         border: none;
     }
