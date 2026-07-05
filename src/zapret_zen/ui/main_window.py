@@ -6570,7 +6570,7 @@ class MainWindow(QMainWindow):
         page.setProperty("class", "pageRoot")
         page.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         root = QVBoxLayout(page)
-        root.setContentsMargins(1, 12, 1, 0)
+        root.setContentsMargins(24, 12, 24, 0)
         root.setSpacing(0)
 
         stack = QStackedWidget()
@@ -6588,7 +6588,7 @@ class MainWindow(QMainWindow):
         chooser_host.setProperty("class", "pageCanvas")
         chooser_host.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         chooser_host_layout = QVBoxLayout(chooser_host)
-        chooser_host_layout.setContentsMargins(1, 0, 1, 12)
+        chooser_host_layout.setContentsMargins(24, 0, 24, 12)
         chooser_host_layout.setSpacing(0)
         chooser_host_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
@@ -6805,7 +6805,7 @@ class MainWindow(QMainWindow):
         advanced_page = QWidget()
         self._file_advanced_page = advanced_page
         advanced_root = QVBoxLayout(advanced_page)
-        advanced_root.setContentsMargins(1, 0, 1, 12)
+        advanced_root.setContentsMargins(24, 0, 24, 12)
         advanced_root.setSpacing(12)
         advanced_back = QToolButton()
         advanced_back.setProperty("class", "action")
@@ -13520,7 +13520,10 @@ class MainWindow(QMainWindow):
             desc.setWordWrap(True)
             card_layout.addWidget(desc)
 
-            source_author = "Flowseal" if component.id in {"zapret", "tg-ws-proxy"} else (component.source.rstrip("/").split("/")[-1] if "/" in component.source else component.source)
+            source_author = {"zapret": "Flowseal", "tg-ws-proxy": "Flowseal", "dns-manager": "peshk0v"}.get(
+                component.id,
+                component.source.rstrip("/").split("/")[-1] if "/" in component.source else component.source,
+            )
             details = QLabel(
                 f"{self._t('Author')}: {source_author}\n"
                 f"{self._t('Status')}: {status_text}\n"

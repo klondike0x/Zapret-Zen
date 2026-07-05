@@ -54,7 +54,7 @@ class StorageManager:
                 "id": "dns-manager",
                 "name": "DNS Manager",
                 "description": "Управление DNS-серверами Windows.",
-                "version": "1.0",
+                "version": "1.1",
                 "source": "https://github.com/peshk0v/Zapret-Zen",
                 "command": [],
                 "enabled": False,
