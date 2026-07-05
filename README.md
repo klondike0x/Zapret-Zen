@@ -19,9 +19,9 @@
 
 <div align="center">
 
-| Главная | Сервисы | Настройки |
+| Главная | Сервисы | Модификации |
 |:---:|:---:|:---:|
-| <img src="assets/screenshot_dashboard.png" width="280" alt="Главная"> | <img src="assets/screenshot_services.png" width="280" alt="Сервисы"> | <img src="assets/screenshot_settings.png" width="280" alt="Настройки"> |
+| <picture><source media="(prefers-color-scheme: dark)" srcset="assets/screenshot_dashboard_dark.png"><source media="(prefers-color-scheme: light)" srcset="assets/screenshot_dashboard_light.png"><img src="assets/screenshot_dashboard_light.png" width="280" alt="Главная"></picture> | <picture><source media="(prefers-color-scheme: dark)" srcset="assets/screenshot_services_dark.png"><source media="(prefers-color-scheme: light)" srcset="assets/screenshot_services_light.png"><img src="assets/screenshot_services_light.png" width="280" alt="Сервисы"></picture> | <picture><source media="(prefers-color-scheme: dark)" srcset="assets/screenshot_mods_dark.png"><source media="(prefers-color-scheme: light)" srcset="assets/screenshot_mods_light.png"><img src="assets/screenshot_mods_light.png" width="280" alt="Модификации"></picture> |
 
 </div>
 
