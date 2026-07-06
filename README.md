@@ -142,7 +142,7 @@ Zapret-Zen/
 
 ## ©️ Лицензия
 
-[MIT](LICENSE)
+[MIT](LICENSE), приложение использует Uicons от <a href="https://www.flaticon.com/uicons">Flaticon</a>
 - - -
 <div align="center">
 <img width="479" height="113" alt="image" src="https://github.com/user-attachments/assets/c7e3eb82-185f-4786-b2bc-72061fa3b018" />
