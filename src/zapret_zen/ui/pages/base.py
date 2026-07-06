@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from typing import Protocol, Any
+from typing import Any, Protocol
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QFrame, QLabel, QScrollArea, QVBoxLayout, QWidget
 
 from zapret_zen.bootstrap import ApplicationContext
+from zapret_zen.domain import ConfigProfile
 
 
 class PageHost(Protocol):
@@ -24,6 +25,12 @@ class PageHost(Protocol):
     def _show_error(self, title: str, message: str) -> None: ...
     def _show_info(self, title: str, message: str) -> None: ...
     def _ask_yes_no(self, title: str, message: str) -> bool: ...
+    def _get_profiles(self) -> list[ConfigProfile]: ...
+    def _active_profile_id(self) -> str: ...
+    def _switch_profile(self, profile_id: str) -> None: ...
+    def _create_profile(self) -> None: ...
+    def _rename_profile(self, profile_id: str) -> None: ...
+    def _delete_profile(self, profile_id: str) -> None: ...
 
 
 class BasePage(QFrame):
@@ -69,3 +76,21 @@ class BasePage(QFrame):
 
     def _ask_yes_no(self, title: str, message: str) -> bool:
         return self._host._ask_yes_no(title, message)
+
+    def _get_profiles(self) -> list[ConfigProfile]:
+        return self._host._get_profiles()
+
+    def _active_profile_id(self) -> str:
+        return self._host._active_profile_id()
+
+    def _switch_profile(self, profile_id: str) -> None:
+        self._host._switch_profile(profile_id)
+
+    def _create_profile(self) -> None:
+        self._host._create_profile()
+
+    def _rename_profile(self, profile_id: str) -> None:
+        self._host._rename_profile(profile_id)
+
+    def _delete_profile(self, profile_id: str) -> None:
+        self._host._delete_profile(profile_id)

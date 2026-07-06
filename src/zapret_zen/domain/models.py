@@ -84,6 +84,7 @@ class ConfigProfile:
     name: str
     description: str
     base_config_path: str
+    settings_snapshot: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(slots=True)

@@ -2,6 +2,7 @@
 
 import locale
 import sys
+from collections.abc import Callable
 from dataclasses import asdict
 
 from zapret_zen.domain import AppSettings
@@ -17,6 +18,16 @@ class SettingsManager:
         self.storage = storage
         self._settings_path = self.storage.paths.data_dir / "settings.json"
         self._settings = self.load()
+        self._on_save_callbacks: list[Callable[[], None]] = []
+
+    def add_on_save_callback(self, callback: Callable[[], None]) -> None:
+        self._on_save_callbacks.append(callback)
+
+    def remove_on_save_callback(self, callback: Callable[[], None]) -> None:
+        try:
+            self._on_save_callbacks.remove(callback)
+        except ValueError:
+            pass
 
     def load(self) -> AppSettings:
         raw = self.storage.read_json(self._settings_path, default={}) or {}
@@ -145,6 +156,11 @@ class SettingsManager:
 
     def save(self) -> None:
         self.storage.write_json(self._settings_path, asdict(self._settings))
+        for cb in self._on_save_callbacks:
+            try:
+                cb()
+            except Exception:
+                pass
 
     def _detect_system_language(self) -> str:
         if sys.platform.startswith("win"):

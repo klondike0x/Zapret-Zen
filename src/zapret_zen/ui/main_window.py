@@ -16,7 +16,7 @@ from datetime import datetime
 from pathlib import Path
 
 from zapret_zen import __version__
-from zapret_zen.domain import ComponentDefinition, ComponentState, FileRecord
+from zapret_zen.domain import ComponentDefinition, ComponentState, ConfigProfile, FileRecord
 from zapret_zen.services.service_catalog import (
     ALWAYS_APPLY_SERVICE_IDS,
     FORTNITE_GENERAL_PRIORITY,
@@ -28,7 +28,7 @@ from zapret_zen.services.service_catalog import (
     service_ids_in_categories,
 )
 from PySide6.QtCore import QAbstractAnimation, QCoreApplication, QEasingCurve, QEvent, QEventLoop, QObject, QPoint, QPointF, QRect, QRectF, QSize, QSizeF, Qt, QTimer, Signal, QPropertyAnimation, QParallelAnimationGroup, Property, QByteArray, QVariantAnimation
-from PySide6.QtGui import QAction, QActionGroup, QColor, QCloseEvent, QFont, QFontDatabase, QFontMetrics, QIcon, QImage, QKeyEvent, QLinearGradient, QMouseEvent, QPainter, QPainterPath, QPen, QPixmap, QRadialGradient, QRegion, QTextCharFormat, QTextCursor, QTextDocument
+from PySide6.QtGui import QAction, QActionGroup, QColor, QCursor, QCloseEvent, QFont, QFontDatabase, QFontMetrics, QIcon, QImage, QKeyEvent, QLinearGradient, QMouseEvent, QPainter, QPainterPath, QPen, QPixmap, QRadialGradient, QRegion, QTextCharFormat, QTextCursor, QTextDocument
 from PySide6.QtSvg import QSvgRenderer
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -941,7 +941,6 @@ class ServiceToggleCard(QFrame):
 
 
 class ExpandToggleButton(QPushButton):
-    _RADIUS = 14.0
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -955,6 +954,8 @@ class ExpandToggleButton(QPushButton):
         self._pulse_progress = 0.0
         self._hover_anim: QPropertyAnimation | None = None
         self._pulse_anim: QPropertyAnimation | None = None
+        self._chevron_rotation = 0.0
+        self._rot_anim: QPropertyAnimation | None = None
         self.setMouseTracking(True)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setFlat(True)
@@ -965,7 +966,14 @@ class ExpandToggleButton(QPushButton):
 
     def set_expanded_state(self, expanded: bool) -> None:
         self._expanded = expanded
-        self.update()
+        target = 0.0 if expanded else 180.0
+        if self._rot_anim is not None:
+            self._rot_anim.stop()
+        self._rot_anim = QPropertyAnimation(self, b"chevronRotation", self)
+        self._rot_anim.setDuration(250)
+        self._rot_anim.setEndValue(target)
+        self._rot_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._rot_anim.start()
 
     def set_light_theme(self, light: bool) -> None:
         self._light = light
@@ -988,6 +996,13 @@ class ExpandToggleButton(QPushButton):
         self._pulse_progress = float(v)
         self.update()
     pulseProgress = Property(float, _get_pulse, _set_pulse)
+
+    def _get_chevron_rotation(self) -> float:
+        return self._chevron_rotation
+    def _set_chevron_rotation(self, v: float) -> None:
+        self._chevron_rotation = float(v)
+        self.update()
+    chevronRotation = Property(float, _get_chevron_rotation, _set_chevron_rotation)
 
     def _get_hover(self) -> float:
         return self._hover_progress
@@ -1021,48 +1036,43 @@ class ExpandToggleButton(QPushButton):
     def paintEvent(self, event: QPaintEvent) -> None:
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        r = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
-        radius = self._RADIUS
 
         accent = QColor(self._accent)
-        if self._expanded:
-            bg = QColor(accent)
-            if self._hover_progress > 0.01:
-                bg = bg.lighter(100 + int(8 * self._hover_progress))
-            text_color = QColor("#ffffff")
-        else:
-            base_alpha = 14 if self._light else 8
-            alpha = int(base_alpha * (0.5 + 0.5 * self._hover_progress) + 10 * self._hover_progress)
-            bg = QColor(255, 255, 255, alpha)
-            text_color = QColor(accent)
-            if self._hover_progress > 0.01:
-                text_color = text_color.lighter(100 + int(10 * self._hover_progress))
 
-        if not self._expanded:
-            border = QColor(accent)
-            border.setAlpha(int(50 + 100 * self._hover_progress))
-            painter.setPen(QPen(border, 3.0))
-            painter.setBrush(bg)
-            painter.drawRoundedRect(r, radius, radius)
-        else:
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(bg)
-            painter.drawRoundedRect(r, radius, radius)
+        chevron_color = QColor(accent)
+        if self._hover_progress > 0.01:
+            chevron_color = chevron_color.lighter(100 + int(15 * self._hover_progress))
+
+        r = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
 
         pulse = self._pulse_progress
         if pulse > 0.01:
             flash = QColor(accent)
-            flash.setAlpha(int(55 * pulse))
+            flash.setAlpha(int(35 * pulse))
             painter.setBrush(flash)
             painter.setPen(Qt.PenStyle.NoPen)
-            painter.drawRoundedRect(r, radius, radius)
+            painter.drawRoundedRect(r, 14.0, 14.0)
 
-        painter.setPen(text_color)
-        font = painter.font()
-        font.setPixelSize(12)
-        font.setWeight(QFont.Weight.DemiBold)
-        painter.setFont(font)
-        painter.drawText(r, Qt.AlignmentFlag.AlignCenter, self.text())
+        cx = r.center().x()
+        cy = r.center().y()
+
+        painter.save()
+        painter.translate(cx, cy)
+        painter.rotate(self._chevron_rotation)
+
+        pen = QPen(chevron_color, 2.5)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        painter.setPen(pen)
+
+        size = 8.0
+        path = QPainterPath()
+        path.moveTo(-size, size * 0.5)
+        path.lineTo(0, -size * 0.5)
+        path.lineTo(size, size * 0.5)
+        painter.drawPath(path)
+
+        painter.restore()
         painter.end()
 
 
@@ -1087,6 +1097,7 @@ class ServiceCategoryCard(BaseServiceCard):
 
         self._expanded = False
         self._expand_anim: QPropertyAnimation | None = None
+        self._headers_font_family = "Headers"
 
         root = QVBoxLayout(self)
         root.setContentsMargins(16, 16, 16, 16)
@@ -1147,6 +1158,10 @@ class ServiceCategoryCard(BaseServiceCard):
         container_layout.addWidget(self._services_toggle_widget)
         container_layout.addStretch(1)
 
+        self._expand_btn = ExpandToggleButton()
+        self._expand_btn.clicked.connect(self._toggle_expand)
+        container_layout.addWidget(self._expand_btn)
+
         # Scroll area (always visible, fills card)
         self._services_scroll = QScrollArea()
         self._services_scroll.setWidget(self._services_container)
@@ -1155,11 +1170,6 @@ class ServiceCategoryCard(BaseServiceCard):
         self._services_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self._services_scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
         root.addWidget(self._services_scroll, 1)
-
-        self._expand_btn = ExpandToggleButton()
-        self._expand_btn.setText("Show services")
-        self._expand_btn.clicked.connect(self._toggle_expand)
-        root.addWidget(self._expand_btn)
 
     def set_card_width(self, width: int) -> None:
         self.setMinimumWidth(max(160, min(width, 320)))
@@ -1204,6 +1214,10 @@ class ServiceCategoryCard(BaseServiceCard):
     def set_texts(self, title: str, description: str) -> None:
         self._title_label.setText(title)
         self._desc_label.setText(description)
+
+    def set_headers_font(self, family: str) -> None:
+        self._headers_font_family = family
+        self._sync_style()
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
@@ -1261,9 +1275,6 @@ class ServiceCategoryCard(BaseServiceCard):
             self._expand_anim.finished.connect(self._finish_collapse)
 
         self._expand_anim.start()
-        show = getattr(self, '_expand_show_text', "Show services")
-        hide = getattr(self, '_expand_hide_text', "Hide services")
-        self._expand_btn.setText(hide if self._expanded else show)
         self._sync_expand_button_style()
 
     def _finish_collapse(self) -> None:
@@ -1304,11 +1315,6 @@ class ServiceCategoryCard(BaseServiceCard):
         self._expand_btn.set_expanded_state(self._expanded)
         self._expand_btn.set_light_theme(light)
 
-    def set_expand_texts(self, show: str, hide: str) -> None:
-        self._expand_show_text = show
-        self._expand_hide_text = hide
-        self._expand_btn.setText(self._expand_hide_text if self._expanded else self._expand_show_text)
-
     def _sync_separator_style(self) -> None:
         accent = self._card_accent()
         light = self._visual_scope == "onboarding" or is_light_theme(self._theme)
@@ -1329,8 +1335,8 @@ class ServiceCategoryCard(BaseServiceCard):
         desc_color = "#3a4a62" if (onboarding or is_light_theme(self._theme)) else ("#a0b0c8" if selected else "#6f7f95")
         if self._selected:
             muted_color = "#334154" if (onboarding or is_light_theme(self._theme)) else "#d5def0"
-        self._title_label.setStyleSheet(f"color: {text_color}; background: transparent; font-size: 17px; font-weight: 700;")
-        self._desc_label.setStyleSheet(f"color: {desc_color}; background: transparent; font-size: 13px; font-weight: 500;")
+        self._title_label.setStyleSheet(f"color: {text_color}; background: transparent; font-family: '{self._headers_font_family}'; font-size: 22px; font-weight: 400;")
+        self._desc_label.setStyleSheet(f"color: {desc_color}; background: transparent; font-size: 14px; font-weight: 500;")
         if self._selected:
             self._selected_label.setText("")
             if not self._check_pixmap.isNull():
@@ -4459,6 +4465,9 @@ class MainWindow(QMainWindow):
 
         self._light_theme = False
 
+        self.context.profiles.ensure_default_exists(self.context.settings)
+        self.context.settings.add_on_save_callback(self._save_active_profile_snapshot)
+
         self._icons_dir = self.context.paths.ui_assets_dir / "icons"
         self._service_icons_dir = self.context.paths.ui_assets_dir / "service_icons"
         self._icon_cache: dict[str, QIcon] = {}
@@ -5954,12 +5963,10 @@ class MainWindow(QMainWindow):
 
         top, top_layout = self._card()
         top_layout.setContentsMargins(14, 14, 14, 14)
+
         title = QLabel(self._t("Quick Access"))
         title.setObjectName("DashboardTitle")
         title.setProperty("class", "title")
-        title.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
-        title.setContentsMargins(0, 0, 0, 0)
-        title.setMaximumHeight(22)
         self._dashboard_title_label = title
         top_layout.addWidget(title)
 
@@ -6050,15 +6057,80 @@ class MainWindow(QMainWindow):
         status_layout.addSpacing(4)
         status_layout.addWidget(self._toggle_status_label)
 
-        badge_row_layout = QHBoxLayout()
-        badge_row_layout.setContentsMargins(0, 0, 0, 0)
-        badge_row_layout.addWidget(self._toggle_status_card, 0, Qt.AlignmentFlag.AlignLeft)
-        badge_row_layout.addStretch(1)
-        badge_row_layout.addWidget(self._mods_badge_card, 0, Qt.AlignmentFlag.AlignRight)
-        top_layout.addLayout(badge_row_layout)
+        self._profile_carousel_card = QFrame()
+        self._profile_carousel_card.setProperty("class", "modBadge")
+        self._profile_carousel_card.setObjectName("ProfileCarouselCard")
+        self._profile_carousel_card.setFixedHeight(32)
+        self._profile_carousel_card.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        carousel_layout = QHBoxLayout(self._profile_carousel_card)
+        carousel_layout.setContentsMargins(0, 0, 0, 0)
+        carousel_layout.setSpacing(2)
+
+        def _btn_style(name: str) -> str:
+            return (
+                f"QToolButton#{name}"
+                "{min-width:30px;max-width:30px;min-height:30px;max-height:30px;"
+                "border:none;border-radius:15px;background:transparent;padding:0;margin:0;}"
+            )
+
+        prev_btn = QToolButton()
+        prev_btn.setObjectName("ProfilePrevBtn")
+        prev_btn.setIcon(self._carousel_arrow_icon("left", 22))
+        prev_btn.setIconSize(QSize(22, 22))
+        prev_btn.setFixedSize(30, 30)
+        prev_btn.setProperty("class", "action")
+        prev_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        prev_btn.clicked.connect(lambda: self._cycle_profile(-1))
+        prev_btn.installEventFilter(self._carousel_arrow_filter(prev_btn))
+        prev_btn.setProperty("_interactionBound", True)
+        prev_btn.setStyleSheet(_btn_style("ProfilePrevBtn"))
+
+        self._profile_carousel_label = QLabel("Default")
+        self._profile_carousel_label.setProperty("class", "muted")
+        self._profile_carousel_label.setFixedHeight(22)
+        self._profile_carousel_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._profile_carousel_label.setMinimumWidth(80)
+
+        next_btn = QToolButton()
+        next_btn.setObjectName("ProfileNextBtn")
+        next_btn.setIcon(self._carousel_arrow_icon("right", 22))
+        next_btn.setIconSize(QSize(22, 22))
+        next_btn.setFixedSize(30, 30)
+        next_btn.setProperty("class", "action")
+        next_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        next_btn.clicked.connect(lambda: self._cycle_profile(1))
+        next_btn.installEventFilter(self._carousel_arrow_filter(next_btn))
+        next_btn.setProperty("_interactionBound", True)
+        next_btn.setStyleSheet(_btn_style("ProfileNextBtn"))
+
+        carousel_layout.addWidget(prev_btn)
+        carousel_layout.addWidget(self._profile_carousel_label)
+        carousel_layout.addWidget(next_btn)
+
+        left_wing = QWidget()
+        left_wing.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        lw = QHBoxLayout(left_wing)
+        lw.setContentsMargins(0, 0, 0, 0)
+        lw.addWidget(self._toggle_status_card)
+        lw.addStretch(1)
+
+        right_wing = QWidget()
+        right_wing.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        rw = QHBoxLayout(right_wing)
+        rw.setContentsMargins(0, 0, 0, 0)
+        rw.addStretch(1)
+        rw.addWidget(self._mods_badge_card)
+
+        badges_row = QHBoxLayout()
+        badges_row.setContentsMargins(0, 0, 0, 0)
+        badges_row.addWidget(left_wing, 1)
+        badges_row.addWidget(self._profile_carousel_card, 0, Qt.AlignmentFlag.AlignCenter)
+        badges_row.addWidget(right_wing, 1)
+        top_layout.addLayout(badges_row)
+
+        self._update_profile_carousel()
 
         root.addWidget(top)
-
         return page
 
     def _build_status_badge(self, key: str, icon_name: str, title: str) -> QWidget:
@@ -6191,6 +6263,7 @@ class MainWindow(QMainWindow):
         for cat in SERVICE_CATEGORIES:
             card = ServiceCategoryCard(cat)
             card.set_visual_scope(scope)
+            card.set_headers_font(self._headers_font_family)
             is_selected = any(sid in selected for sid in cat.member_ids)
             card.set_texts(cat.title_en, self._t(cat.description_ru, cat.description_en))
             card.set_icon_pixmap(self._category_card_icon_pixmap(cat, 28, selected=is_selected, onboarding=scope == "onboarding"))
@@ -6205,7 +6278,6 @@ class MainWindow(QMainWindow):
                 pixmaps[preset.id] = self._service_icon_pixmap(preset, 24, selected=preset.id in selected)
             card.set_service_toggles(cat_presets, pixmaps, selected)
             card.service_toggled.connect(self._on_service_card_toggled)
-            card.set_expand_texts(self._t("Показать сервисы", "Show services"), self._t("Скрыть сервисы", "Hide services"))
             cards.append(card)
         return cards
 
@@ -6370,7 +6442,7 @@ class MainWindow(QMainWindow):
 
     def _service_icon_pixmap(self, preset: ServicePreset, size: int, *, selected: bool, onboarding: bool = False) -> QPixmap:
         theme = self.context.settings.get().theme
-        tint = QColor(preset.accent) if selected else (QColor("#7b8798") if (onboarding or is_light_theme(theme)) else QColor("#6f7a8c"))
+        tint = QColor(preset.accent)
         dpr = self._service_icon_device_ratio()
         cache_key = f"{preset.icon_file}|{size}|{dpr:.2f}|{tint.name(QColor.NameFormat.HexArgb)}"
         cached = self._service_icon_cache.get(cache_key)
@@ -7047,8 +7119,108 @@ class MainWindow(QMainWindow):
         app_section.addWidget(QLabel(self._t("Update branch")))
         app_section.addWidget(branch_w)
 
+        # --- Profiles section ---
+        profiles_section = _section(self._t("Profiles"))
+
+        self._settings_profiles_list = QListWidget()
+        self._settings_profiles_list.setFixedHeight(120)
+        self._settings_profiles_list.setProperty("class", "settingsList")
+
+        profiles_section.addWidget(self._settings_profiles_list)
+
+        profile_btn_row = QWidget()
+        profile_btn_row.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, False)
+        pbr = QHBoxLayout(profile_btn_row)
+        pbr.setContentsMargins(0, 0, 0, 0)
+        pbr.setSpacing(6)
+
+        create_pb = QPushButton(self._t("+ Create"))
+        create_pb.setFixedHeight(30)
+        create_pb.setProperty("class", "settingsSegment")
+        create_pb.setCursor(Qt.CursorShape.PointingHandCursor)
+        create_pb.clicked.connect(self._settings_create_profile)
+
+        rename_pb = QPushButton(self._t("Rename"))
+        rename_pb.setFixedHeight(30)
+        rename_pb.setProperty("class", "settingsSegment")
+        rename_pb.setCursor(Qt.CursorShape.PointingHandCursor)
+        rename_pb.clicked.connect(self._settings_rename_profile)
+
+        delete_pb = QPushButton(self._t("Delete"))
+        delete_pb.setFixedHeight(30)
+        delete_pb.setProperty("class", "settingsSegment")
+        delete_pb.setCursor(Qt.CursorShape.PointingHandCursor)
+        delete_pb.clicked.connect(self._settings_delete_profile)
+
+        pbr.addWidget(create_pb)
+        pbr.addWidget(rename_pb)
+        pbr.addWidget(delete_pb)
+        pbr.addStretch(1)
+        profiles_section.addWidget(profile_btn_row)
+
+        self._refresh_settings_profiles_list()
+
         layout.addStretch(1)
         return page, ctrl
+
+    def _refresh_settings_profiles_list(self) -> None:
+        self._settings_profiles_list.clear()
+        active = self._active_profile_id()
+        for p in self.context.profiles.list_profiles():
+            item = QListWidgetItem(p.name)
+            item.setData(Qt.ItemDataRole.UserRole, p.id)
+            if p.id == active:
+                f = item.font()
+                f.setBold(True)
+                item.setFont(f)
+            self._settings_profiles_list.addItem(item)
+
+    def _settings_create_profile(self) -> None:
+        name, ok = QInputDialog.getText(self, self._t("Create profile"), self._t("Profile name:"))
+        if not ok or not name.strip():
+            return
+        current_id = self._active_profile_id()
+        source = self.context.profiles.get_profile(current_id)
+        if source is None:
+            snapshot = self.context.profiles._make_snapshot(self.context.settings)
+        else:
+            snapshot = source.settings_snapshot or {}
+        self.context.profiles.create_profile(name.strip(), snapshot)
+        self._refresh_settings_profiles_list()
+        self._update_profile_carousel()
+
+    def _settings_rename_profile(self) -> None:
+        item = self._settings_profiles_list.currentItem()
+        if item is None:
+            return
+        pid = item.data(Qt.ItemDataRole.UserRole)
+        if pid == "default":
+            return
+        name, ok = QInputDialog.getText(self, self._t("Rename profile"), self._t("New name:"), text=item.text())
+        if not ok or not name.strip():
+            return
+        self.context.profiles.update_profile(pid, name=name.strip())
+        self._refresh_settings_profiles_list()
+        self._update_profile_carousel()
+
+    def _settings_delete_profile(self) -> None:
+        item = self._settings_profiles_list.currentItem()
+        if item is None:
+            return
+        pid = item.data(Qt.ItemDataRole.UserRole)
+        if pid == "default":
+            return
+        ok = self._ask_yes_no(
+            self._t("Delete profile"),
+            self._t('Delete profile "{name}"? This action cannot be undone.').replace("{name}", item.text()),
+        )
+        if not ok:
+            return
+        self.context.profiles.delete_profile(pid)
+        if self._active_profile_id() == pid:
+            self._switch_profile("default")
+        self._refresh_settings_profiles_list()
+        self._update_profile_carousel()
 
     def _build_zapret_settings_page(self) -> tuple[QWidget, dict]:
         page = QWidget()
@@ -7364,6 +7536,16 @@ class MainWindow(QMainWindow):
         credits.setProperty("class", "muted")
         credits.setWordWrap(True)
         layout.addWidget(credits)
+
+        flat = QLabel(
+            self._t(
+                "Данное приложение использует ресурсы сайта flaticon.com.",
+                "This application uses resources from flaticon.com.",
+            )
+        )
+        flat.setProperty("class", "muted")
+        flat.setWordWrap(True)
+        layout.addWidget(flat)
 
         layout.addStretch(1)
         return page, ctrl
@@ -8989,6 +9171,7 @@ class MainWindow(QMainWindow):
                 self.refresh_mods()
             except Exception:
                 pass
+        self._update_profile_carousel()
 
     def _apply_onboarding_style(self) -> None:
         if self._content_surface is None:
@@ -12784,7 +12967,6 @@ class MainWindow(QMainWindow):
                 for preset in cat_presets:
                     pixmaps[preset.id] = self._service_icon_pixmap(preset, 24, selected=preset.id in selected)
                 card.refresh_service_toggles(pixmaps, selected)
-                card.set_expand_texts(self._t("Показать сервисы", "Show services"), self._t("Скрыть сервисы", "Hide services"))
             finally:
                 try:
                     card.blockSignals(False)
@@ -12810,7 +12992,6 @@ class MainWindow(QMainWindow):
                 for preset in cat_presets:
                     pixmaps[preset.id] = self._service_icon_pixmap(preset, 24, selected=preset.id in selected)
                 card.refresh_service_toggles(pixmaps, selected)
-                card.set_expand_texts(self._t("Показать сервисы", "Show services"), self._t("Скрыть сервисы", "Hide services"))
             finally:
                 try:
                     card.blockSignals(False)
@@ -13679,6 +13860,156 @@ class MainWindow(QMainWindow):
             if str(combo.itemData(index) or "") == value:
                 combo.setCurrentIndex(index)
                 return
+
+    # ── Profile methods ──────────────────────────────────────────────────────
+
+    def _save_active_profile_snapshot(self) -> None:
+        active_id = self._active_profile_id()
+        self.context.profiles.save_profile_snapshot(active_id, self.context.settings)
+
+    def _get_profiles(self) -> list[ConfigProfile]:
+        return self.context.profiles.list_profiles()
+
+    def _active_profile_id(self) -> str:
+        return self.context.settings.get().active_profile_id or "default"
+
+    def _cycle_profile(self, delta: int) -> None:
+        profiles = self._get_profiles()
+        if not profiles:
+            return
+        active = self._active_profile_id()
+        idx = next((i for i, p in enumerate(profiles) if p.id == active), 0)
+        new_idx = (idx + delta) % len(profiles)
+        if new_idx != idx:
+            self._switch_profile(profiles[new_idx].id)
+
+    def _carousel_arrow_icon(self, direction: str, size: int) -> QIcon:
+        svg = (
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">'
+            '<path d="M10.48,19a1,1,0,0,1-.7-.29L5.19,14.12a3,3,0,0,1,0-4.24L9.78,5.29a1,1,0,0,1,1.41,0,1,1,0,0,1,0,1.42L6.6,11.29a1,1,0,0,0,0,1.42l4.59,4.58a1,1,0,0,1,0,1.42A1,1,0,0,1,10.48,19Z" fill="#90a1c2"/>'
+            '<path d="M17.48,19a1,1,0,0,1-.7-.29l-6-6a1,1,0,0,1,0-1.42l6-6a1,1,0,0,1,1.41,0,1,1,0,0,1,0,1.42L12.9,12l5.29,5.29a1,1,0,0,1,0,1.42A1,1,0,0,1,17.48,19Z" fill="#90a1c2"/>'
+            '</svg>'
+        ) if direction == "left" else (
+            '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">'
+            '<path d="M13.1,19a1,1,0,0,1-.7-1.71L17,12.71a1,1,0,0,0,0-1.42L12.4,6.71a1,1,0,0,1,0-1.42,1,1,0,0,1,1.41,0L18.4,9.88a3,3,0,0,1,0,4.24l-4.59,4.59A1,1,0,0,1,13.1,19Z" fill="#90a1c2"/>'
+            '<path d="M6.1,19a1,1,0,0,1-.7-1.71L10.69,12,5.4,6.71a1,1,0,0,1,0-1.42,1,1,0,0,1,1.41,0l6,6a1,1,0,0,1,0,1.42l-6,6A1,1,0,0,1,6.1,19Z" fill="#90a1c2"/>'
+            '</svg>'
+        )
+        renderer = QSvgRenderer(QByteArray(svg.encode()))
+        image = QImage(size, size, QImage.Format.Format_ARGB32_Premultiplied)
+        image.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(image)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+        renderer.render(painter, QRectF(0, 0, size, size))
+        painter.end()
+        return QIcon(QPixmap.fromImage(image))
+
+    def _carousel_arrow_filter(self, btn: QToolButton) -> QObject:
+        main = self
+        class _Filter(QObject):
+            def __init__(inner_self) -> None:
+                super().__init__(btn)
+                inner_self._anim: QVariantAnimation | None = None
+
+            def eventFilter(inner_self, obj: QObject, event: QEvent) -> bool:
+                if obj is btn:
+                    if event.type() == QEvent.Type.Enter:
+                        inner_self._start_anim(22, 30)
+                    elif event.type() == QEvent.Type.Leave:
+                        cur = btn.iconSize().width()
+                        inner_self._start_anim(cur, 22)
+                return super().eventFilter(obj, event)
+
+            def _start_anim(inner_self, start: int, end: int) -> None:
+                if inner_self._anim is not None:
+                    inner_self._anim.stop()
+                    inner_self._anim = None
+                anim = QVariantAnimation(btn)
+                anim.setDuration(180)
+                anim.setStartValue(start)
+                anim.setEndValue(end)
+                anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+                dir = "left" if btn.objectName() == "ProfilePrevBtn" else "right"
+                anim.valueChanged.connect(
+                    lambda s: (btn.setIcon(main._carousel_arrow_icon(dir, int(s))),
+                               btn.setIconSize(QSize(int(s), int(s))))
+                )
+                anim.finished.connect(lambda: setattr(inner_self, '_anim', None))
+                anim.start(QAbstractAnimation.DeletionPolicy.DeleteWhenStopped)
+                inner_self._anim = anim
+        return _Filter()
+
+    def _switch_profile(self, profile_id: str) -> None:
+        cb = self._save_active_profile_snapshot
+        self.context.settings.remove_on_save_callback(cb)
+        try:
+            self.context.profiles.switch_profile(profile_id, self.context.settings)
+        finally:
+            self.context.settings.add_on_save_callback(cb)
+        QTimer.singleShot(0, self._apply_theme)
+        QTimer.singleShot(0, self._update_profile_carousel)
+        QTimer.singleShot(0, self.refresh_dashboard)
+
+    def _update_profile_carousel(self) -> None:
+        active = self._active_profile_id()
+        p = self.context.profiles.get_profile(active)
+        name = p.name if p else "Default"
+        self._profile_carousel_label.setText(name)
+
+    def _create_profile(self) -> None:
+        name, ok = QInputDialog.getText(self, self._t("Create profile"), self._t("Profile name:"))
+        if not ok or not name.strip():
+            return
+        current_id = self._active_profile_id()
+        source = self.context.profiles.get_profile(current_id)
+        if source is None:
+            snapshot = self.context.profiles._make_snapshot(self.context.settings)
+        else:
+            snapshot = source.settings_snapshot or {}
+        self.context.profiles.create_profile(name.strip(), snapshot)
+        self._update_profile_carousel()
+
+    def _rename_profile(self, profile_id: str) -> None:
+        profile = self.context.profiles.get_profile(profile_id)
+        if profile is None:
+            return
+        if profile_id == "default":
+            return
+        name, ok = QInputDialog.getText(self, self._t("Rename profile"), self._t("New name:"), text=profile.name)
+        if not ok or not name.strip():
+            return
+        self.context.profiles.update_profile(profile_id, name=name.strip())
+        self._update_profile_carousel()
+
+    def _delete_profile(self, profile_id: str) -> None:
+        if profile_id == "default":
+            return
+        profile = self.context.profiles.get_profile(profile_id)
+        if profile is None:
+            return
+        ok = self._ask_yes_no(
+            self._t("Delete profile"),
+            self._t('Delete profile "{name}"? This action cannot be undone.').replace("{name}", profile.name),
+        )
+        if not ok:
+            return
+        self.context.profiles.delete_profile(profile_id)
+        if self._active_profile_id() == profile_id:
+            self._switch_profile("default")
+        self._update_profile_carousel()
+
+    def _theme_accent_hex(self) -> str:
+        theme = self.context.settings.get().theme
+        if is_light_theme(theme):
+            return "#5a67d6"
+        return "#7380ff"
+
+    def _theme_muted_hex(self) -> str:
+        theme = self.context.settings.get().theme
+        if is_light_theme(theme):
+            return "#6d7fa0"
+        return "#90a1c2"
 
     def _prompt_tg_proxy_connect(self) -> None:
         try:

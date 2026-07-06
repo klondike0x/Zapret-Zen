@@ -389,7 +389,7 @@ class StorageManager:
                 try:
                     temp_path.replace(path)
                     break
-                except PermissionError:
+                except (PermissionError, FileNotFoundError):
                     if attempt < 2:
                         time.sleep(0.1)
                     else:
