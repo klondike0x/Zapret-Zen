@@ -4,7 +4,7 @@
   <img alt="Zapret-Zen banner" src="ui_assets/icons/app_large.png" width="200">
 </picture>
 
-# ⚡ Zapret Zen
+# Zapret Zen
 
 **Утилита для удобного и быстрого обхода блокировок на Windows**
 
