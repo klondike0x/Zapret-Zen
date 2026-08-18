@@ -16,6 +16,7 @@ from zapret_zen.services.merge import MergeEngine
 from zapret_zen.services.mods import ModsManager
 from zapret_zen.services.notifications import NotificationManager
 from zapret_zen.services.profiles import ProfilesManager
+from zapret_zen.services.discord_rpc import DiscordRPCService
 from zapret_zen.services.service_catalog import FORTNITE_GENERAL_PRIORITY
 from zapret_zen.services.settings import SettingsManager
 from zapret_zen.services import translation as _tr
@@ -37,6 +38,7 @@ class ApplicationContext:
     updates: UpdatesManager
     profiles: ProfilesManager
     files: FilesManager
+    discord_rpc: DiscordRPCService
     backend: Any | None = None
 
 
@@ -92,6 +94,7 @@ def bootstrap_application() -> ApplicationContext:
     updates = UpdatesManager(storage, logging, processes=processes)
     profiles = ProfilesManager(storage)
     files = FilesManager(storage, settings)
+    discord_rpc = DiscordRPCService()
     _prime_first_run_state(settings, processes)
 
     _tr.set_language(settings.get().language)
@@ -110,6 +113,7 @@ def bootstrap_application() -> ApplicationContext:
         updates=updates,
         profiles=profiles,
         files=files,
+        discord_rpc=discord_rpc,
         backend=None,
     )
 

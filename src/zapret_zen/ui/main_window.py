@@ -3792,6 +3792,13 @@ class SettingsDialog(AppDialog):
         )
         credits.setProperty("class", "muted")
         canvas_layout.addWidget(credits)
+
+        repo_btn = QPushButton("GitHub")
+        repo_btn.setFixedHeight(30)
+        repo_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        repo_btn.clicked.connect(lambda: __import__("webbrowser").open("https://github.com/peshk0v/Zapret-Zen"))
+        canvas_layout.addWidget(repo_btn)
+
         canvas_layout.addStretch(1)
 
         buttons = QHBoxLayout()
@@ -7120,6 +7127,24 @@ class MainWindow(QMainWindow):
         app_section.addWidget(QLabel(self._t("Update branch")))
         app_section.addWidget(branch_w)
 
+        # --- Discord Rich Presence section ---
+        rpc_section = _section("Discord Rich Presence")
+
+        rpc_detail_label = QLabel(self._t("Статус:"))
+        rpc_detail_input = QLineEdit(settings.discord_rpc_detail)
+        rpc_detail_input.setPlaceholderText(self._t("Текст статуса..."))
+        rpc_detail_input.setMaxLength(128)
+        ctrl["discord_rpc_detail"] = rpc_detail_input
+
+        rpc_row = QWidget()
+        rpc_row.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        rr = QHBoxLayout(rpc_row)
+        rr.setContentsMargins(0, 0, 0, 0)
+        rr.setSpacing(6)
+        rr.addWidget(rpc_detail_label)
+        rr.addWidget(rpc_detail_input, 1)
+        rpc_section.addWidget(rpc_row)
+
         # --- Profiles section ---
         profiles_section = _section(self._t("Profiles"))
 
@@ -7675,6 +7700,9 @@ class MainWindow(QMainWindow):
             cb = all_ctrl.get(key)
             if isinstance(cb, QCheckBox):
                 cb.stateChanged.connect(_ctrl_changed)
+        rpc_detail_w = all_ctrl.get("discord_rpc_detail")
+        if isinstance(rpc_detail_w, QLineEdit):
+            rpc_detail_w.textChanged.connect(_schedule_ctrl_save)
         for seg_key in ("update_branch", "ipset_mode", "gaming_mode", "tg_media_mode"):
             grp = all_ctrl.get(seg_key)
             if isinstance(grp, QButtonGroup):
@@ -7877,6 +7905,10 @@ class MainWindow(QMainWindow):
         val = _read_seg("tg_media_mode")
         if val:
             payload["tg_proxy_media_mode"] = val
+
+        inp = ctrl.get("discord_rpc_detail")
+        if isinstance(inp, QLineEdit):
+            payload["discord_rpc_detail"] = inp.text()
 
         before = self.context.settings.get()
         QTimer.singleShot(0, lambda p=payload, b=before: self._apply_settings_payload(b, p))
@@ -8500,6 +8532,12 @@ class MainWindow(QMainWindow):
         revision = self._settings_save_revision
         self._pending_settings_payload = dict(effective_payload)
         self.context.settings.update(**effective_payload)
+        if "discord_rpc_detail" in effective_payload:
+            current = self.context.settings.get()
+            if self.context.discord_rpc.is_running:
+                self.context.discord_rpc.update_presence(
+                    detail=current.discord_rpc_detail or "Использует для обхода блокировок.",
+                )
         if theme_changed:
             self._apply_theme()
         if language_changed:
@@ -11867,6 +11905,13 @@ class MainWindow(QMainWindow):
         self.power_button.setProperty("state", state_str)
         self._update_power_icon()
         self.power_button.setEnabled(not self._toggle_in_progress)
+        if fully_running:
+            self.context.discord_rpc.configure(
+                enabled=True,
+                detail=settings.discord_rpc_detail or "Использует для обхода блокировок.",
+            )
+        else:
+            self.context.discord_rpc.stop()
         if isinstance(self.power_button, AnimatedPowerButton):
             animate_power = not self._page_transition_running
             self.power_button.set_active_state(fully_running, animate=animate_power)

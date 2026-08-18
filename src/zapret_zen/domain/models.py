@@ -56,6 +56,8 @@ class AppSettings:
     selected_dns_preset: str = ""
     apply_update_on_next_launch: bool = False
     dismissed_component_updates: dict[str, str] = field(default_factory=dict)
+    discord_rpc_enabled: bool = True
+    discord_rpc_detail: str = "Использует для обхода блокировок."
 
 
 @dataclass(slots=True)
