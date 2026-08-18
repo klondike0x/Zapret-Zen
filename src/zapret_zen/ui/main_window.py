@@ -4384,6 +4384,7 @@ class MainWindow(QMainWindow):
         self._settings_save_acked_revision = 0
         self._loading_overlay_fade: QPropertyAnimation | None = None
         self._loading_overlay_context = ""
+        self._profile_restart_pending = False
         self._current_file_values_cache: list[str] = []
         self._file_tag_render_values: list[str] = []
         self._file_tag_render_index = 0
@@ -8744,6 +8745,13 @@ class MainWindow(QMainWindow):
             self._ensure_local_runtime_snapshot()
         if action in {"toggle_master_runtime", "start_enabled_components", "select_general"}:
             self._mark_dirty("dashboard", "components", "tray")
+            if action == "toggle_master_runtime" and self._profile_restart_pending:
+                self._profile_restart_pending = False
+                self._loading_action = "connect"
+                self._loading_frame = 0
+                self._state_generation += 1
+                self._submit_backend_task("toggle_master_runtime")
+                return
             self._ui_signals.toggle_done.emit()
             if action == "select_general":
                 self._ui_signals.component_action_done.emit("__general__")
@@ -8893,6 +8901,7 @@ class MainWindow(QMainWindow):
             self._mark_dirty("dashboard", "components", "tray")
             return
         if action in {"toggle_master_runtime", "start_enabled_components", "select_general"}:
+            self._profile_restart_pending = False
             self._ui_signals.toggle_done.emit()
             if action == "select_general":
                 self._ui_signals.component_action_done.emit("__general__")
@@ -13941,15 +13950,42 @@ class MainWindow(QMainWindow):
         return _Filter()
 
     def _switch_profile(self, profile_id: str) -> None:
+        if self._profile_restart_pending:
+            return
+        if profile_id == self._active_profile_id():
+            return
+        if self.context.profiles.get_profile(profile_id) is None:
+            return
         cb = self._save_active_profile_snapshot
         self.context.settings.remove_on_save_callback(cb)
         try:
             self.context.profiles.switch_profile(profile_id, self.context.settings)
         finally:
             self.context.settings.add_on_save_callback(cb)
-        QTimer.singleShot(0, self._apply_theme)
-        QTimer.singleShot(0, self._update_profile_carousel)
-        QTimer.singleShot(0, self.refresh_dashboard)
+        self._apply_theme()
+        self._update_profile_carousel()
+        states = self._component_states()
+        active_ids = self._master_active_components()
+        running_ids = {cid for cid in active_ids if states.get(cid) and states[cid].status == "running"}
+        if running_ids and self._startup_snapshot_ready and not self._toggle_in_progress:
+            self._profile_restart_pending = True
+            self._sync_power_aura_geometry()
+            self._loading_action = "disconnect"
+            self._partial_restart_count = 0
+            self._partial_restart_timer.stop()
+            self._toggle_in_progress = True
+            self.power_button.setEnabled(False)
+            if isinstance(self.power_button, AnimatedPowerButton):
+                self.power_button.play_wave(outward=False)
+            if self.power_aura is not None:
+                self.power_aura.play_wave(outward=False)
+            self._loading_frame = 0
+            self._loading_timer.start()
+            self._advance_loading_caption()
+            self._state_generation += 1
+            self._submit_backend_task("toggle_master_runtime")
+        else:
+            self.refresh_dashboard()
 
     def _update_profile_carousel(self) -> None:
         active = self._active_profile_id()

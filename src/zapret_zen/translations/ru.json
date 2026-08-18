@@ -274,5 +274,17 @@
   "Reinstall": "Переустановить",
   "Remove Zapret-Zen": "Удаление Zapret-Zen",
   "Uninstall started": "Удаление запущено",
-  "The app will be removed in a few seconds.": "Приложение будет удалено через несколько секунд."
+  "The app will be removed in a few seconds.": "Приложение будет удалено через несколько секунд.",
+  "Profiles": "Профили",
+  "+ Create": "+ Создать",
+  "Rename": "Переименовать",
+  "Delete": "Удалить",
+  "Create profile": "Создать профиль",
+  "Profile name:": "Название профиля:",
+  "Rename profile": "Переименовать профиль",
+  "New name:": "Новое название:",
+  "Delete profile": "Удалить профиль",
+  "Delete profile \"{name}\"? This action cannot be undone.": "Удалить профиль «{name}»? Это действие нельзя отменить.",
+  "Switching profile...": "Переключение профиля...",
+  "Applying profile settings...": "Применяем настройки профиля..."
 }

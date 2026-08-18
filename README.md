@@ -1,149 +1,169 @@
 <div align="center">
 
-# Zapret Zen
-
-Утилита для быстрого обхода блокировок на Windows
-
 <picture>
-  <img alt="Zapret-Zen banner" src="assets/Hello.png" width="720">
+  <img alt="Zapret-Zen banner" src="ui_assets/icons/app_large.png" width="200">
 </picture>
 
-[![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)](https://python.org)
-[![PySide6](https://img.shields.io/badge/PySide6-6.7%2B-41CD52?logo=qt&logoColor=white)](https://doc.qt.io/qtforpython/)
-[![License](https://img.shields.io/badge/License-MIT-yellow?logo=github)](LICENSE)
-[![Version](https://img.shields.io/badge/Version-2.1-blue?logo=github)](https://github.com/peshk0v/Zapret-Zen/releases)
+# ⚡ Zapret Zen
+
+**Утилита для удобного и быстрого обхода блокировок на Windows**
+
+<br />
+<br />
+
+[![Version](https://img.shields.io/github/v/release/peshk0v/Zapret-Zen?style=for-the-badge&logo=github&color=5865F2&label=Версия)](https://github.com/peshk0v/Zapret-Zen/releases)
+[![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
+[![PySide6](https://img.shields.io/badge/PySide6-6.7%2B-41CD52?style=for-the-badge&logo=qt&logoColor=white)](https://doc.qt.io/qtforpython/)
+[![License](https://img.shields.io/github/license/peshk0v/Zapret-Zen?style=for-the-badge&color=E0A96D&label=Лицензия)](LICENSE)
+[![Telegram](https://img.shields.io/badge/Telegram-Канал-26A5E4?style=for-the-badge&logo=telegram&logoColor=white)](https://t.me/zapzen)
 
 </div>
+
+---
 
 ## 🖼️ Скриншоты
 
 <div align="center">
 
 | Главная | Сервисы | Модификации |
-|:---:|:---:|:---:|
+| :---: | :---: | :---: |
 | <picture><source media="(prefers-color-scheme: dark)" srcset="assets/screenshot_dashboard_dark.png"><source media="(prefers-color-scheme: light)" srcset="assets/screenshot_dashboard_light.png"><img src="assets/screenshot_dashboard_light.png" width="280" alt="Главная"></picture> | <picture><source media="(prefers-color-scheme: dark)" srcset="assets/screenshot_services_dark.png"><source media="(prefers-color-scheme: light)" srcset="assets/screenshot_services_light.png"><img src="assets/screenshot_services_light.png" width="280" alt="Сервисы"></picture> | <picture><source media="(prefers-color-scheme: dark)" srcset="assets/screenshot_mods_dark.png"><source media="(prefers-color-scheme: light)" srcset="assets/screenshot_mods_light.png"><img src="assets/screenshot_mods_light.png" width="280" alt="Модификации"></picture> |
 
 </div>
+
+---
 
 ## ⚙️ Возможности
 
 | Функция | Описание |
 | :--- | :--- |
-| 🛡️ **Обход блокировок** | Управление компонентами zapret, tg-ws-proxy: запуск, остановка, статус, автозапуск |
-| 🎛️ **Пресеты сервисов** | Удобный выбор сервисов по категориям |
-| 🧩 **Система модов** | Устанавливайте, обновляйте и отключайте моды сообщества, расширяющие наборы правил |
-| 🎨 **Динамические темы** | Выбирайте режим (Light / Dark / OLED) и акцентный цвет — интерфейс адаптируется в реальном времени |
-| 🩺 **Диагностика** | Встроенные проверки системы: связность, DNS, здоровье компонентов |
-| ⚙️ **Автоконфигурация** | Автоматический выбор стратегии на основе выбранных сервисов |
-| 🔔 **Уведомления** | Внутренняя система уведомлений о событиях и обновлениях |
-| 📥 **Системный трей** | Сворачивание в трей и запуск в трее при автозагрузке |
-| 🔄 **Автообновления** | Проверка обновлений приложения и модов через GitHub Releases |
-| 🌐 **Локализация** | Полный перевод интерфейса на русский и английский языки |
+| 🛡️ **Обход блокировок** | Управление компонентами `zapret` и `tg-ws-proxy`: запуск, остановка, просмотр статуса, фоновый автозапуск |
+| 🎛️ **Пресеты сервисов** | Быстрый и удобный выбор сервисов, разбитых по категориям |
+| 🧩 **Система модов** | Установка, обновление и отключение пользовательских модов сообщества для расширения правил |
+| 🎨 **Динамические темы** | Кастомизация интерфейса: Light, Dark, OLED темы и настраиваемые акцентные цвета |
+| 🩺 **Диагностика** | Встроенный модуль проверки системы: тест связности, проверка DNS и целостности компонентов |
+| ⚙️ **Автоконфигурация** | Автоматический подбор оптимальной стратегии на основе выбранных сервисов |
+| 🔔 **Уведомления** | Нативная система информирования о событиях, ошибках и выходе обновлений |
+| 📥 **Системный трей** | Работа в фоновом режиме, сворачивание и тихий запуск при старте ОС |
+| 🔄 **Автообновления** | Автоматическая проверка свежих релизов приложения и модов прямо с GitHub |
+| 🌐 **Локализация** | Полная поддержка русского и английского языков |
+
+---
 
 ## 💻 Установка
 
-### Портативная (рекомендуется)
+### 📦 Портативная версия (Рекомендуется)
 
-1. Скачайте `zapret_zen_<version>_portable_win_<architecture>.zip` из [Releases](https://github.com/peshk0v/Zapret-Zen/releases) под свою процессорную архитектуру.
-2. Распакуйте в любую папку.
+1. Скачайте архив `zapret_zen_<version>_portable_win_<architecture>.zip` со страницы [Releases](https://github.com/peshk0v/Zapret-Zen/releases) под вашу архитектуру CPU.
+2. Распакуйте содержимое в удобную папку.
 3. Запустите `zapret_zen.exe`.
 
-### Установщик
+### 💿 Инсталлятор
 
-1. Скачайте `install_zapretzen_<version>_universal.exe` из [Releases](https://github.com/peshk0v/Zapret-Zen/releases).
-2. Запустите — установщик развернёт приложение и зарегистрирует запись в списке установленных программ.
+1. Скачайте файл `install_zapretzen_<version>_universal.exe` со страницы [Releases](https://github.com/peshk0v/Zapret-Zen/releases).
+2. Запустите мастер установки — он развернёт программу и добавит запись в стандартный список приложений Windows.
 
-## 📞 Обратная связь
-| Тип обращения | Ссылка |
-| :--- | :--- |
-| 🐛 **Сообщить об ошибке** | [Создать Issue](https://github.com/peshk0v/Zapret-Zen/issues/new) |
-| 🤔 **Вопрос или предложение** | [Перейти в Discussions](https://github.com/peshk0v/Zapret-Zen/discussions) |
-| 📰 **Новости и обновления** | [Подписаться в Telegram](https://t.me/zapzen) |
+---
 
-## 🛠️ Для разработчиков
+## 🛠️ Разработка и сборка
 
-### Требования
+### Системные требования
+* **Python**: `3.11+`
+* **ОС**: Windows 10 / 11
 
-- Python 3.11
-- Windows 10+
-
-### Настройка окружения
+### 1. Настройка окружения
 
 ```powershell
+# Создание и активация виртуального окружения
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
+
+# Установка зависимостей разработчика
 pip install -e .[dev]
+
 ```
 
-### Запуск из исходников
+### 2. Запуск из исходников
 
 ```powershell
 .\.venv\Scripts\python.exe -m zapret_zen.main
+
 ```
 
-### Сборка портативной версии
+### 3. Сборка Portable-версии
 
 ```powershell
 .\.venv\Scripts\python.exe scripts\sync_app_icon.py
 .\.venv\Scripts\pyinstaller.exe packaging/zapret_zen.spec --distpath dist_pyinstaller --workpath build_pyinst --noconfirm
+
 ```
 
-### Сборка установщика
+### 4. Сборка Инсталлятора
 
 ```powershell
-# После сборки портативной версии создайте архив с payload:
+# Формирование payload-архива
 $tempDir = Join-Path $env:TEMP "zapretzen_payload"
 $payloadRoot = Join-Path $tempDir "zapret_zen"
 Copy-Item -LiteralPath dist_pyinstaller\zapret_zen -Destination $payloadRoot -Recurse -Force
 Compress-Archive -Path (Join-Path $tempDir "*") -DestinationPath installer_payload\win_x64.zip -CompressionLevel Optimal -Force
 Remove-Item $tempDir -Recurse -Force
 
-# Соберите установщик:
+# Компиляция инсталлятора
 .\.venv\Scripts\pyinstaller.exe packaging/install_zapretzen.spec --distpath dist_installer --workpath build_installer --noconfirm
-```
 
-### Структура проекта
+---
 
-```
+## 📁 Структура проекта
+
+```text
 Zapret-Zen/
-├── assets/           # Исходники для README
-├── configs/          # Пользовательские конфиги (переопределение правил)
-├── data/             # Состояние приложения (настройки, профили, уведомления)
-├── installer/        # Исходный код установщика
+├── assets/           # Графические ресурсы для документации
+├── configs/          # Пользовательские конфиги и переопределения правил
+├── data/             # Состояние приложения (настройки, профили, кэш)
+├── installer/        # Исходный код мастера установки
 ├── mods/             # Установленные моды сообщества
-├── packaging/        # .spec файлы для PyInstaller
-├── runtime/          # Встроенные инструменты (zapret, tg-ws-proxy, dns-manager)
-├── scripts/          # Скрипты сборки, скриншотов и утилиты
+├── packaging/        # Файлы конфигурации .spec для PyInstaller
+├── runtime/          # Встроенные бинарники (zapret, tg-ws-proxy, dns-manager)
+├── scripts/          # Вспомогательные скрипты сборки и утилиты
 ├── src/zapret_zen/   # Исходный код приложения
 │   ├── domain/       # Модели данных (настройки, компоненты, сервисы)
-│   ├── services/     # Бизнес-логика (бэкенд, настройки, слияние, обновления)
-│   └── ui/           # Интерфейс PySide6
-├── themes/           # JSON-файлы пользовательских тем
-└── ui_assets/        # Иконки, шрифты, логотипы сервисов
+│   ├── services/     # Бизнес-логика, интеграции и бэкенд
+│   └── ui/           # Графический интерфейс на PySide6
+├── themes/           # JSON-файлы оформления тем
+└── ui_assets/        # Иконки (Flaticon), шрифты, логотипы
+
 ```
 
+---
 
-## 🧲 Используемые проекты
+## 🧲 Используемые компоненты
 
-| Инструмент | Автор |
-|------------|--------|
-| [zapret-discord-youtube](https://github.com/Flowseal/zapret-discord-youtube) | **Flowseal** |
-| [tg-ws-proxy](https://github.com/Flowseal/tg-ws-proxy) | **Flowseal** |
-| [zapret](https://github.com/bol-van/zapret-win-bundle) экосистема | **bol-van** |
+| Инструмент | Автор / Проект |
+| --- | --- |
+| **zapret-discord-youtube** | [Flowseal](https://github.com/Flowseal/zapret-discord-youtube) |
+| **tg-ws-proxy** | [Flowseal](https://github.com/Flowseal/tg-ws-proxy) |
+| **zapret ecosystem** | [bol-van](https://github.com/bol-van/zapret-win-bundle) |
 
 > [!CAUTION]
->
-> ### Авторство
-> **Zapret Zen** = модификация проекта [Zapret Hub](https://github.com/goshkow/Zapret-Hub) от [goshkow](https://github.com/goshkow).
->
-> Приложение не присваевает себе авторство встроенных инструментов, интерфейса и менеджера поверх этих инструментов. Пользователь может модифицировать файлы самостоятельно, но авторство оригинальных проектов сохраняется.
+> ### Авторство и правовая информация
 > 
-> В самой программе указаны инструменты и их авторы.
+> 
+> **Zapret Zen** является модификацией проекта **[Zapret Hub](https://github.com/goshkow/Zapret-Hub)** от [goshkow](https://github.com/goshkow).
+> Приложение не присваивает себе авторство встроенных утилит, оригинального интерфейса и менеджера. Пользователь вправе модифицировать файлы самостоятельно, однако авторские права оригинальных разработчиков сохраняются.
+> В графическом интерфейсе используются иконки Uicons, права на которые принадлежат [Flaticon](https://www.flaticon.com/uicons).
+
+---
+
+## 📞 Обратная связь
+
+| Назначение | Ссылка |
+| --- | --- |
+| 🐛 **Баг-трекер** | [Сообщить об ошибке](https://github.com/peshk0v/Zapret-Zen/issues/new) |
+| 💬 **Обсуждения** | [Задать вопрос или предложить идею](https://github.com/peshk0v/Zapret-Zen/discussions) |
+| 📢 **Новости** | [Telegram-канал проекта](https://t.me/zapzen) |
+
+---
 
 ## ©️ Лицензия
 
-[MIT](LICENSE), приложение использует Uicons от <a href="https://www.flaticon.com/uicons">Flaticon</a>
-- - -
-<div align="center">
-<img width="479" height="113" alt="image" src="https://github.com/user-attachments/assets/c7e3eb82-185f-4786-b2bc-72061fa3b018" />
-
+Распространяется под лицензией [MIT](https://www.google.com/search?q=LICENSE).
