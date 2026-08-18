@@ -19,45 +19,6 @@ RADIUS = 18
 PAGES = [(0, "dashboard"), (1, "services"), (3, "mods")]
 THEMES = ["light", "dark"]
 
-# Real catalog data from https://raw.githubusercontent.com/peshk0v/Zapret-Hub-Zen-Mods/refs/heads/main/catalog.json
-_CATALOG_DATA = [
-    {
-        "Title": "SoundCloud",
-        "Description": "Обход блокировок сервиса SoundCloud.",
-        "Author": "peshk0v",
-        "Tag": "SoundCloud-by-peshk0v",
-        "Version": "1.0.2"
-    },
-    {
-        "Title": "Roblox",
-        "Description": "Обход блокировок игры Roblox для тех регионов в которых он замедляется.",
-        "Author": "peshk0v",
-        "Tag": "Roblox-by-peshk0v",
-        "Version": "1.0.1"
-    },
-    {
-        "Title": "Twitch",
-        "Description": "Обход блокировок платформы для прямых трансляций Twitch.",
-        "Author": "peshk0v",
-        "Tag": "Twitch-by-peshk0v",
-        "Version": "1.0.1"
-    },
-    {
-        "Title": "X",
-        "Description": "Обход блокировок платформы X (бывший Twitter).",
-        "Author": "peshk0v",
-        "Tag": "X-by-peshk0v",
-        "Version": "1.0.1"
-    },
-    {
-        "Title": "Minecraft",
-        "Description": "Обход блокировок сайтов для загрузки модов, таких как Modrinth и CurseForge",
-        "Author": "peshk0v",
-        "Tag": "Minecraft-by-peshk0v",
-        "Version": "1.0.0"
-    }
-]
-
 
 def main():
     import multiprocessing
@@ -126,15 +87,6 @@ def main():
         result.putalpha(mask)
         return result
 
-    def open_mods_catalog():
-        mods_page = window._mods_page
-        mods_page._catalog_data = list(_CATALOG_DATA)
-        mods_page._catalog_loaded = True
-        mods_page._show_catalog()
-
-    def close_mods_catalog():
-        window._mods_page._show_local()
-
     theme_queue = list(THEMES)
     page_queue = []
 
@@ -157,10 +109,7 @@ def main():
         idx, name, theme = page_queue.pop()
         print(f"  Switching to page {idx} ({name})...")
         window._switch_page(idx)
-        if name == "mods":
-            QTimer.singleShot(600, lambda n=name, t=theme: open_mods_catalog() or QTimer.singleShot(400, lambda n=n, t=t: do_capture(n, t)))
-        else:
-            QTimer.singleShot(1000, lambda n=name, t=theme: do_capture(n, t))
+        QTimer.singleShot(1000, lambda n=name, t=theme: do_capture(n, t))
 
     def do_capture(name, theme):
         QCoreApplication.processEvents()
@@ -174,8 +123,6 @@ def main():
             import traceback
             print(f"    Error: {e}")
             traceback.print_exc()
-        if name == "mods":
-            QTimer.singleShot(100, lambda: close_mods_catalog())
         QTimer.singleShot(200, capture_next)
 
     print("Showing window...")

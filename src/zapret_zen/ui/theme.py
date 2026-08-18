@@ -331,15 +331,11 @@ def _build_base_css() -> tuple[str, str]:
         color: #d7e1f2;
         line-height: 1.3em;
     }
-    #ModsScroll, #ModsCanvas, #ComponentsScroll, #ComponentsCanvas, #ModsCatalogScroll, #ModsCatalogCanvas {
+    #ModsScroll, #ModsCanvas, #ComponentsScroll, #ComponentsCanvas {
         background: transparent;
         border: none;
     }
     #ComponentsScroll QScrollBar, #ComponentsCanvas QScrollBar, #ComponentsScroll QWidget#qt_scrollarea_viewport, #ComponentsCanvas QWidget#qt_scrollarea_viewport {
-        background: transparent;
-        border: none;
-    }
-    #ModsCatalogScroll > QWidget#qt_scrollarea_viewport {
         background: transparent;
         border: none;
     }
@@ -925,15 +921,11 @@ def _build_base_css() -> tuple[str, str]:
         color: #2a3648;
         line-height: 1.3em;
     }
-    #ModsScroll, #ModsCanvas, #ComponentsScroll, #ComponentsCanvas, #ModsCatalogScroll, #ModsCatalogCanvas {
+    #ModsScroll, #ModsCanvas, #ComponentsScroll, #ComponentsCanvas {
         background: transparent;
         border: none;
     }
     #ComponentsScroll QScrollBar, #ComponentsCanvas QScrollBar, #ComponentsScroll QWidget#qt_scrollarea_viewport, #ComponentsCanvas QWidget#qt_scrollarea_viewport {
-        background: transparent;
-        border: none;
-    }
-    #ModsCatalogScroll > QWidget#qt_scrollarea_viewport {
         background: transparent;
         border: none;
     }

@@ -777,20 +777,6 @@ def _handle_import_mod_from_github(context, payload, emit_progress):
     return result
 
 
-@_register_action("install_mod_from_catalog")
-def _handle_install_mod_from_catalog(context, payload, emit_progress):
-    tag = str(payload.get("tag", "")).strip()
-    version = str(payload.get("version", "")).strip()
-    with _reconfigure_zapret(context):
-        if tag:
-            context.mods.install_from_catalog(tag, version)
-    result = {"tag": tag}
-    result.update(_snapshot(context))
-    result.update(_mods_payload(context))
-    result["general_options"] = list(context.processes.list_zapret_generals())
-    return result
-
-
 @_register_action("import_mod_from_paths")
 def _handle_import_mod_from_paths(context, payload, emit_progress):
     raw_paths = payload.get("paths", []) or []
