@@ -8862,6 +8862,12 @@ class MainWindow(QMainWindow):
             self._ui_signals.component_action_done.emit(action_id)
             return
         if action == "set_selected_services":
+            if service_response_revision:
+                self._services_selection_acked_revision = max(
+                    self._services_selection_acked_revision,
+                    service_response_revision,
+                )
+                self._optimistic_selected_service_ids = None
             self._mark_dirty("dashboard", "services", "components", "files", "tray")
             return
         if action == "toggle_mod":
@@ -12209,6 +12215,7 @@ class MainWindow(QMainWindow):
         if selected == current:
             return
         self.context.settings.get().selected_zapret_general = selected
+        self.context.settings.save()
         states = self._component_states()
         zapret_running = states.get("zapret") and states["zapret"].status == "running"
         if zapret_running:
@@ -12231,6 +12238,8 @@ class MainWindow(QMainWindow):
             return
         if self._general_loading_combo is not None:
             return
+        self.context.settings.get().selected_zapret_general = selected
+        self.context.settings.save()
         self._general_loading_combo = combo
         self._general_loading_label = status_label
         combo.setEnabled(False)

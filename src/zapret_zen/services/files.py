@@ -5,6 +5,8 @@ import re
 import json
 
 from zapret_zen.domain.models import FileRecord
+from zapret_zen.services.service_catalog import ALWAYS_APPLY_SERVICE_IDS
+from zapret_zen.services.service_rules import SERVICE_RULES
 from zapret_zen.services.settings import SettingsManager
 from zapret_zen.services.storage import StorageManager
 
@@ -561,6 +563,19 @@ class FilesManager:
                         continue
                     seen.add(key)
                     entries.append(line)
+        if self.settings is not None:
+            settings = self.settings.get()
+            selected = set(settings.selected_service_ids or [])
+            for service_id in sorted(selected | set(ALWAYS_APPLY_SERVICE_IDS)):
+                rule = SERVICE_RULES.get(service_id)
+                if rule is None:
+                    continue
+                for entry in rule.hosts:
+                    key = " ".join(entry.split()).lower()
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    entries.append(entry)
         return entries
 
     def read_system_hosts(self) -> str:

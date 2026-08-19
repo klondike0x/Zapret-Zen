@@ -334,6 +334,18 @@ class ZapretRuntimeBuilder:
                         continue
                     seen.add(key)
                     entries.append(line)
+        settings = self.settings.get()
+        selected = set(settings.selected_service_ids or [])
+        for service_id in sorted(selected | set(ALWAYS_APPLY_SERVICE_IDS)):
+            rule = SERVICE_RULES.get(service_id)
+            if rule is None:
+                continue
+            for entry in rule.hosts:
+                key = " ".join(entry.split()).lower()
+                if key in seen:
+                    continue
+                seen.add(key)
+                entries.append(entry)
         return entries
 
     _SYSTEM_HOSTS_PATH = Path(r"C:\Windows\System32\drivers\etc\hosts")
@@ -384,8 +396,10 @@ class ZapretRuntimeBuilder:
             result += "\n"
         try:
             self._SYSTEM_HOSTS_PATH.write_text(result, encoding="utf-8")
-        except Exception:
-            pass
+        except PermissionError:
+            self.logging.log("error", "System hosts write failed: no permission", path=str(self._SYSTEM_HOSTS_PATH))
+        except Exception as exc:
+            self.logging.log("error", "System hosts write failed", error=str(exc))
 
     def _ensure_zapret_user_lists(self, lists_dir: Path) -> None:
         for filename in ("list-general-user.txt", "list-exclude-user.txt", "ipset-all-user.txt", "ipset-exclude-user.txt"):

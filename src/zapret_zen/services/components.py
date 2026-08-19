@@ -301,7 +301,7 @@ class ProcessManager:
                 if (worker and worker.poll() is None) or listening:
                     state.status = "running"
                     state.pid = worker.pid if worker and worker.poll() is None else None
-                else:
+                elif state.status != "error":
                     state.status = "stopped"
                     state.pid = None
             elif component.id == "dns-manager":
@@ -997,6 +997,7 @@ Get-NetAdapter -ErrorAction SilentlyContinue | ForEach-Object {
             tg_buf_kb=int(settings.tg_proxy_buf_kb or 256),
             tg_pool_size=int(settings.tg_proxy_pool_size or 4),
         )
+        self.logging.log("info", "TG WS Proxy starting", command=" ".join(command))
         process = subprocess.Popen(
             command,
             cwd=str(self.storage.paths.install_root),
@@ -1009,18 +1010,36 @@ Get-NetAdapter -ErrorAction SilentlyContinue | ForEach-Object {
         listen_host = settings.tg_proxy_host
         listen_port = int(settings.tg_proxy_port)
         ready = False
+        exit_code = None
         for _ in range(16):
-            if process.poll() is not None:
+            exit_code = process.poll()
+            if exit_code is not None:
                 break
             if self._is_port_listening(listen_host, listen_port):
                 ready = True
                 break
             time.sleep(0.35)
         if not ready:
+            if exit_code is None:
+                exit_code = process.poll()
             error_hint = "TG WS Proxy worker did not open listening port."
             worker_error_log = self.storage.paths.logs_dir / "tg_worker_error.log"
             if worker_error_log.exists():
-                error_hint = worker_error_log.read_text(encoding="utf-8")[-1000:]
+                try:
+                    error_hint = worker_error_log.read_text(encoding="utf-8")[-1000:]
+                except Exception:
+                    pass
+            if exit_code is not None:
+                error_hint += f" (exit code: {exit_code})"
+            try:
+                process.kill()
+            except Exception:
+                pass
+            try:
+                process.wait(timeout=2)
+            except Exception:
+                pass
+            self._close_source_log_stream("tg-ws-proxy")
             state = ComponentState(
                 component_id=component_id,
                 status="error",
