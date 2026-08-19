@@ -7130,11 +7130,22 @@ class MainWindow(QMainWindow):
         # --- Discord Rich Presence section ---
         rpc_section = _section("Discord Rich Presence")
 
+        discord_rpc_cb = QCheckBox(self._t("Включить"))
+        discord_rpc_cb.setChecked(settings.discord_rpc_enabled)
+        ctrl["discord_rpc"] = discord_rpc_cb
+        rpc_section.addWidget(discord_rpc_cb)
+
         rpc_detail_label = QLabel(self._t("Статус:"))
         rpc_detail_input = QLineEdit(settings.discord_rpc_detail)
         rpc_detail_input.setPlaceholderText(self._t("Текст статуса..."))
         rpc_detail_input.setMaxLength(128)
+        rpc_detail_input.setEnabled(settings.discord_rpc_enabled)
         ctrl["discord_rpc_detail"] = rpc_detail_input
+
+        def _rpc_toggled(checked: bool) -> None:
+            rpc_detail_input.setEnabled(checked)
+
+        discord_rpc_cb.toggled.connect(_rpc_toggled)
 
         rpc_row = QWidget()
         rpc_row.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
@@ -7696,7 +7707,7 @@ class MainWindow(QMainWindow):
         lang_grp = all_ctrl.get("language")
         if isinstance(lang_grp, QButtonGroup):
             lang_grp.idClicked.connect(_lang_changed)
-        for key in ("autostart", "tray", "auto_components", "check_updates", "tg_cfproxy", "tg_cfproxy_priority"):
+        for key in ("autostart", "tray", "auto_components", "check_updates", "tg_cfproxy", "tg_cfproxy_priority", "discord_rpc"):
             cb = all_ctrl.get(key)
             if isinstance(cb, QCheckBox):
                 cb.stateChanged.connect(_ctrl_changed)
@@ -7906,6 +7917,9 @@ class MainWindow(QMainWindow):
         if val:
             payload["tg_proxy_media_mode"] = val
 
+        cb = ctrl.get("discord_rpc")
+        if isinstance(cb, QCheckBox):
+            payload["discord_rpc_enabled"] = cb.isChecked()
         inp = ctrl.get("discord_rpc_detail")
         if isinstance(inp, QLineEdit):
             payload["discord_rpc_detail"] = inp.text()
@@ -8532,12 +8546,15 @@ class MainWindow(QMainWindow):
         revision = self._settings_save_revision
         self._pending_settings_payload = dict(effective_payload)
         self.context.settings.update(**effective_payload)
-        if "discord_rpc_detail" in effective_payload:
+        if "discord_rpc_enabled" in effective_payload or "discord_rpc_detail" in effective_payload:
             current = self.context.settings.get()
-            if self.context.discord_rpc.is_running:
-                self.context.discord_rpc.update_presence(
+            if current.discord_rpc_enabled:
+                self.context.discord_rpc.configure(
+                    enabled=True,
                     detail=current.discord_rpc_detail or "Использует для обхода блокировок.",
                 )
+            else:
+                self.context.discord_rpc.stop()
         if theme_changed:
             self._apply_theme()
         if language_changed:
@@ -11905,12 +11922,12 @@ class MainWindow(QMainWindow):
         self.power_button.setProperty("state", state_str)
         self._update_power_icon()
         self.power_button.setEnabled(not self._toggle_in_progress)
-        if fully_running:
+        if fully_running and settings.discord_rpc_enabled:
             self.context.discord_rpc.configure(
                 enabled=True,
                 detail=settings.discord_rpc_detail or "Использует для обхода блокировок.",
             )
-        else:
+        elif not fully_running or not settings.discord_rpc_enabled:
             self.context.discord_rpc.stop()
         if isinstance(self.power_button, AnimatedPowerButton):
             animate_power = not self._page_transition_running
