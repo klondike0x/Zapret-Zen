@@ -150,7 +150,7 @@ Zapret-Zen/
 > ### Авторство и правовая информация
 > 
 > 
-> **Zapret Zen** является модификацией проекта **[Zapret Hub](https://github.com/goshkow/Zapret-Hub)** от [goshkow](https://github.com/goshkow).
+> **Zapret Zen** является модификацией проекта **[Zapret Hub](https://github.com/goshkow/Zapret-Hub)** от [goshkow](https://github.com/goshkow), ныне поддерживающийся [klondike0x](https://github.com/klondike0x).
 > Приложение не присваивает себе авторство встроенных утилит, оригинального интерфейса и менеджера. Пользователь вправе модифицировать файлы самостоятельно, однако авторские права оригинальных разработчиков сохраняются.
 > В графическом интерфейсе используются иконки Uicons, права на которые принадлежат [Flaticon](https://www.flaticon.com/uicons).
 
