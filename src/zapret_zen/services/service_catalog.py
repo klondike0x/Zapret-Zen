@@ -35,7 +35,7 @@ SERVICE_CATEGORIES: tuple[ServiceCategory, ...] = (
         description_ru="Игровые платформы и лаунчеры",
         description_en="Games and launchers",
         icon_file="gaming.svg",
-        member_ids=("epic-games", "battle-net", "fortnite", "league-of-legends", "riot-games"),
+        member_ids=("epic-games", "battle-net", "fortnite", "league-of-legends", "riot-games", "roblox"),
     ),
     ServiceCategory(
         id="socials",

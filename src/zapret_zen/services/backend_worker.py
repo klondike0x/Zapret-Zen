@@ -931,6 +931,24 @@ def _handle_rebuild_merge_runtime(context, payload, emit_progress):
     return result
 
 
+@_register_action("apply_system_hosts")
+def _handle_apply_system_hosts(context, payload, emit_progress):
+    action = str(payload.get("action", "apply"))
+    if action == "revert":
+        ok, msg = context.files.revert_system_hosts()
+    else:
+        entries = context.files.collect_mod_hosts_entries()
+        ok, msg = context.files.apply_system_hosts(entries)
+    return {"ok": ok, "message": msg}
+
+
+@_register_action("load_system_hosts")
+def _handle_load_system_hosts(context, payload, emit_progress):
+    content = context.files.read_system_hosts()
+    entries = context.files.collect_mod_hosts_entries()
+    return {"content": content, "mod_entries": entries}
+
+
 @_register_action("set_favorite_generals")
 def _handle_set_favorite_generals(context, payload, emit_progress):
     favorites = [str(item).strip() for item in (payload.get("favorites", []) or []) if str(item).strip()]

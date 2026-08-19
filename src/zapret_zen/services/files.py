@@ -529,3 +529,97 @@ class FilesManager:
             if path.exists():
                 result.append(path)
         return result
+
+    SYSTEM_HOSTS_PATH = Path(r"C:\Windows\System32\drivers\etc\hosts")
+    _MARKER_START = "# === Zapret Zen START ==="
+    _MARKER_END = "# === Zapret Zen END ==="
+
+    def system_hosts_path(self) -> Path:
+        return self.SYSTEM_HOSTS_PATH
+
+    def collect_mod_hosts_entries(self) -> list[str]:
+        entries: list[str] = []
+        seen: set[str] = set()
+        installed = self.storage.read_json(self.storage.paths.data_dir / "installed_mods.json", default=[]) or []
+        for item in installed:
+            if not isinstance(item, dict):
+                continue
+            if not bool(item.get("enabled")):
+                continue
+            mod_path = Path(str(item.get("path", "")))
+            if not mod_path.exists():
+                continue
+            for candidate in [mod_path / "hosts", mod_path / "lists" / "hosts.txt", mod_path / "lists" / "hosts"]:
+                if not candidate.exists() or not candidate.is_file():
+                    continue
+                for raw in candidate.read_text(encoding="utf-8", errors="ignore").splitlines():
+                    line = raw.strip()
+                    if not line or line.startswith("#"):
+                        continue
+                    key = " ".join(line.split()).lower()
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    entries.append(line)
+        return entries
+
+    def read_system_hosts(self) -> str:
+        try:
+            return self.SYSTEM_HOSTS_PATH.read_text(encoding="utf-8", errors="ignore")
+        except Exception:
+            return ""
+
+    def apply_system_hosts(self, entries: list[str]) -> tuple[bool, str]:
+        try:
+            content = self.read_system_hosts()
+            lines = content.splitlines()
+
+            start_idx = -1
+            end_idx = -1
+            for i, line in enumerate(lines):
+                if line.strip() == self._MARKER_START:
+                    start_idx = i
+                elif line.strip() == self._MARKER_END:
+                    end_idx = i
+
+            if start_idx >= 0 and end_idx > start_idx:
+                before = lines[:start_idx]
+                after = lines[end_idx + 1:]
+            elif start_idx >= 0:
+                before = lines[:start_idx]
+                after = []
+            else:
+                before = lines
+                after = []
+
+            while before and not before[-1].strip():
+                before.pop()
+            while after and not after[0].strip():
+                after.pop(0)
+
+            new_lines = list(before)
+            if entries:
+                if new_lines and new_lines[-1].strip():
+                    new_lines.append("")
+                new_lines.append(self._MARKER_START)
+                for entry in entries:
+                    new_lines.append(entry)
+                new_lines.append(self._MARKER_END)
+            if after:
+                if new_lines and new_lines[-1].strip():
+                    new_lines.append("")
+                new_lines.extend(after)
+
+            result = "\n".join(new_lines)
+            if not result.endswith("\n"):
+                result += "\n"
+
+            self.SYSTEM_HOSTS_PATH.write_text(result, encoding="utf-8")
+            return True, ""
+        except PermissionError:
+            return False, "Недостаточно прав для записи системного файла hosts."
+        except Exception as exc:
+            return False, f"Ошибка записи hosts: {exc}"
+
+    def revert_system_hosts(self) -> tuple[bool, str]:
+        return self.apply_system_hosts([])

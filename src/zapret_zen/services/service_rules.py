@@ -128,6 +128,10 @@ SERVICE_RULES: dict[str, ServiceRule] = {
             "141.193.3.0/24",
             "205.201.62.0/24",
         ),
+        hosts=(
+            "23.47.124.101 tr.rbxcdn.com",
+            "23.47.124.78 tr.rbxcdn.com",
+        ),
         test_targets=(("Roblox", "https://www.roblox.com"), ("Roblox CDN", "https://setup.rbxcdn.com")),
     ),
     "tiktok": ServiceRule(

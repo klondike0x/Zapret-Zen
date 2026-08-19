@@ -4444,6 +4444,9 @@ class MainWindow(QMainWindow):
         self._files_tags_stack: QStackedWidget | None = None
         self._files_list_stack: QStackedWidget | None = None
         self._files_editor_stack: QStackedWidget | None = None
+        self._files_save_btn: QPushButton | None = None
+        self._files_system_hosts_apply_btn: QPushButton | None = None
+        self._files_system_hosts_revert_btn: QPushButton | None = None
         self._file_content_refresh_token = 0
         self._pending_file_content_path = ""
         self._preferred_file_path = ""
@@ -6734,6 +6737,15 @@ class MainWindow(QMainWindow):
                 "files.svg",
             ),
             (
+                self._t("Системный Hosts"),
+                self._t(
+                    "Добавить записи из модов в C:\\Windows\\System32\\drivers\\etc\\hosts.",
+                    "Add mod entries to C:\\Windows\\System32\\drivers\\etc\\hosts.",
+                ),
+                "system_hosts",
+                "files.svg",
+            ),
+            (
                 self._t("Advanced editor"),
                 self._t("Open the full file list and the text editor."),
                 "advanced",
@@ -6981,7 +6993,20 @@ class MainWindow(QMainWindow):
         save_btn = QPushButton(self._t("Save file"))
         save_btn.clicked.connect(self._save_current_file)
         self._attach_button_animations(save_btn)
+        self._files_save_btn = save_btn
+        system_hosts_apply_btn = QPushButton(self._t("Apply to system hosts"))
+        system_hosts_apply_btn.clicked.connect(self._apply_system_hosts)
+        self._attach_button_animations(system_hosts_apply_btn)
+        self._files_system_hosts_apply_btn = system_hosts_apply_btn
+        system_hosts_revert_btn = QPushButton(self._t("Revert system hosts"))
+        system_hosts_revert_btn.clicked.connect(self._revert_system_hosts)
+        self._attach_button_animations(system_hosts_revert_btn)
+        self._files_system_hosts_revert_btn = system_hosts_revert_btn
         right_layout.addWidget(save_btn)
+        right_layout.addWidget(system_hosts_apply_btn)
+        right_layout.addWidget(system_hosts_revert_btn)
+        system_hosts_apply_btn.hide()
+        system_hosts_revert_btn.hide()
         advanced_split.addWidget(right, 2)
         advanced_root.addLayout(advanced_split, 1)
 
@@ -8883,6 +8908,29 @@ class MainWindow(QMainWindow):
             self._mark_dirty("files", "logs")
             self._ui_signals.component_action_done.emit("__file_saved__")
             return
+        if action == "load_system_hosts" and isinstance(payload, dict):
+            content = str(payload.get("content", "") or "")
+            mod_entries = payload.get("mod_entries", [])
+            self.file_editor.setPlainText(content)
+            self._set_files_mode_loading(False)
+            if mod_entries:
+                mod_text = "\n".join(f"  {e}" for e in mod_entries)
+                header = self._t(
+                    f"Записи из модов ({len(mod_entries)}):\n{mod_text}\n\n---\n\n",
+                    f"Mod entries ({len(mod_entries)}):\n{mod_text}\n\n---\n\n",
+                )
+                self.file_editor.setPlainText(header + content)
+            return
+        if action == "apply_system_hosts" and isinstance(payload, dict):
+            ok = bool(payload.get("ok"))
+            msg = str(payload.get("message", "") or "")
+            if ok:
+                self._toast_notification("success", "Hosts", self._t("Системный hosts обновлён.", "System hosts updated."))
+                if self._current_file_list_filter == "system_hosts":
+                    self._submit_backend_task("load_system_hosts", action_id="__system_hosts__")
+            else:
+                self._toast_notification("error", "Hosts", msg or self._t("Ошибка", "Error"))
+            return
         if action == "rebuild_merge_runtime":
             self._ui_signals.component_action_done.emit("__merge_rebuild__")
             return
@@ -9944,8 +9992,32 @@ class MainWindow(QMainWindow):
             self._set_files_mode_loading(True)
             QTimer.singleShot(0, lambda: self._request_page_refresh("files"))
             return
+        if mode == "system_hosts":
+            self._cancel_file_tag_render()
+            self._current_file_list_filter = "system_hosts"
+            self._file_mode_stack.setCurrentIndex(2)
+            self.file_path_label.setText("C:\\Windows\\System32\\drivers\\etc\\hosts")
+            self.file_editor.setReadOnly(True)
+            self.file_editor.clear()
+            self.files_list.clear()
+            self._set_files_mode_loading(True)
+            if self._files_save_btn is not None:
+                self._files_save_btn.hide()
+            if self._files_system_hosts_apply_btn is not None:
+                self._files_system_hosts_apply_btn.show()
+            if self._files_system_hosts_revert_btn is not None:
+                self._files_system_hosts_revert_btn.show()
+            self._submit_backend_task("load_system_hosts", action_id="__system_hosts__")
+            return
+        self.file_editor.setReadOnly(False)
         self._cancel_file_tag_render()
         self._current_file_list_filter = "all"
+        if self._files_save_btn is not None:
+            self._files_save_btn.show()
+        if self._files_system_hosts_apply_btn is not None:
+            self._files_system_hosts_apply_btn.hide()
+        if self._files_system_hosts_revert_btn is not None:
+            self._files_system_hosts_revert_btn.hide()
         self._use_file_search_variant("tags")
         self._file_search_mode = "tags"
         self._current_file_collection = mode
@@ -11230,6 +11302,8 @@ class MainWindow(QMainWindow):
         self._request_file_content(full_path)
 
     def _save_current_file(self) -> None:
+        if self._current_file_list_filter == "system_hosts":
+            return
         full_path = self._selected_file_path()
         if not full_path:
             self._show_info(self._t("Files"), self._t("Select a file before saving."))
@@ -11239,6 +11313,12 @@ class MainWindow(QMainWindow):
             {"path": full_path, "content": self.file_editor.toPlainText()},
             action_id="__file_saved__",
         )
+
+    def _apply_system_hosts(self) -> None:
+        self._submit_backend_task("apply_system_hosts", {"action": "apply"})
+
+    def _revert_system_hosts(self) -> None:
+        self._submit_backend_task("apply_system_hosts", {"action": "revert"})
 
     def _toggle_file_search(self, expanded: bool | None = None) -> None:
         panel = self._file_search_panel
