@@ -146,22 +146,6 @@ def _prime_first_run_state(settings: SettingsManager, processes: ProcessManager)
         changes["zapret_ipset_mode"] = "loaded"
     if str(current.zapret_game_filter_mode or "").strip() not in {"disabled", "tcp", "udp", "tcpudp"}:
         changes["zapret_game_filter_mode"] = "disabled"
-    if "fortnite" in set(current.selected_service_ids or []):
-        changes["zapret_ipset_mode"] = "any"
-        changes["zapret_game_filter_mode"] = "tcpudp"
-        options = list(processes.list_zapret_generals())
-        for wanted in FORTNITE_GENERAL_PRIORITY:
-            match = next(
-                (
-                    option
-                    for option in options
-                    if str(option.get("name", "")).strip().lower() == wanted.lower()
-                ),
-                None,
-            )
-            if match is not None:
-                changes["selected_zapret_general"] = str(match.get("id", "") or "")
-                break
     if changes:
         settings.update(**changes)
 

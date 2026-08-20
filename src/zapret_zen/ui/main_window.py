@@ -12987,12 +12987,6 @@ class MainWindow(QMainWindow):
             "zapret_ipset_mode": "any",
             "zapret_game_filter_mode": "tcpudp",
         }
-        options = self._general_options_for_current_service_tests(self._sorted_general_options())
-        for wanted in FORTNITE_GENERAL_PRIORITY:
-            match = next((option for option in options if str(option.get("name", "")).strip().lower() == wanted.lower()), None)
-            if match is not None and str(match.get("id", "")).strip():
-                changes["selected_zapret_general"] = str(match["id"])
-                break
         self.context.settings.update(**changes)
 
     def _on_service_card_toggled(self, service_id: str, selected: bool) -> None:

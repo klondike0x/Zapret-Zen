@@ -198,14 +198,10 @@ def _preferred_fortnite_general_id(context) -> str:
     return ""
 
 def _fortnite_zapret_settings(context) -> dict[str, str]:
-    changes = {
+    return {
         "zapret_ipset_mode": "any",
         "zapret_game_filter_mode": "tcpudp",
     }
-    general_id = _preferred_fortnite_general_id(context)
-    if general_id:
-        changes["selected_zapret_general"] = general_id
-    return changes
 
 def _attach_telegram_proxy_info(context, result: dict[str, Any]) -> None:
     try:

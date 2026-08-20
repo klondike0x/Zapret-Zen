@@ -1260,10 +1260,7 @@ Get-NetAdapter -ErrorAction SilentlyContinue | ForEach-Object {
         selected = settings.selected_zapret_general
         picked = next((item for item in options if item["id"] == selected), None)
         if picked is None:
-            preferred = options[0]
-            selected = preferred["id"]
-            self.settings.update(selected_zapret_general=selected)
-            picked = preferred
+            picked = options[0]
         return picked
 
     def _prepare_active_zapret_runtime(self, selected_bundle_root: Path, selected_bundle_id: str, selected_script_name: str) -> Path:
