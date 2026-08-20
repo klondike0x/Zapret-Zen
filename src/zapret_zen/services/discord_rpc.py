@@ -60,7 +60,6 @@ class DiscordRPCService:
     def _set_activity(self, rpc, detail: str) -> bool:
         try:
             rpc.update(
-                state="Zapret Zen",
                 details=detail,
                 large_image="ds_icon",
                 large_text="Zapret Zen",

@@ -3965,8 +3965,8 @@ class SettingsDialog(AppDialog):
     def _sync_tg_media_mode_from_dc_ip(self, value: str) -> None:
         normalized = "\n".join(line.strip() for line in str(value or "").splitlines() if line.strip())
         mapping = {
-            "2:149.154.167.220\n4:149.154.167.220": "default",
-            "4:149.154.167.220": "media_fix",
+            "2:149.154.167.51\n4:149.154.167.91": "default",
+            "4:149.154.167.91": "media_fix",
             "": "empty",
         }
         mode = mapping.get(normalized, "default")
@@ -3979,11 +3979,11 @@ class SettingsDialog(AppDialog):
     def _apply_tg_media_preset(self) -> None:
         mode = str(self.tg_media_mode_combo.currentData() or "default")
         if mode == "media_fix":
-            self.tg_dc_ip_input.setPlainText("4:149.154.167.220")
+            self.tg_dc_ip_input.setPlainText("4:149.154.167.91")
         elif mode == "empty":
             self.tg_dc_ip_input.setPlainText("")
         else:
-            self.tg_dc_ip_input.setPlainText("2:149.154.167.220\n4:149.154.167.220")
+            self.tg_dc_ip_input.setPlainText("2:149.154.167.51\n4:149.154.167.91")
 
 
 # ── SettingsTabBar ──────────────────────────────────────────────────────────
@@ -7455,11 +7455,11 @@ class MainWindow(QMainWindow):
                 return
             mode = str(getattr(btn, "_seg_value", "default"))
             if mode == "media_fix":
-                tg_dc.setPlainText("4:149.154.167.220")
+                tg_dc.setPlainText("4:149.154.167.91")
             elif mode == "empty":
                 tg_dc.setPlainText("")
             else:
-                tg_dc.setPlainText("2:149.154.167.220\n4:149.154.167.220")
+                tg_dc.setPlainText("2:149.154.167.51\n4:149.154.167.91")
 
         media_grp.idClicked.connect(_apply_tg_media_preset)
         tg_section.addWidget(QLabel("DC -> IP"))

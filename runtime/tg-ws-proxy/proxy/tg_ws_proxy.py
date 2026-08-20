@@ -561,7 +561,7 @@ def main():
                     help='MTProto proxy secret (32 hex chars). '
                          'Auto-generated if not provided.')
     ap.add_argument('--dc-ip', metavar='DC:IP', action='append',
-                    help='Target IP for a DC, e.g. --dc-ip 2:149.154.167.220')
+                    help='Target IP for a DC, e.g. --dc-ip 2:149.154.167.51')
     ap.add_argument('-v', '--verbose', action='store_true',
                     help='Debug logging')
     ap.add_argument('--log-file', type=str, default=None, metavar='PATH',
@@ -595,7 +595,7 @@ def main():
     args = ap.parse_args()
 
     if not args.dc_ip:
-        args.dc_ip = ['2:149.154.167.220', '4:149.154.167.220']
+        args.dc_ip = ['2:149.154.167.51', '4:149.154.167.91']
 
     try:
         dc_redirects = parse_dc_ip_list(args.dc_ip)

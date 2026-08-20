@@ -123,7 +123,7 @@ class SettingsManager:
             if token and ":" in token:
                 dc_ips_present.add(token.split(":")[0])
         if "2" not in dc_ips_present and "4" in dc_ips_present:
-            settings.tg_proxy_dc_ip = "2:149.154.167.220\n4:149.154.167.220"
+            settings.tg_proxy_dc_ip = "2:149.154.167.51\n4:149.154.167.91"
             changed = True
 
         selected_service_ids = raw.get("selected_service_ids", [])
