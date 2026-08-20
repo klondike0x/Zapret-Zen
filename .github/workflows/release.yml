@@ -146,6 +146,7 @@ jobs:
           Remove-Item .\dist_installer -Recurse -Force -ErrorAction SilentlyContinue
           Remove-Item .\.nuitka_staging -Recurse -Force -ErrorAction SilentlyContinue
           Remove-Item .\.artifacts -Recurse -Force -ErrorAction SilentlyContinue
+          Remove-Item .\installer_payload -Recurse -Force -ErrorAction SilentlyContinue
           Remove-Item .\release_* -Recurse -Force -ErrorAction SilentlyContinue
 
       - name: Set up Python
@@ -218,8 +219,7 @@ jobs:
         shell: pwsh
         run: |
           $version = "${{ steps.meta.outputs.version }}"
-          $tag = "${{ steps.meta.outputs.tag }}"
-          .\scripts\build_nuitka_installer.ps1 -Python python -OutputDir dist_installer -Version $version -Tag $tag
+          .\scripts\build_nuitka_installer.ps1 -Python python -PayloadDir installer_payload -OutputDir dist_installer -SkipPrepareRelease -Version $version
 
       - name: Place installer into release folder
         shell: pwsh
