@@ -4344,6 +4344,7 @@ class MainWindow(QMainWindow):
         self._tray_general_action_group: QActionGroup | None = None
         self._update_check_in_progress = False
         self._update_prepare_dialog: AppDialog | None = None
+        self._update_prepare_cancelled = False
         self._component_update_queue: list = []
         self._update_check_dialog: AppDialog | None = None
         self._update_check_label: QLabel | None = None
@@ -8153,11 +8154,13 @@ class MainWindow(QMainWindow):
             self._window_opacity_animation.stop()
         self._window_fade_pending_action = None
         self.setWindowOpacity(1.0)
+        self._toast_notification("info", self._t("Updates"), self._t("Restarting the application..."))
+        QCoreApplication.processEvents()
         self.hide()
-        self._shutdown_runtime(blocking=True)
+        self._shutdown_runtime(blocking=False)
         app = QCoreApplication.instance()
         if app is not None:
-            QTimer.singleShot(0, app.quit)
+            QTimer.singleShot(400, app.quit)
 
     def _finalize_exit(self) -> None:
         self._shutdown_runtime(blocking=False)
@@ -10880,6 +10883,7 @@ class MainWindow(QMainWindow):
             return
         if self._update_prepare_dialog is not None:
             return
+        self._update_prepare_cancelled = False
         dialog = AppDialog(self, self.context, self._t("Preparing update"))
         label = QLabel(self._t("Preparing update from file..."))
         label.setWordWrap(True)
@@ -10887,6 +10891,12 @@ class MainWindow(QMainWindow):
         bar = QProgressBar()
         bar.setRange(0, 0)
         dialog.body_layout.addWidget(bar)
+        cancel_btn = QPushButton(self._t("Cancel"))
+        cancel_btn.setObjectName("DialogSecondaryButton")
+        cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        cancel_btn.setMinimumHeight(36)
+        cancel_btn.clicked.connect(lambda: self._cancel_update_prepare(dialog))
+        dialog.body_layout.addWidget(cancel_btn)
         dialog.prepare_and_center()
         dialog.show()
         self._update_prepare_dialog = dialog
@@ -10996,22 +11006,20 @@ class MainWindow(QMainWindow):
                 self._last_prompted_update_version = prompt_key
                 self._show_update_prompt(release)
             return
-        if manual:
-            if status == "up-to-date":
-                self._show_info(
-                    self._t("Updates"),
-                    self._t(
-                        f"У вас уже установлена последняя версия: {release.get('current_version', '')}.",
-                        f"You already have the latest version: {release.get('current_version', '')}.",
-                    ),
-                )
-            else:
-                message = str(release.get("error", self._t("Failed to check for updates.")))
-                self._toast_notification("error", self._t("Updates"), message)
-                self._show_error(
-                    self._t("Updates"),
-                    message,
-                )
+        if status == "error":
+            message = str(release.get("error", self._t("Failed to check for updates.")))
+            self._toast_notification("error", self._t("Updates"), message)
+            if manual:
+                self._show_error(self._t("Updates"), message)
+            return
+        if manual and status == "up-to-date":
+            self._show_info(
+                self._t("Updates"),
+                self._t(
+                    f"У вас уже установлена последняя версия: {release.get('current_version', '')}.",
+                    f"You already have the latest version: {release.get('current_version', '')}.",
+                ),
+            )
 
     def _show_update_check_dialog(self) -> None:
         if self._update_check_dialog is not None:
@@ -11235,6 +11243,7 @@ class MainWindow(QMainWindow):
             self.context.settings.update(apply_update_on_next_launch=False)
         if self._update_prepare_dialog is not None:
             return
+        self._update_prepare_cancelled = False
         dialog = AppDialog(self, self.context, self._t("Preparing update"))
         label = QLabel(self._t("Downloading and preparing the new version. The app will restart automatically."))
         label.setWordWrap(True)
@@ -11242,11 +11251,22 @@ class MainWindow(QMainWindow):
         bar = QProgressBar()
         bar.setRange(0, 0)
         dialog.body_layout.addWidget(bar)
+        cancel_btn = QPushButton(self._t("Cancel"))
+        cancel_btn.setObjectName("DialogSecondaryButton")
+        cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        cancel_btn.setMinimumHeight(36)
+        cancel_btn.clicked.connect(lambda: self._cancel_update_prepare(dialog))
+        dialog.body_layout.addWidget(cancel_btn)
         dialog.prepare_and_center()
         dialog.show()
         self._update_prepare_dialog = dialog
         thread = threading.Thread(target=self._run_update_prepare_worker, args=(release,), daemon=True)
         thread.start()
+
+    def _cancel_update_prepare(self, dialog: AppDialog) -> None:
+        self._update_prepare_cancelled = True
+        dialog.reject()
+        self._update_prepare_dialog = None
 
     def _run_update_prepare_worker(self, release: dict[str, str]) -> None:
         try:
@@ -11263,6 +11283,9 @@ class MainWindow(QMainWindow):
             self._ui_signals.update_prepare_done.emit({"ok": False, "error": str(error)})
 
     def _on_update_prepare_done(self, payload: object) -> None:
+        if getattr(self, "_update_prepare_cancelled", False):
+            self._update_prepare_cancelled = False
+            return
         if self._update_prepare_dialog is not None:
             self._update_prepare_dialog.accept()
             self._update_prepare_dialog = None

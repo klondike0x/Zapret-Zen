@@ -103,7 +103,7 @@ function Overlay-Tree([string]$sourceDir, [string]$targetDir, [string[]]$preserv
   }
 }
 
-for ($i = 0; $i -lt 120; $i++) {
+for ($i = 0; $i -lt 40; $i++) {
   if (-not (Get-Process -Id $pidToWait -ErrorAction SilentlyContinue)) { break }
   Start-Sleep -Milliseconds 250
 }
@@ -111,7 +111,7 @@ for ($i = 0; $i -lt 120; $i++) {
 if (Get-Process -Id $pidToWait -ErrorAction SilentlyContinue) {
   Add-Content -LiteralPath $logPath -Value ('[' + (Get-Date -Format s) + '] forcing old process stop')
   Stop-Process -Id $pidToWait -Force -ErrorAction SilentlyContinue
-  for ($i = 0; $i -lt 40; $i++) {
+  for ($i = 0; $i -lt 20; $i++) {
     if (-not (Get-Process -Id $pidToWait -ErrorAction SilentlyContinue)) { break }
     Start-Sleep -Milliseconds 250
   }
