@@ -59,7 +59,7 @@ if (-not $SkipPrepareRelease) {
   --onefile `
   --assume-yes-for-downloads `
   --no-deployment-flag=self-execution `
-  --mingw64 `
+  --msvc=latest `
   --enable-plugin=pyside6 `
   --windows-console-mode=disable `
   --windows-uac-admin `
