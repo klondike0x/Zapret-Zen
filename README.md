@@ -12,8 +12,7 @@
 <br />
 
 [![Version](https://img.shields.io/github/v/release/peshk0v/Zapret-Zen?style=for-the-badge&logo=github&color=5865F2&label=Версия)](https://github.com/peshk0v/Zapret-Zen/releases)
-[![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
-[![Views](https://img.shields.io/endpoint?url=https://hits.dwyl.com/peshk0v/Zapret-Zen.json&style=for-the-badge&color=42a5f5&label=Views)](https://github.com/peshk0v/Zapret-Zen)
+[![Views](https://img.shields.io/endpoint?url=https://hits.dwyl.com/peshk0v/Zapret-Zen.json&style=for-the-badge&color=42a5f5&label=Просмотров)](https://github.com/peshk0v/Zapret-Zen)
 [![License](https://img.shields.io/github/license/peshk0v/Zapret-Zen?style=for-the-badge&color=E0A96D&label=Лицензия)](LICENSE)
 [![Downloads](https://img.shields.io/github/downloads/peshk0v/Zapret-Zen/total?style=for-the-badge&color=2ea44f&label=Скачиваний)](https://github.com/peshk0v/Zapret-Zen/releases)
 
