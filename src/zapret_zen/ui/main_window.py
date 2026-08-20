@@ -8824,8 +8824,7 @@ class MainWindow(QMainWindow):
                 self._schedule_full_locale_theme_refresh()
             self._mark_dirty("dashboard", "services", "components", "mods", "files", "logs", "tray")
         if action == "start_enabled_components":
-            self._component_states_cache = {}
-            self._ensure_local_runtime_snapshot()
+            pass
         if action in {"toggle_master_runtime", "start_enabled_components", "select_general"}:
             self._mark_dirty("dashboard", "components", "tray")
             if action == "toggle_master_runtime" and self._profile_restart_pending:
