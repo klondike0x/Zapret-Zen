@@ -15,7 +15,7 @@
 [![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?style=for-the-badge&logo=python&logoColor=white)](https://python.org)
 [![Views](https://img.shields.io/endpoint?url=https://hits.dwyl.com/peshk0v/Zapret-Zen.json&style=for-the-badge&color=42a5f5&label=Views)](https://github.com/peshk0v/Zapret-Zen)
 [![License](https://img.shields.io/github/license/peshk0v/Zapret-Zen?style=for-the-badge&color=E0A96D&label=Лицензия)](LICENSE)
-[![Telegram](https://img.shields.io/badge/Telegram-Канал-26A5E4?style=for-the-badge&logo=telegram&logoColor=white)](https://t.me/zapzen)
+[![Downloads](https://img.shields.io/github/downloads/peshk0v/Zapret-Zen/total?style=for-the-badge&color=2ea44f&label=Скачиваний)](https://github.com/peshk0v/Zapret-Zen/releases)
 
 </div>
 
