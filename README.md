@@ -55,7 +55,7 @@
 
 > Подробная инструкция по установке, созданию и публикации собственных модов — в **[документации по модам](https://github.com/peshk0v/Zapret-Zen/wiki/%D0%9C%D0%BE%D0%B4%D0%B8%D1%84%D0%B8%D0%BA%D0%B0%D1%86%D0%B8%D0%B8#13-доверенные-каталоги-модов-от-сообщества)**.
 
-<a href="https://github.com/peshk0v/Zapret-Mods/releases/latest">
+<a href="https://github.com/peshk0v/Zapret-Mods/">
   <img src="https://img.shields.io/badge/Скачать_моды-Zapret--Mods-fc428?style=for-the-badge&logo=github" alt="Скачать моды" />
 </a>
 
