@@ -1,12 +1,8 @@
 ﻿param(
     [string]$Python = ".\.venv\Scripts\python.exe",
-    [string]$PayloadDir = "installer_payload",
     [string]$OutputDir = "dist_installer",
-    [string]$ReleaseDir = "",
-    [string]$X64Source = "",
-    [string]$Arm64Source = "",
-    [switch]$SkipPrepareRelease,
-    [string]$Version = ""
+    [string]$Version = "",
+    [string]$Tag = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -25,35 +21,21 @@ if (-not $Version) {
 }
 $nuitkaVersion = & $Python -c "import re; m=re.search(r'^(\d+(?:\.\d+)*)','$Version'.strip()); parts=tuple(int(x) for x in (m.group(1) if m else '0').split('.')[:4]); print('.'.join(str(p) for p in parts))"
 
-if (-not $ReleaseDir) {
-    $ReleaseDir = "release_$Version"
-}
-
 $installerPy = Join-Path $root "installer" "install_zapretzen.py"
 $content = Get-Content $installerPy -Raw -Encoding UTF8
 $content = $content -replace '(?<=INSTALLER_VERSION\s*=\s*")[^"]*', $Version
+if ($Tag) {
+    $content = $content -replace '(?<=DEFAULT_RELEASE_TAG\s*=\s*")[^"]*', $Tag
+    Write-Host "Injected DEFAULT_RELEASE_TAG=$Tag into installer source"
+} else {
+    $content = $content -replace '(?<=DEFAULT_RELEASE_TAG\s*=\s*")[^"]*', "v$Version"
+    Write-Host "Injected DEFAULT_RELEASE_TAG=v$Version into installer source"
+}
 Set-Content $installerPy -NoNewLine -Encoding UTF8 -Value $content
 Write-Host "Injected INSTALLER_VERSION=$Version into installer source"
 
 & $Python scripts\sync_app_icon.py
 if ($LASTEXITCODE -ne 0) { throw "sync_app_icon.py failed with exit code $LASTEXITCODE" }
-if (-not $SkipPrepareRelease) {
-    $prepareArgs = @(
-        "scripts\prepare_nuitka_release.py",
-        "--payload-dir",
-        $PayloadDir,
-        "--release-dir",
-        $ReleaseDir
-    )
-    if ($X64Source) {
-        $prepareArgs += @("--x64-source", $X64Source)
-    }
-    if ($Arm64Source) {
-        $prepareArgs += @("--arm64-source", $Arm64Source)
-    }
-    & $Python @prepareArgs
-    if ($LASTEXITCODE -ne 0) { throw "prepare_nuitka_release.py failed with exit code $LASTEXITCODE" }
-}
 
 & $Python -m nuitka `
   --onefile `
@@ -72,8 +54,6 @@ if (-not $SkipPrepareRelease) {
   --copyright="peshk0v" `
   --output-dir=$OutputDir `
   --output-filename="install_zapretzen_${Version}_universal.exe" `
-  --include-data-dir=$PayloadDir=installer_payload `
-  --include-data-dir=ui_assets=ui_assets `
   --nofollow-import-to=tkinter `
   --remove-output `
   installer\install_zapretzen.py

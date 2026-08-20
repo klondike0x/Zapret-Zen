@@ -2,6 +2,8 @@
 
 import ctypes
 import base64
+import json
+import re
 from datetime import datetime
 import locale
 import os
@@ -13,6 +15,8 @@ import tempfile
 import time
 import zipfile
 from pathlib import Path
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
 from installer.embedded_app_icon import APP_PNG_BASE64
 from PySide6.QtCore import QEasingCurve, QEvent, QObject, Property, QPropertyAnimation, QRectF, QSize, QThread, QTimer, Qt, Signal
@@ -20,6 +24,7 @@ from PySide6.QtGui import QColor, QIcon, QImage, QMouseEvent, QPainter, QPen, QP
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
+    QComboBox,
     QDialog,
     QFileDialog,
     QFrame,
@@ -39,10 +44,15 @@ if sys.platform.startswith("win"):
     import winreg
 
 INSTALLER_VERSION = "__BUILD_VERSION__"
+DEFAULT_RELEASE_TAG = "__BUILD_TAG__"
+GITHUB_REPO = "peshk0v/Zapret-Zen"
+GITHUB_API = "https://api.github.com"
+GITHUB_HEADERS = {"Accept": "application/vnd.github+json", "User-Agent": f"ZapretZen-Installer/{INSTALLER_VERSION}"}
+
 
 def _is_ru() -> bool:
     try:
-        lang = (locale.getdefaultlocale()[0] or "").lower()  # type: ignore[call-arg]
+        lang = (locale.getdefaultlocale()[0] or "").lower()
     except Exception:
         lang = ""
     return lang.startswith("ru")
@@ -75,7 +85,6 @@ def _detect_system_theme() -> str:
     except Exception:
         return "dark"
 
-_RU_TRANSLATIONS: dict[str, str] = {}
 
 _RU_TRANSLATIONS: dict[str, str] = {
     "No": "Нет",
@@ -96,11 +105,140 @@ _RU_TRANSLATIONS: dict[str, str] = {
     "Remove Zapret-Zen": "Удаление Zapret-Zen",
     "Uninstall started": "Удаление запущено",
     "The app will be removed in a few seconds.": "Приложение будет удалено через несколько секунд.",
+    "Uninstall": "Удалить",
+    "Branch / Release": "Ветка / Релиз",
+    "Select version to download": "Выберите версию для скачивания",
+    "Loading releases...": "Загрузка релизов...",
+    "No internet connection": "Нет подключения к интернету",
+    "Download": "Скачать",
+    "Downloading...": "Скачивание...",
+    "Extracting...": "Извлечение...",
+    "Error": "Ошибка",
+    "Launch Zapret-Zen": "Запустить Zapret-Zen",
+    "This installer deploys Zapret-Zen and automatically picks the proper build for your system.":
+        "Установщик скачает и развернёт Zapret-Zen для вашей системы.",
+    "Do you want to reinstall the app and remove all data, or update it while keeping all of your user data?":
+        "Хотите переустановить приложение (с удалением данных) или обновить, сохранив ваши данные?",
+    "Remove Zapret-Zen and all data inside the install folder?\n\nExternal folders and third-party files will not be touched.":
+        "Удалить Zapret-Zen и все данные в папке установки?\n\nВнешние папки и сторонние файлы не будут затронуты.",
+    "Pre-release": "Предрелиз",
 }
+
 
 def tr(en: str) -> str:
     return _RU_TRANSLATIONS.get(en, en) if RU else en
 
+
+# ---------------------------------------------------------------------------
+# GitHub API
+# ---------------------------------------------------------------------------
+
+def _github_json(url: str) -> list | dict:
+    req = Request(url, headers=GITHUB_HEADERS)
+    ctx = _ssl_context()
+    with urlopen(req, context=ctx, timeout=20) as resp:
+        return json.loads(resp.read().decode("utf-8"))
+
+
+def _ssl_context():
+    import ssl
+    ctx = ssl.create_default_context()
+    try:
+        import certifi
+        ctx.load_verify_locations(certifi.where())
+    except Exception:
+        pass
+    return ctx
+
+
+def _github_download(url: str, dest: Path, progress_cb=None) -> None:
+    req = Request(url, headers=GITHUB_HEADERS)
+    ctx = _ssl_context()
+    with urlopen(req, context=ctx, timeout=300) as resp:
+        total = int(resp.headers.get("Content-Length", 0))
+        downloaded = 0
+        chunk_size = 256 * 1024
+        with open(dest, "wb") as f:
+            while True:
+                chunk = resp.read(chunk_size)
+                if not chunk:
+                    break
+                f.write(chunk)
+                downloaded += len(chunk)
+                if progress_cb and total:
+                    progress_cb(downloaded, total)
+
+
+def fetch_releases() -> list[dict]:
+    try:
+        data = _github_json(f"{GITHUB_API}/repos/{GITHUB_REPO}/releases?per_page=30")
+        if isinstance(data, list):
+            return data
+    except Exception:
+        pass
+    return []
+
+
+def _pick_portable_asset(release: dict, arch: str) -> dict | None:
+    pattern = re.compile(rf"portable.*win_{arch}\.zip$")
+    for asset in release.get("assets", []):
+        name = asset.get("name", "")
+        if pattern.search(name):
+            return asset
+    return None
+
+
+def _native_windows_machine() -> str:
+    if not sys.platform.startswith("win"):
+        return platform.machine().lower()
+    try:
+        process_machine = ctypes.c_ushort(0)
+        native_machine = ctypes.c_ushort(0)
+        kernel32 = ctypes.windll.kernel32
+        is_wow64_process2 = getattr(kernel32, "IsWow64Process2", None)
+        if is_wow64_process2:
+            current_process = kernel32.GetCurrentProcess()
+            ok = is_wow64_process2(current_process, ctypes.byref(process_machine), ctypes.byref(native_machine))
+            if ok:
+                machine_map = {0x014c: "x86", 0x8664: "amd64", 0xAA64: "arm64"}
+                return machine_map.get(int(native_machine.value), platform.machine().lower())
+    except Exception:
+        pass
+    arch = (os.environ.get("PROCESSOR_ARCHITEW6432") or os.environ.get("PROCESSOR_ARCHITECTURE") or platform.machine()).lower()
+    if "arm64" in arch or "aarch64" in arch:
+        return "arm64"
+    if "amd64" in arch or "x86_64" in arch or "x64" in arch:
+        return "amd64"
+    return arch
+
+
+def detect_arch() -> str:
+    machine = _native_windows_machine()
+    if "arm" in machine or "aarch64" in machine:
+        return "arm64"
+    return "x64"
+
+
+# ---------------------------------------------------------------------------
+# Logging
+# ---------------------------------------------------------------------------
+
+def _installer_log(event: str, **context: object) -> None:
+    try:
+        timestamp = datetime.now().isoformat(timespec="seconds")
+        details = ", ".join(f"{key}={context[key]!r}" for key in sorted(context))
+        line = f"[{timestamp}] {event}"
+        if details:
+            line += f" | {details}"
+        with INSTALLER_LOG_PATH.open("a", encoding="utf-8") as stream:
+            stream.write(line + "\n")
+    except Exception:
+        return
+
+
+# ---------------------------------------------------------------------------
+# Path utilities
+# ---------------------------------------------------------------------------
 
 def _resource_candidates() -> list[Path]:
     candidates: list[Path] = []
@@ -148,28 +286,6 @@ def resource_root() -> Path:
     return _resource_candidates()[0]
 
 
-def payload_root() -> Path:
-    for candidate in _resource_candidates():
-        if (candidate / "installer_payload").exists():
-            return candidate
-        if (candidate / "win_x64.zip").exists() or (candidate / "win_arm64.zip").exists():
-            return candidate
-    return resource_root()
-
-
-def _installer_log(event: str, **context: object) -> None:
-    try:
-        timestamp = datetime.now().isoformat(timespec="seconds")
-        details = ", ".join(f"{key}={context[key]!r}" for key in sorted(context))
-        line = f"[{timestamp}] {event}"
-        if details:
-            line += f" | {details}"
-        with INSTALLER_LOG_PATH.open("a", encoding="utf-8") as stream:
-            stream.write(line + "\n")
-    except Exception:
-        return
-
-
 def _is_within_path(path: Path, root: Path) -> bool:
     try:
         resolved_path = path.resolve()
@@ -192,6 +308,14 @@ def _top_level_install_name(path: Path, install_dir: Path) -> str:
 def _is_preserved_user_root(path: Path, install_dir: Path) -> bool:
     return _top_level_install_name(path, install_dir) in {"data", "mods", "configs", "cache"}
 
+
+def default_install_dir() -> Path:
+    return Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "Zapret-Zen"
+
+
+# ---------------------------------------------------------------------------
+# Icon helpers
+# ---------------------------------------------------------------------------
 
 def _embedded_app_pixmap() -> QPixmap:
     try:
@@ -259,29 +383,6 @@ def app_pixmap(size: int) -> QPixmap:
         scaled = embedded.scaled(target_px, target_px, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
         scaled.setDevicePixelRatio(dpr)
         return scaled
-    installer_png_path = resource_root() / "ui_assets" / "icons" / "installer_runtime_icon.png"
-    if installer_png_path.exists():
-        image = QImage(str(installer_png_path))
-        pixmap = QPixmap.fromImage(image) if not image.isNull() else QPixmap()
-        if not pixmap.isNull():
-            scaled = pixmap.scaled(target_px, target_px, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
-            scaled.setDevicePixelRatio(dpr)
-            return scaled
-    icon_path = resource_root() / "ui_assets" / "icons" / "app.png"
-    if icon_path.exists():
-        image = QImage(str(icon_path))
-        pixmap = QPixmap.fromImage(image) if not image.isNull() else QPixmap()
-        if not pixmap.isNull():
-            scaled = pixmap.scaled(target_px, target_px, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
-            scaled.setDevicePixelRatio(dpr)
-            return scaled
-    ico_path = resource_root() / "ui_assets" / "icons" / "app.ico"
-    if ico_path.exists():
-        pixmap = QPixmap(str(ico_path))
-        if not pixmap.isNull():
-            scaled = pixmap.scaled(target_px, target_px, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
-            scaled.setDevicePixelRatio(dpr)
-            return scaled
     return app_icon().pixmap(size, size)
 
 
@@ -335,174 +436,15 @@ def apply_native_window_icons(widget: QWidget) -> None:
         pass
 
 
-def title_logo() -> QIcon:
-    png_path = resource_root() / "ui_assets" / "icons" / "app.png"
-    if png_path.exists():
-        icon = QIcon(str(png_path))
-        if not icon.isNull():
-            return icon
-    return app_icon()
-
-
-def default_install_dir() -> Path:
-    return Path(os.environ.get("ProgramFiles", r"C:\Program Files")) / "Zapret-Zen"
-
-
-def _native_windows_machine() -> str:
-    if not sys.platform.startswith("win"):
-        return platform.machine().lower()
-    try:
-        process_machine = ctypes.c_ushort(0)
-        native_machine = ctypes.c_ushort(0)
-        kernel32 = ctypes.windll.kernel32  # type: ignore[attr-defined]
-        is_wow64_process2 = getattr(kernel32, "IsWow64Process2", None)
-        if is_wow64_process2:
-            current_process = kernel32.GetCurrentProcess()
-            ok = is_wow64_process2(current_process, ctypes.byref(process_machine), ctypes.byref(native_machine))
-            if ok:
-                machine_map = {
-                    0x014c: "x86",
-                    0x8664: "amd64",
-                    0xAA64: "arm64",
-                }
-                return machine_map.get(int(native_machine.value), platform.machine().lower())
-    except Exception:
-        pass
-    arch = (os.environ.get("PROCESSOR_ARCHITEW6432") or os.environ.get("PROCESSOR_ARCHITECTURE") or platform.machine()).lower()
-    if "arm64" in arch or "aarch64" in arch:
-        return "arm64"
-    if "amd64" in arch or "x86_64" in arch or "x64" in arch:
-        return "amd64"
-    return arch
-
-
-def detect_payload_name() -> str:
-    machine = _native_windows_machine()
-    if "arm" in machine or "aarch64" in machine:
-        return "win_arm64.zip"
-    return "win_x64.zip"
-
-
-def is_admin() -> bool:
-    if not sys.platform.startswith("win"):
-        return True
-    try:
-        return bool(ctypes.windll.shell32.IsUserAnAdmin())  # type: ignore[attr-defined]
-    except Exception:
-        return False
-
-
-def relaunch_with_elevation(args: list[str]) -> bool:
-    if not sys.platform.startswith("win"):
-        return True
-    if not _is_frozen():
-        return False
-    cmd = " ".join(f'"{arg}"' for arg in args)
-    result = ctypes.windll.shell32.ShellExecuteW(  # type: ignore[attr-defined]
-        None, "runas", sys.executable, cmd, None, 1
-    )
-    return int(result) > 32
-
-
-class ButtonInteractionOverlay(QWidget):
-    def __init__(self, parent: QWidget) -> None:
-        super().__init__(parent)
-        self._progress = 0.0
-        self._pressed = False
-        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
-        self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
-        self.hide()
-
-    def _get_progress(self) -> float:
-        return self._progress
-
-    def _set_progress(self, value: float) -> None:
-        self._progress = max(0.0, min(1.0, float(value)))
-        self.setVisible(self._progress > 0.001)
-        self.update()
-
-    progress = Property(float, _get_progress, _set_progress)
-
-    def set_pressed(self, pressed: bool) -> None:
-        self._pressed = bool(pressed)
-        self.update()
-
-    def paintEvent(self, event: QEvent) -> None:
-        if self._progress <= 0.001:
-            return
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        base = self.parentWidget().palette().button().color() if self.parentWidget() is not None else QColor('#1f2430')
-        if base.lightness() < 128:
-            overlay = QColor(255, 255, 255)
-            max_alpha = 28 if not self._pressed else 42
-        else:
-            overlay = QColor(31, 41, 55)
-            max_alpha = 14 if not self._pressed else 22
-        overlay.setAlpha(int(max_alpha * self._progress))
-        rect = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
-        radius = min(18.0, max(8.0, min(rect.width(), rect.height()) / 2.0))
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(overlay)
-        painter.drawRoundedRect(rect, radius, radius)
-
-
-class ButtonInteractionFilter(QObject):
-    def __init__(self, widget: QWidget) -> None:
-        super().__init__(widget)
-        self._widget = widget
-        self._overlay = ButtonInteractionOverlay(widget)
-        self._overlay.setGeometry(widget.rect())
-        self._animation: QPropertyAnimation | None = None
-        widget.installEventFilter(self)
-
-    def eventFilter(self, watched: QObject, event: QEvent) -> bool:
-        if watched is self._widget:
-            if event.type() in {QEvent.Type.Resize, QEvent.Type.Show, QEvent.Type.Move}:
-                self._overlay.setGeometry(self._widget.rect())
-                self._overlay.raise_()
-            elif event.type() == QEvent.Type.Enter:
-                self._overlay.raise_()
-                self._overlay.set_pressed(False)
-                self._animate(1.0, 180)
-            elif event.type() == QEvent.Type.Leave:
-                self._overlay.set_pressed(False)
-                self._animate(0.0, 180)
-            elif event.type() == QEvent.Type.MouseButtonPress:
-                self._overlay.raise_()
-                self._overlay.set_pressed(True)
-                self._animate(1.0, 90)
-            elif event.type() == QEvent.Type.MouseButtonRelease:
-                self._overlay.set_pressed(False)
-                self._animate(1.0 if self._widget.underMouse() else 0.0, 150)
-        return super().eventFilter(watched, event)
-
-    def _animate(self, target: float, duration: int) -> None:
-        if self._animation is not None:
-            self._animation.stop()
-        animation = QPropertyAnimation(self._overlay, b"progress", self)
-        animation.setDuration(duration)
-        animation.setStartValue(self._overlay.progress)
-        animation.setEndValue(target)
-        animation.setEasingCurve(QEasingCurve.Type.OutCubic)
-        animation.start()
-        self._animation = animation
-
-
-def attach_button_animations(widget: QWidget) -> None:
-    if not isinstance(widget, (QPushButton, QToolButton)):
-        return
-    if widget.property("_interactionBound"):
-        return
-    widget.setProperty("_interactionBound", True)
-    ButtonInteractionFilter(widget)
-
+# ---------------------------------------------------------------------------
+# Windows helpers
+# ---------------------------------------------------------------------------
 
 def set_windows_app_id() -> None:
     if not sys.platform.startswith("win"):
         return
     try:
-        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("peshk0v.ZapretZen.NuitkaInstaller.2.0.0.pngsync2")  # type: ignore[attr-defined]
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("peshk0v.ZapretZen.NuitkaInstaller.3.0.0")  # type: ignore[attr-defined]
     except Exception:
         return
 
@@ -544,6 +486,31 @@ def bring_widget_to_front(widget: QWidget) -> None:
     except Exception:
         return
 
+
+def is_admin() -> bool:
+    if not sys.platform.startswith("win"):
+        return True
+    try:
+        return bool(ctypes.windll.shell32.IsUserAnAdmin())  # type: ignore[attr-defined]
+    except Exception:
+        return False
+
+
+def relaunch_with_elevation(args: list[str]) -> bool:
+    if not sys.platform.startswith("win"):
+        return True
+    if not _is_frozen():
+        return False
+    cmd = " ".join(f'"{arg}"' for arg in args)
+    result = ctypes.windll.shell32.ShellExecuteW(  # type: ignore[attr-defined]
+        None, "runas", sys.executable, cmd, None, 1
+    )
+    return int(result) > 32
+
+
+# ---------------------------------------------------------------------------
+# Process management
+# ---------------------------------------------------------------------------
 
 def _run_hidden(command: list[str]) -> None:
     startup = None
@@ -657,6 +624,10 @@ def _remove_shortcuts() -> None:
         except Exception:
             continue
 
+
+# ---------------------------------------------------------------------------
+# File operations
+# ---------------------------------------------------------------------------
 
 def _clear_path_attributes(path: Path) -> None:
     if not sys.platform.startswith("win") or not path.exists():
@@ -804,6 +775,10 @@ def _read_app_version(install_dir: Path) -> str:
     return INSTALLER_VERSION if INSTALLER_VERSION != "__BUILD_VERSION__" else "1.0.0"
 
 
+# ---------------------------------------------------------------------------
+# Registry
+# ---------------------------------------------------------------------------
+
 def _write_uninstall_registry(install_dir: Path, uninstaller_exe: Path, app_exe: Path, override_cmd: str | None = None) -> None:
     if not sys.platform.startswith("win"):
         return
@@ -888,6 +863,108 @@ def _launch_folder_removal(install_dir: Path) -> None:
         startup.wShowWindow = 0
     subprocess.Popen(["cmd", "/c", cmd], creationflags=flags, startupinfo=startup)
 
+
+# ---------------------------------------------------------------------------
+# Button animations
+# ---------------------------------------------------------------------------
+
+class ButtonInteractionOverlay(QWidget):
+    def __init__(self, parent: QWidget) -> None:
+        super().__init__(parent)
+        self._progress = 0.0
+        self._pressed = False
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
+        self.hide()
+
+    def _get_progress(self) -> float:
+        return self._progress
+
+    def _set_progress(self, value: float) -> None:
+        self._progress = max(0.0, min(1.0, float(value)))
+        self.setVisible(self._progress > 0.001)
+        self.update()
+
+    progress = Property(float, _get_progress, _set_progress)
+
+    def set_pressed(self, pressed: bool) -> None:
+        self._pressed = bool(pressed)
+        self.update()
+
+    def paintEvent(self, event: QEvent) -> None:
+        if self._progress <= 0.001:
+            return
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        base = self.parentWidget().palette().button().color() if self.parentWidget() is not None else QColor('#1f2430')
+        if base.lightness() < 128:
+            overlay = QColor(255, 255, 255)
+            max_alpha = 28 if not self._pressed else 42
+        else:
+            overlay = QColor(31, 41, 55)
+            max_alpha = 14 if not self._pressed else 22
+        overlay.setAlpha(int(max_alpha * self._progress))
+        rect = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+        radius = min(18.0, max(8.0, min(rect.width(), rect.height()) / 2.0))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(overlay)
+        painter.drawRoundedRect(rect, radius, radius)
+
+
+class ButtonInteractionFilter(QObject):
+    def __init__(self, widget: QWidget) -> None:
+        super().__init__(widget)
+        self._widget = widget
+        self._overlay = ButtonInteractionOverlay(widget)
+        self._overlay.setGeometry(widget.rect())
+        self._animation: QPropertyAnimation | None = None
+        widget.installEventFilter(self)
+
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:
+        if watched is self._widget:
+            if event.type() in {QEvent.Type.Resize, QEvent.Type.Show, QEvent.Type.Move}:
+                self._overlay.setGeometry(self._widget.rect())
+                self._overlay.raise_()
+            elif event.type() == QEvent.Type.Enter:
+                self._overlay.raise_()
+                self._overlay.set_pressed(False)
+                self._animate(1.0, 180)
+            elif event.type() == QEvent.Type.Leave:
+                self._overlay.set_pressed(False)
+                self._animate(0.0, 180)
+            elif event.type() == QEvent.Type.MouseButtonPress:
+                self._overlay.raise_()
+                self._overlay.set_pressed(True)
+                self._animate(1.0, 90)
+            elif event.type() == QEvent.Type.MouseButtonRelease:
+                self._overlay.set_pressed(False)
+                self._animate(1.0 if self._widget.underMouse() else 0.0, 150)
+        return super().eventFilter(watched, event)
+
+    def _animate(self, target: float, duration: int) -> None:
+        if self._animation is not None:
+            self._animation.stop()
+        animation = QPropertyAnimation(self._overlay, b"progress", self)
+        animation.setDuration(duration)
+        animation.setStartValue(self._overlay.progress)
+        animation.setEndValue(target)
+        animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+        animation.start()
+        self._animation = animation
+
+
+def attach_button_animations(widget: QWidget) -> None:
+    if not isinstance(widget, (QPushButton, QToolButton)):
+        return
+    if widget.property("_interactionBound"):
+        return
+    widget.setProperty("_interactionBound", True)
+    ButtonInteractionFilter(widget)
+
+
+# ---------------------------------------------------------------------------
+# Dialog
+# ---------------------------------------------------------------------------
 
 class InstallerDialog(QDialog):
     def __init__(
@@ -1042,51 +1119,61 @@ class InstallerDialog(QDialog):
         return self._result_mode
 
 
+# ---------------------------------------------------------------------------
+# Worker — downloads release from GitHub and installs
+# ---------------------------------------------------------------------------
+
 class InstallerWorker(QThread):
     progress = Signal(int)
+    status = Signal(str)
     done = Signal(bool, str)
 
-    def __init__(self, target_dir: Path, preserve_data: bool) -> None:
+    def __init__(self, target_dir: Path, release: dict, preserve_data: bool) -> None:
         super().__init__()
         self.target_dir = target_dir
+        self.release = release
         self.preserve_data = preserve_data
 
     def run(self) -> None:
         try:
-            _installer_log(
-                "install_start",
-                cwd=str(Path.cwd()),
-                executable=str(sys.executable),
-                target_dir=str(self.target_dir),
-                preserve_data=bool(self.preserve_data),
-            )
-            root = payload_root()
-            payload_name = detect_payload_name()
-            payload_zip = root / "installer_payload" / payload_name
-            if not payload_zip.exists():
-                direct_payload_zip = root / payload_name
-                if direct_payload_zip.exists():
-                    payload_zip = direct_payload_zip
-            if not payload_zip.exists():
-                raise FileNotFoundError(f"payload not found: {payload_zip}")
-            _installer_log("payload_resolved", payload_root=str(root), payload_zip=str(payload_zip))
+            _installer_log("install_start", target_dir=str(self.target_dir), tag=self.release.get("tag_name", ""))
+            arch = detect_arch()
+            asset = _pick_portable_asset(self.release, arch)
+            if asset is None:
+                raise FileNotFoundError(f"No portable asset for {arch} in release {self.release.get('tag_name', '?')}")
 
-            self.progress.emit(8)
+            download_url = asset.get("browser_download_url", "")
+            if not download_url:
+                raise ValueError("Asset has no download URL")
+
+            _installer_log("download_start", url=download_url, asset=asset.get("name", ""))
+            self.status.emit(tr("Downloading..."))
+            self.progress.emit(5)
+
+            tmp_dir = Path(tempfile.mkdtemp(prefix="zapret_zen_dl_"))
+            zip_path = tmp_dir / asset.get("name", "download.zip")
+
+            def on_progress(downloaded: int, total: int) -> None:
+                pct = 5 + int(40 * downloaded / total) if total else 5
+                self.progress.emit(min(pct, 45))
+
+            _github_download(download_url, zip_path, progress_cb=on_progress)
+            self.progress.emit(45)
+
             _terminate_running_instances(self.target_dir)
             self.target_dir.mkdir(parents=True, exist_ok=True)
             staging = Path(tempfile.mkdtemp(prefix="zapret_zen_install_"))
-            _installer_log("staging_created", staging=str(staging))
-            self.progress.emit(18)
+            self.status.emit(tr("Extracting..."))
+            self.progress.emit(50)
 
-            with zipfile.ZipFile(payload_zip, "r") as archive:
+            with zipfile.ZipFile(zip_path, "r") as archive:
                 archive.extractall(staging)
             _installer_log("payload_extracted", staging=str(staging))
-            self.progress.emit(45)
+            self.progress.emit(70)
 
             source_root = staging / "zapret_zen"
             if not source_root.exists():
                 source_root = staging
-            _installer_log("source_root_resolved", source_root=str(source_root))
 
             preserved_names = {"merged_runtime", "backups", "logs"}
             if self.preserve_data:
@@ -1102,18 +1189,25 @@ class InstallerWorker(QThread):
                     except Exception:
                         _quarantine_item(runtime_dir)
 
-            self.progress.emit(70)
+            self.status.emit(tr("Installing..."))
+            self.progress.emit(75)
             _overlay_tree(source_root, self.target_dir, self.target_dir, preserved_names)
             _installer_log("overlay_done", target_dir=str(self.target_dir))
 
             shutil.rmtree(staging, ignore_errors=True)
+            shutil.rmtree(tmp_dir, ignore_errors=True)
             self.progress.emit(100)
             _installer_log("install_done", target_dir=str(self.target_dir))
+            self.status.emit(tr("Installation complete"))
             self.done.emit(True, "")
         except Exception as error:
             _installer_log("install_failed", error=str(error))
             self.done.emit(False, str(error))
 
+
+# ---------------------------------------------------------------------------
+# Main window
+# ---------------------------------------------------------------------------
 
 class InstallerWindow(QMainWindow):
     def __init__(self) -> None:
@@ -1123,10 +1217,13 @@ class InstallerWindow(QMainWindow):
         self.worker: InstallerWorker | None = None
         self.install_path = default_install_dir()
         self.preserve_existing_data = True
+        self._releases: list[dict] = []
+        self._selected_release: dict | None = None
+        self._mode: str = "install"
         self.setWindowTitle("Zapret-Zen Installer")
         self.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
-        self.setFixedSize(580, 380)
+        self.setFixedSize(580, 420)
         self.setWindowIcon(app_icon())
         self._build_ui()
         self._load_existing_install()
@@ -1146,7 +1243,6 @@ class InstallerWindow(QMainWindow):
         title_row = QHBoxLayout(self.title_bar)
         title_row.setContentsMargins(12, 8, 12, 8)
         title_row.setSpacing(8)
-
         icon = QLabel()
         icon.setFixedSize(20, 20)
         icon.setPixmap(app_pixmap(20))
@@ -1172,18 +1268,34 @@ class InstallerWindow(QMainWindow):
         self.stack = QStackedWidget()
         shell.addWidget(self.stack, 1)
 
+        self._build_page_start()
+        self._build_page_branch()
+        self._build_page_progress()
+        self._build_page_done()
+
+        self._check_icon = str((resource_root() / "ui_assets" / "icons" / "check.svg").resolve()).replace("\\", "/")
+
+    def _build_page_start(self) -> None:
         self.page_start = QWidget()
-        start_layout = QVBoxLayout(self.page_start)
-        start_layout.setContentsMargins(20, 20, 20, 20)
-        start_layout.setSpacing(12)
+        layout = QVBoxLayout(self.page_start)
+        layout.setContentsMargins(24, 20, 24, 20)
+        layout.setSpacing(12)
+
         head = QLabel(tr("Welcome to Zapret-Zen Installer"))
         head.setObjectName("title")
-        start_layout.addWidget(head)
-        desc = QLabel(
-            tr("This installer deploys Zapret-Zen and automatically picks the proper build for your system.")
-        )
+        layout.addWidget(head)
+
+        desc = QLabel(tr("This installer deploys Zapret-Zen and automatically picks the proper build for your system."))
         desc.setWordWrap(True)
-        start_layout.addWidget(desc)
+        layout.addWidget(desc)
+
+        self._existing_label = QLabel("")
+        self._existing_label.setObjectName("subtitle")
+        self._existing_label.setVisible(False)
+        layout.addWidget(self._existing_label)
+
+        layout.addStretch(1)
+
         path_row = QHBoxLayout()
         self.path_edit = QLineEdit(str(self.install_path))
         browse_btn = QPushButton(tr("Browse"))
@@ -1191,51 +1303,134 @@ class InstallerWindow(QMainWindow):
         attach_button_animations(browse_btn)
         path_row.addWidget(self.path_edit, 1)
         path_row.addWidget(browse_btn)
-        start_layout.addLayout(path_row)
-        start_layout.addStretch(1)
-        install_btn = QPushButton(tr("Install"))
-        install_btn.setObjectName("primary")
-        install_btn.setMinimumHeight(42)
-        install_btn.clicked.connect(self._start_install)
-        attach_button_animations(install_btn)
-        start_layout.addWidget(install_btn)
+        layout.addLayout(path_row)
+
+        layout.addStretch(1)
+
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(10)
+
+        self.install_btn = QPushButton(tr("Install"))
+        self.install_btn.setObjectName("primary")
+        self.install_btn.setMinimumHeight(42)
+        self.install_btn.clicked.connect(lambda: self._start_action("install"))
+        attach_button_animations(self.install_btn)
+        btn_row.addWidget(self.install_btn)
+
+        self.update_btn = QPushButton(tr("Update"))
+        self.update_btn.setMinimumHeight(42)
+        self.update_btn.clicked.connect(lambda: self._start_action("update"))
+        self.update_btn.setVisible(False)
+        attach_button_animations(self.update_btn)
+        btn_row.addWidget(self.update_btn)
+
+        self.uninstall_btn = QPushButton(tr("Uninstall"))
+        self.uninstall_btn.setMinimumHeight(42)
+        self.uninstall_btn.clicked.connect(self._start_uninstall)
+        self.uninstall_btn.setVisible(False)
+        attach_button_animations(self.uninstall_btn)
+        btn_row.addWidget(self.uninstall_btn)
+
+        layout.addLayout(btn_row)
         self.stack.addWidget(self.page_start)
 
+    def _build_page_branch(self) -> None:
+        self.page_branch = QWidget()
+        layout = QVBoxLayout(self.page_branch)
+        layout.setContentsMargins(24, 20, 24, 20)
+        layout.setSpacing(12)
+
+        head = QLabel(tr("Branch / Release"))
+        head.setObjectName("title")
+        layout.addWidget(head)
+
+        hint = QLabel(tr("Select version to download"))
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+
+        self._loading_label = QLabel(tr("Loading releases..."))
+        layout.addWidget(self._loading_label)
+
+        self._release_combo = QComboBox()
+        self._release_combo.currentIndexChanged.connect(self._on_release_selected)
+        self._release_combo.setVisible(False)
+        layout.addWidget(self._release_combo)
+
+        arch_label = QLabel(f"Architecture: {detect_arch().upper()}")
+        arch_label.setObjectName("subtitle")
+        layout.addWidget(arch_label)
+
+        layout.addStretch(1)
+
+        back_row = QHBoxLayout()
+        back_btn = QPushButton(tr("Back"))
+        back_btn.clicked.connect(lambda: self.stack.setCurrentWidget(self.page_start))
+        attach_button_animations(back_btn)
+        back_row.addWidget(back_btn)
+        back_row.addStretch(1)
+        self._fetch_btn = QPushButton(tr("Download"))
+        self._fetch_btn.setObjectName("primary")
+        self._fetch_btn.setMinimumHeight(42)
+        self._fetch_btn.clicked.connect(self._proceed_with_selected)
+        self._fetch_btn.setEnabled(False)
+        attach_button_animations(self._fetch_btn)
+        back_row.addWidget(self._fetch_btn)
+        layout.addLayout(back_row)
+
+        self.stack.addWidget(self.page_branch)
+
+    def _build_page_progress(self) -> None:
         self.page_progress = QWidget()
-        progress_layout = QVBoxLayout(self.page_progress)
-        progress_layout.setContentsMargins(20, 20, 20, 20)
-        progress_layout.setSpacing(12)
-        progress_layout.addWidget(QLabel(tr("Installing...")))
-        progress_layout.addStretch(1)
+        layout = QVBoxLayout(self.page_progress)
+        layout.setContentsMargins(24, 20, 24, 20)
+        layout.setSpacing(12)
+
+        self._progress_title = QLabel(tr("Installing..."))
+        self._progress_title.setObjectName("title")
+        layout.addWidget(self._progress_title)
+
+        self._progress_status = QLabel("")
+        layout.addWidget(self._progress_status)
+
+        layout.addStretch(1)
         self.bar = QProgressBar()
         self.bar.setRange(0, 100)
         self.bar.setValue(0)
         self.bar.setFixedHeight(24)
-        progress_layout.addWidget(self.bar)
-        progress_layout.addStretch(1)
+        layout.addWidget(self.bar)
+        layout.addStretch(1)
+
         self.stack.addWidget(self.page_progress)
 
+    def _build_page_done(self) -> None:
         self.page_done = QWidget()
-        done_layout = QVBoxLayout(self.page_done)
-        done_layout.setContentsMargins(20, 20, 20, 20)
-        done_layout.setSpacing(12)
-        done_layout.addWidget(QLabel(tr("Installation complete")))
+        layout = QVBoxLayout(self.page_done)
+        layout.setContentsMargins(24, 20, 24, 20)
+        layout.setSpacing(12)
+
+        layout.addWidget(QLabel(tr("Installation complete")))
+
         self.desktop_cb = QCheckBox(tr("Create desktop shortcut"))
         self.startmenu_cb = QCheckBox(tr("Create Start Menu shortcut"))
         self.desktop_cb.setChecked(True)
         self.startmenu_cb.setChecked(True)
-        done_layout.addWidget(self.desktop_cb)
-        done_layout.addWidget(self.startmenu_cb)
-        done_layout.addStretch(1)
+        layout.addWidget(self.desktop_cb)
+        layout.addWidget(self.startmenu_cb)
+
+        layout.addStretch(1)
+
         finish_btn = QPushButton(tr("Finish"))
         finish_btn.setObjectName("primary")
         finish_btn.setMinimumHeight(42)
         finish_btn.clicked.connect(self._finish)
         attach_button_animations(finish_btn)
-        done_layout.addWidget(finish_btn)
+        layout.addWidget(finish_btn)
+
         self.stack.addWidget(self.page_done)
 
-        self._check_icon = str((resource_root() / "ui_assets" / "icons" / "check.svg").resolve()).replace("\\", "/")
+    # ------------------------------------------------------------------
+    # Events
+    # ------------------------------------------------------------------
 
     def showEvent(self, event: QShowEvent) -> None:
         super().showEvent(event)
@@ -1261,6 +1456,10 @@ class InstallerWindow(QMainWindow):
         self._drag_pos = None
         super().mouseReleaseEvent(event)
 
+    # ------------------------------------------------------------------
+    # Theme
+    # ------------------------------------------------------------------
+
     @staticmethod
     def _window_stylesheet(dark: bool, check_icon: str) -> str:
         if dark:
@@ -1269,10 +1468,14 @@ class InstallerWindow(QMainWindow):
             QWidget#Root {{ background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #1e2128, stop:0.7 #1e2128, stop:1 #15171c); color: #e0e4eb; font-family: Segoe UI; font-size: 10pt; border: 1px solid #2f3440; border-radius: 12px; }}
             #InstallerTitleBar {{ background: transparent; border-bottom: 1px solid #2f3440; }}
             QLabel#title {{ font-size: 18pt; font-weight: 800; color: #ffffff; }}
+            QLabel#subtitle {{ font-size: 9pt; color: #8b8fa3; }}
             QLabel {{ background: transparent; color: #e0e4eb; }}
             QLineEdit {{ background: #252830; color: #e0e4eb; border: 1px solid #373d4a; border-radius: 10px; padding: 9px; font-size: 11pt; }}
             QPushButton {{ background: #2a2e38; border: 1px solid #373d4a; border-radius: 12px; padding: 10px 14px; font-size: 11pt; color: #e0e4eb; }}
             QPushButton#primary {{ background: #5865f2; border: 1px solid #7481ff; color: #fff; font-weight: 800; }}
+            QComboBox {{ background: #252830; color: #e0e4eb; border: 1px solid #373d4a; border-radius: 10px; padding: 9px; font-size: 11pt; }}
+            QComboBox::drop-down {{ border: none; width: 24px; }}
+            QComboBox QAbstractItemView {{ background: #252830; color: #e0e4eb; border: 1px solid #373d4a; selection-background-color: #5865f2; }}
             QCheckBox {{ color: #e0e4eb; }}
             QToolButton {{ border: none; background: transparent; min-width: 26px; min-height: 26px; max-width: 26px; max-height: 26px; border-radius: 12px; padding: 0px; margin: 0px; }}
             QToolButton[role="close"]:hover {{ background: rgba(200, 70, 80, 0.6); border-radius: 12px; }}
@@ -1287,10 +1490,14 @@ class InstallerWindow(QMainWindow):
         QWidget#Root {{ background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #f4f7fc, stop:0.7 #f4f7fc, stop:1 #eef4ff); color: #152033; font-family: Segoe UI; font-size: 10pt; border: 1px solid #c8d7ee; border-radius: 12px; }}
         #InstallerTitleBar {{ background: transparent; border-bottom: 1px solid #d0ddf0; }}
         QLabel#title {{ font-size: 18pt; font-weight: 800; color: #0f172a; }}
+        QLabel#subtitle {{ font-size: 9pt; color: #6b7280; }}
         QLabel {{ background: transparent; color: #152033; }}
         QLineEdit {{ background: #ffffff; color: #152033; border: 1px solid #c8d7ee; border-radius: 10px; padding: 9px; font-size: 11pt; }}
         QPushButton {{ background: #e6eef9; border: 1px solid #c8d7ee; border-radius: 12px; padding: 10px 14px; font-size: 11pt; color: #152033; }}
         QPushButton#primary {{ background: #5865f2; border: 1px solid #7481ff; color: #fff; font-weight: 800; }}
+        QComboBox {{ background: #ffffff; color: #152033; border: 1px solid #c8d7ee; border-radius: 10px; padding: 9px; font-size: 11pt; }}
+        QComboBox::drop-down {{ border: none; width: 24px; }}
+        QComboBox QAbstractItemView {{ background: #ffffff; color: #152033; border: 1px solid #c8d7ee; selection-background-color: #5865f2; }}
         QCheckBox {{ color: #152033; }}
         QToolButton {{ border: none; background: transparent; min-width: 26px; min-height: 26px; max-width: 26px; max-height: 26px; border-radius: 12px; padding: 0px; margin: 0px; }}
         QToolButton[role="close"]:hover {{ background: rgba(170, 84, 97, 0.62); border-radius: 12px; }}
@@ -1319,48 +1526,169 @@ class InstallerWindow(QMainWindow):
         self._is_dark = not self._is_dark
         self._apply_theme()
 
+    # ------------------------------------------------------------------
+    # Existing install detection
+    # ------------------------------------------------------------------
+
     def _load_existing_install(self) -> None:
         existing = _install_dir_from_registry()
         if existing:
             self.path_edit.setText(str(existing))
+            self.install_path = existing
+            try:
+                ver = _read_app_version(existing)
+                self._existing_label.setText(f"{tr('Existing installation found')}: v{ver} ({existing})")
+            except Exception:
+                self._existing_label.setText(f"{tr('Existing installation found')}: {existing}")
+            self._existing_label.setVisible(True)
+            self.update_btn.setVisible(True)
+            self.uninstall_btn.setVisible(True)
 
     def _choose_dir(self) -> None:
         picked = QFileDialog.getExistingDirectory(self, tr("Choose install directory"), self.path_edit.text())
         if picked:
             self.path_edit.setText(picked)
 
-    def _start_install(self) -> None:
+    # ------------------------------------------------------------------
+    # Actions
+    # ------------------------------------------------------------------
+
+    def _start_action(self, mode: str) -> None:
+        self._mode = mode
         raw_path = self.path_edit.text().strip() or str(default_install_dir())
         self.install_path = Path(raw_path).expanduser()
         if not self.install_path.is_absolute():
             self.install_path = (Path.cwd() / self.install_path).resolve()
-        _installer_log("ui_start_install", selected_path=raw_path, normalized_target=str(self.install_path))
-        if self.install_path.exists():
-            existing_items = [item for item in self.install_path.iterdir()]
-        else:
-            existing_items = []
-        if existing_items:
-            choice = self._ask_existing_install_mode()
-            if choice == "cancel":
-                return
-            self.preserve_existing_data = choice == "preserve"
-        else:
+
+        if mode == "update" and self.install_path.exists():
             self.preserve_existing_data = True
+
         if sys.platform.startswith("win") and _is_frozen() and not is_admin():
             args = [
-                "--elevated-install",
+                "--elevated-ui",
                 "--install-dir",
                 str(self.install_path),
-                "--preserve-data" if self.preserve_existing_data else "--clean-install",
             ]
             if relaunch_with_elevation(args):
                 self.close()
                 return
             InstallerDialog("Error", tr("Failed to request administrator privileges."), parent=self).exec()
             return
+
+        self.stack.setCurrentWidget(self.page_branch)
+        self._load_releases()
+
+    def _start_uninstall(self) -> None:
+        if sys.platform.startswith("win") and _is_frozen() and not is_admin():
+            args = ["--uninstall", "--install-dir", str(self.install_path)]
+            if relaunch_with_elevation(args):
+                self.close()
+                return
+            InstallerDialog("Error", tr("Failed to request administrator privileges."), parent=self).exec()
+            return
+
+        confirm = InstallerDialog(
+            tr("Remove Zapret-Zen"),
+            tr("Remove Zapret-Zen and all data inside the install folder?\n\nExternal folders and third-party files will not be touched."),
+            with_yes_no=True,
+            parent=self,
+        )
+        confirm.exec()
+        if not confirm.result_yes:
+            return
+
+        _terminate_running_instances(self.install_path)
+        _remove_shortcuts()
+        _remove_uninstall_registry()
+        if self.install_path.exists():
+            _launch_folder_removal(self.install_path)
+        InstallerDialog(tr("Uninstall started"), tr("The app will be removed in a few seconds."), parent=self).exec()
+        self.close()
+
+    # ------------------------------------------------------------------
+    # Releases
+    # ------------------------------------------------------------------
+
+    def _load_releases(self) -> None:
+        self._loading_label.setVisible(True)
+        self._release_combo.setVisible(False)
+        self._fetch_btn.setEnabled(False)
+
+        class FetchThread(QThread):
+            done = Signal(list)
+
+            def run(self_inner) -> None:
+                releases = fetch_releases()
+                self_inner.done.emit(releases)
+
+        self._fetch_thread = FetchThread()
+        self._fetch_thread.done.connect(self._on_releases_loaded)
+        self._fetch_thread.start()
+
+    def _on_releases_loaded(self, releases: list[dict]) -> None:
+        self._releases = releases
+        self._loading_label.setVisible(False)
+        self._release_combo.setVisible(True)
+        self._release_combo.blockSignals(True)
+        self._release_combo.clear()
+
+        if not releases:
+            self._release_combo.addItem(tr("No internet connection"))
+            self._fetch_btn.setEnabled(False)
+            self._release_combo.blockSignals(False)
+            return
+
+        default_idx = 0
+        for idx, rel in enumerate(releases):
+            tag = rel.get("tag_name", "?")
+            name = rel.get("name", tag)
+            prerelease = rel.get("prerelease", False)
+            label = f"{'[PRE] ' if prerelease else ''}{name}"
+            self._release_combo.addItem(label)
+            if DEFAULT_RELEASE_TAG and DEFAULT_RELEASE_TAG != "__BUILD_TAG__" and tag == DEFAULT_RELEASE_TAG:
+                default_idx = idx
+
+        self._release_combo.blockSignals(False)
+        self._release_combo.setCurrentIndex(default_idx)
+        self._on_release_selected(default_idx)
+
+    def _on_release_selected(self, index: int) -> None:
+        if 0 <= index < len(self._releases):
+            self._selected_release = self._releases[index]
+            arch = detect_arch()
+            asset = _pick_portable_asset(self._selected_release, arch)
+            self._fetch_btn.setEnabled(asset is not None)
+        else:
+            self._selected_release = None
+            self._fetch_btn.setEnabled(False)
+
+    def _proceed_with_selected(self) -> None:
+        if not self._selected_release:
+            return
+
+        if self.install_path.exists():
+            existing_items = [item for item in self.install_path.iterdir()]
+        else:
+            existing_items = []
+
+        if existing_items and self._mode == "install":
+            choice = self._ask_existing_install_mode()
+            if choice == "cancel":
+                return
+            self.preserve_existing_data = choice == "preserve"
+
         self.stack.setCurrentWidget(self.page_progress)
-        self.worker = InstallerWorker(self.install_path, preserve_data=self.preserve_existing_data)
+        tag = self._selected_release.get("tag_name", "")
+        self._progress_title.setText(f"{tr('Installing...')} {tag}")
+        self.bar.setValue(0)
+
+        self.worker = InstallerWorker(
+            self.install_path,
+            self._selected_release,
+            preserve_data=self.preserve_existing_data,
+        )
         self.worker.progress.connect(self.bar.setValue)
+        self.worker.status.connect(lambda s: self._progress_status.setText(s))
         self.worker.done.connect(self._on_done)
         self.worker.start()
 
@@ -1379,6 +1707,10 @@ class InstallerWindow(QMainWindow):
         if dialog.result_mode == "no":
             return "clean"
         return "cancel"
+
+    # ------------------------------------------------------------------
+    # Done
+    # ------------------------------------------------------------------
 
     def _on_done(self, ok: bool, error: str) -> None:
         if not ok:
@@ -1408,7 +1740,6 @@ class InstallerWindow(QMainWindow):
             except Exception:
                 pass
             try:
-                import ctypes
                 kernel32 = ctypes.windll.kernel32
                 buf = ctypes.create_unicode_buffer(1024)
                 n = kernel32.GetModuleFileNameW(None, buf, len(buf))
@@ -1434,9 +1765,6 @@ class InstallerWindow(QMainWindow):
                     break
         if copied:
             _write_uninstall_registry(self.install_path, uninstaller_exe, app_exe)
-            _installer_log("register_uninstaller_exe", dest=str(uninstaller_exe))
-        else:
-            _installer_log("register_uninstaller_skipped", reason="exe_copy_failed", dest=str(uninstaller_exe))
         self._create_ps_uninstaller(app_exe, register=not copied)
 
     def _create_ps_uninstaller(self, app_exe: Path, register: bool = False) -> None:
@@ -1446,11 +1774,9 @@ class InstallerWindow(QMainWindow):
         ps_content = f"""$installDir = '{escaped}'
 $uninstallKey = 'Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\ZapretZen'
 
-# Kill running instances
 $images = @('zapret_zen.exe', 'TgWsProxy_windows.exe', 'winws.exe')
 foreach ($img in $images) {{ taskkill /F /T /IM $img 2>$null }}
 
-# Remove shortcuts
 $lnkPaths = @(
   [Environment]::GetFolderPath('Desktop'),
   [Environment]::GetFolderPath('Desktop')
@@ -1462,13 +1788,11 @@ $lnkNames = @(
 )
 foreach ($p in $lnkNames) {{ if (Test-Path $p) {{ Remove-Item $p -Force -ErrorAction SilentlyContinue }} }}
 
-# Remove registry keys
 $reg = [Microsoft.Win32.Registry]::LocalMachine
 try {{ $reg.DeleteSubKey($uninstallKey, $false) }} catch {{}}
 $reg = [Microsoft.Win32.Registry]::CurrentUser
 try {{ $reg.DeleteSubKey($uninstallKey, $false) }} catch {{}}
 
-# Remove install directory (background batch)
 $batch = [io.path]::Combine([io.path]::GetTempPath(), 'rm_zapretzen.bat')
 $batchContent = @"
 @echo off
@@ -1483,13 +1807,11 @@ Start-Process cmd.exe -ArgumentList '/c', $batch -WindowStyle Hidden
         try:
             install_dir.mkdir(parents=True, exist_ok=True)
             ps_path.write_text(ps_content, encoding="utf-8")
-            if ps_path.exists():
-                _installer_log("register_ps_uninstaller", dest=str(ps_path))
-                if register:
-                    uninstall_cmd = f'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "{ps_path}"'
-                    _write_uninstall_registry(install_dir, ps_path, app_exe, override_cmd=uninstall_cmd)
-        except Exception as ps_err:
-            _installer_log("create_ps_uninstaller_failed", error=str(ps_err))
+            if register:
+                uninstall_cmd = f'powershell.exe -NoProfile -ExecutionPolicy Bypass -File "{ps_path}"'
+                _write_uninstall_registry(install_dir, ps_path, app_exe, override_cmd=uninstall_cmd)
+        except Exception:
+            pass
 
     def _create_shortcut(self, target: Path, name: str, desktop: bool) -> None:
         if desktop:
@@ -1505,13 +1827,6 @@ Start-Process cmd.exe -ArgumentList '/c', $batch -WindowStyle Hidden
             f"$Shortcut.WorkingDirectory = '{str(target.parent)}'; "
             f"$Shortcut.IconLocation = '{str(target)},0'; "
             "$Shortcut.Save();"
-        )
-        _installer_log(
-            "shortcut_prepare",
-            shortcut_target=str(target),
-            shortcut_workdir=str(target.parent),
-            shortcut_path=str(lnk_path),
-            desktop=bool(desktop),
         )
         startup = None
         flags = 0
@@ -1531,7 +1846,6 @@ Start-Process cmd.exe -ArgumentList '/c', $batch -WindowStyle Hidden
     def _launch_installed_app(self, exe: Path) -> None:
         if not exe.exists():
             return
-        _installer_log("launch_target", launch_target=str(exe), launch_workdir=str(exe.parent))
         if sys.platform.startswith("win"):
             startup = subprocess.STARTUPINFO()
             startup.dwFlags |= subprocess.STARTF_USESHOWWINDOW
@@ -1554,8 +1868,13 @@ Start-Process cmd.exe -ArgumentList '/c', $batch -WindowStyle Hidden
         self.close()
 
 
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
+
 def main() -> int:
     set_windows_app_id()
+
     if (
         sys.platform.startswith("win")
         and _is_frozen()
@@ -1566,6 +1885,7 @@ def main() -> int:
         if relaunch_with_elevation(["--elevated-ui", *sys.argv[1:]]):
             return 0
         return 1
+
     if "--uninstall" in sys.argv:
         if not is_admin():
             relaunch_with_elevation(sys.argv[1:])
@@ -1610,12 +1930,6 @@ def main() -> int:
         except Exception:
             pass
     window.show()
-    if "--elevated-install" in sys.argv:
-        preserve_data = "--preserve-data" in sys.argv
-        if "--clean-install" in sys.argv:
-            preserve_data = False
-        window.preserve_existing_data = preserve_data
-        QTimer.singleShot(0, window._start_install)
     return app.exec()
 
 
