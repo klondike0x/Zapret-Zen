@@ -116,6 +116,16 @@ class SettingsManager:
             settings.selected_runtime_mode = "zapret"
             changed = True
 
+        dc_ip_raw = str(settings.tg_proxy_dc_ip or "").strip()
+        dc_ips_present = set()
+        for part in dc_ip_raw.replace("\n", ",").split(","):
+            token = part.strip()
+            if token and ":" in token:
+                dc_ips_present.add(token.split(":")[0])
+        if "2" not in dc_ips_present and "4" in dc_ips_present:
+            settings.tg_proxy_dc_ip = "2:149.154.167.220\n4:149.154.167.220"
+            changed = True
+
         selected_service_ids = raw.get("selected_service_ids", [])
         if not isinstance(selected_service_ids, list):
             settings.selected_service_ids = []

@@ -19,8 +19,6 @@
 
 </div>
 
----
-
 ## 🖼️ Скриншоты
 
 <div align="center">
@@ -51,6 +49,18 @@
 
 ---
 
+## 🧩 Доверенные моды сообщества
+
+Готовые модификации для Zapret-Zen от сообщества: обход блокировок Minecraft, Roblox, SoundCloud, Canva и других сервисов.
+
+> Подробная инструкция по установке, созданию и публикации собственных модов — в **[документации по модам](https://github.com/peshk0v/Zapret-Zen/wiki/%D0%9C%D0%BE%D0%B4%D0%B8%D1%84%D0%B8%D0%BA%D0%B0%D1%86%D0%B8%D0%B8#13-доверенные-каталоги-модов-от-сообщества)**.
+
+<a href="https://github.com/peshk0v/Zapret-Mods/releases/latest">
+  <img src="https://img.shields.io/badge/Скачать_моды-Zapret--Mods-fc428?style=for-the-badge&logo=github" alt="Скачать моды" />
+</a>
+
+---
+
 ## 💻 Установка
 
 ### 📦 Портативная версия (Рекомендуется)
@@ -66,75 +76,13 @@
 
 ---
 
-## 🛠️ Разработка и сборка
+## 🛠️ Вики для разработчиков
 
-### Системные требования
-* **Python**: `3.11+`
-* **ОС**: Windows 10 / 11
+У проекта есть *полноценный* wiki, в котором подробно расписаны детали для разработки проекта.
 
-### 1. Настройка окружения
-
-```powershell
-# Создание и активация виртуального окружения
-python -m venv .venv
-.\.venv\Scripts\Activate.ps1
-
-# Установка зависимостей разработчика
-pip install -e .[dev]
-
-```
-
-### 2. Запуск из исходников
-
-```powershell
-.\.venv\Scripts\python.exe -m zapret_zen.main
-
-```
-
-### 3. Сборка Portable-версии
-
-```powershell
-.\.venv\Scripts\python.exe scripts\sync_app_icon.py
-.\.venv\Scripts\pyinstaller.exe packaging/zapret_zen.spec --distpath dist_pyinstaller --workpath build_pyinst --noconfirm
-
-```
-
-### 4. Сборка Инсталлятора
-
-```powershell
-# Формирование payload-архива
-$tempDir = Join-Path $env:TEMP "zapretzen_payload"
-$payloadRoot = Join-Path $tempDir "zapret_zen"
-Copy-Item -LiteralPath dist_pyinstaller\zapret_zen -Destination $payloadRoot -Recurse -Force
-Compress-Archive -Path (Join-Path $tempDir "*") -DestinationPath installer_payload\win_x64.zip -CompressionLevel Optimal -Force
-Remove-Item $tempDir -Recurse -Force
-
-# Компиляция инсталлятора
-.\.venv\Scripts\pyinstaller.exe packaging/install_zapretzen.spec --distpath dist_installer --workpath build_installer --noconfirm
-```
-
----
-
-## 📁 Структура проекта
-
-```text
-Zapret-Zen/
-├── assets/           # Графические ресурсы для документации
-├── configs/          # Пользовательские конфиги и переопределения правил
-├── data/             # Состояние приложения (настройки, профили, кэш)
-├── installer/        # Исходный код мастера установки
-├── mods/             # Установленные моды сообщества
-├── packaging/        # Файлы конфигурации .spec для PyInstaller
-├── runtime/          # Встроенные бинарники (zapret, tg-ws-proxy, dns-manager)
-├── scripts/          # Вспомогательные скрипты сборки и утилиты
-├── src/zapret_zen/   # Исходный код приложения
-│   ├── domain/       # Модели данных (настройки, компоненты, сервисы)
-│   ├── services/     # Бизнес-логика, интеграции и бэкенд
-│   └── ui/           # Графический интерфейс на PySide6
-├── themes/           # JSON-файлы оформления тем
-└── ui_assets/        # Иконки (Flaticon), шрифты, логотипы
-
-```
+<a href="https://github.com/peshk0v/Zapret-Zen/wiki">
+  <img src="https://img.shields.io/badge/Открыть_Wiki-Zapret--Zen-2ea44f?style=for-the-badge&logo=github" alt="GitHub Wiki" />
+</a>
 
 ---
 

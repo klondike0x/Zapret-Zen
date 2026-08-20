@@ -51,7 +51,7 @@ def main():
         return 1
 
     ctx.backend = None
-    ctx.settings.update(theme="light")
+    ctx.settings.update(theme="light", accent_color="#3b82f6")
 
     print("Creating MainWindow...")
     from zapret_zen.ui.main_window import MainWindow
@@ -97,8 +97,12 @@ def main():
             return
         theme = theme_queue.pop()
         print(f"\n=== Theme: {theme} ===")
-        ctx.settings.update(theme=theme)
+        ctx.settings.update(theme=theme, accent_color="#3b82f6")
         window._apply_theme()
+        if hasattr(window, "_pages_host") and window._pages_host is not None:
+            window._pages_host.set_accent_color("#3b82f6")
+        if hasattr(window, "power_button") and window.power_button is not None:
+            window.power_button.set_power_theme(theme, "#3b82f6")
         page_queue.extend([(idx, name, theme) for idx, name in reversed(PAGES)])
         QTimer.singleShot(500, capture_next)
 
@@ -112,6 +116,10 @@ def main():
         QTimer.singleShot(1000, lambda n=name, t=theme: do_capture(n, t))
 
     def do_capture(name, theme):
+        if name == "dashboard" and hasattr(window, "power_button"):
+            window.power_button.setProperty("state", "on")
+            window.power_button.set_active_state(True, animate=False)
+            window.power_button.set_power_theme(theme, "#3b82f6")
         QCoreApplication.processEvents()
         try:
             img = grab_pil(window)
@@ -123,6 +131,9 @@ def main():
             import traceback
             print(f"    Error: {e}")
             traceback.print_exc()
+        if name == "dashboard" and hasattr(window, "power_button"):
+            window.power_button.setProperty("state", "off")
+            window.power_button.set_active_state(False, animate=False)
         QTimer.singleShot(200, capture_next)
 
     print("Showing window...")

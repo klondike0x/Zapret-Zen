@@ -4,6 +4,8 @@ __pycache__/
 *.pyd
 *.so
 
+docs/
+
 # venv
 .venv/
 venv/
