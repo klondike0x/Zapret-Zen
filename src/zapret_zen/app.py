@@ -349,11 +349,8 @@ def run(argv: list[str] | None = None) -> int:
                 backend = BackendWorkerClient(app)
                 _startup_trace("attach_backend: client created")
                 context.backend = backend
-                window.attach_backend_client(backend)
+                window.attach_backend_client(backend, deferred_autostart=autostart_callback)
                 _startup_trace("attach_backend: attached")
-                if autostart_callback is not None:
-                    autostart_callback()
-                    _startup_trace("attach_backend: autostart callback done")
 
             QTimer.singleShot(900, _attach_backend_after_show)
             _startup_trace("finish_bootstrap: backend attach scheduled")

@@ -20,11 +20,58 @@ from zapret_zen.services.merge import MergeEngine
 from zapret_zen.services.settings import SettingsManager
 from zapret_zen.services.storage import StorageManager
 
+_MOD_SETTING_ENUMS = {
+    "zapret_ipset_mode": {"loaded", "none", "any"},
+    "zapret_game_filter_mode": {"disabled", "tcp", "udp", "tcpudp"},
+    "tg_proxy_media_mode": {"default", "media_fix", "empty"},
+}
+_MOD_SETTING_STRINGS = {
+    "zapret_udp_exclude_ports",
+    "tg_proxy_host",
+    "tg_proxy_dc_ip",
+    "tg_proxy_cfproxy_domain",
+    "tg_proxy_fake_tls_domain",
+}
+_MOD_SETTING_BOOLS = {"tg_proxy_cfproxy_enabled", "tg_proxy_cfproxy_priority"}
+_MOD_SETTING_PORTS = {"tg_proxy_port"}
+_MOD_SETTING_POSITIVE_INTS = {"tg_proxy_buf_kb", "tg_proxy_pool_size"}
+MOD_SETTING_KEYS = (
+    set(_MOD_SETTING_ENUMS) | _MOD_SETTING_STRINGS | _MOD_SETTING_BOOLS
+    | _MOD_SETTING_PORTS | _MOD_SETTING_POSITIVE_INTS
+)
+
+
+def _normalize_mod_setting(key: str, value: object) -> object | None:
+    if key in _MOD_SETTING_ENUMS:
+        text = str(value).strip().lower()
+        if key == "zapret_game_filter_mode" and text == "all":
+            return "tcpudp"
+        return text if text in _MOD_SETTING_ENUMS[key] else None
+    if key in _MOD_SETTING_BOOLS:
+        if isinstance(value, bool):
+            return value
+        return str(value).strip().lower() in {"1", "true", "yes", "on"}
+    if key in _MOD_SETTING_PORTS:
+        try:
+            port = int(value)
+        except (TypeError, ValueError):
+            return None
+        return port if 1 <= port <= 65535 else None
+    if key in _MOD_SETTING_POSITIVE_INTS:
+        try:
+            number = int(value)
+        except (TypeError, ValueError):
+            return None
+        return number if number > 0 else None
+    if key in _MOD_SETTING_STRINGS:
+        return str(value).strip()
+    return None
+
 
 class ModsManager:
     METADATA_FILENAME = "mod.json"
     UNKNOWN_AUTHOR = "неизвестен"
-    ALLOWED_MOD_SUFFIXES = {".txt", ".ps1", ".bat"}
+    ALLOWED_MOD_SUFFIXES = {".txt", ".ps1", ".bat", ".json"}
     _EMOJI_CHOICES = ["✨", "🪄", "🔥", "⚡", "🧩", "🎮", "🌐", "🛡️", "🚀", "💎", "📦", "🧪"]
     def __init__(
         self,
@@ -246,8 +293,61 @@ class ModsManager:
         enabled_ids = {item.id for item in installed if item.enabled}
         self.settings.update(enabled_mod_ids=sorted(enabled_ids))
         self.merge.rebuild()
+        if enabled:
+            self.apply_declared_settings(mod_id)
         self.logging.log("info", "Mod state changed", mod_id=mod_id, enabled=enabled)
         return entry
+
+    def read_declared_settings(self, mod_id: str) -> dict[str, object]:
+        entry = next((item for item in self.list_installed() if item.id == mod_id), None)
+        if entry is None:
+            return {}
+        meta_path = Path(entry.path) / self.METADATA_FILENAME
+        if not meta_path.is_file():
+            return {}
+        try:
+            metadata = json.loads(meta_path.read_text(encoding="utf-8-sig"))
+        except (OSError, ValueError):
+            return {}
+        raw = metadata.get("settings") if isinstance(metadata, dict) else None
+        if not isinstance(raw, dict):
+            return {}
+        result: dict[str, object] = {}
+        for raw_key, raw_value in raw.items():
+            key = str(raw_key).strip()
+            normalized = _normalize_mod_setting(key, raw_value)
+            if normalized is None:
+                reason = "unknown" if key not in MOD_SETTING_KEYS else "rejected"
+                self.logging.log("warning", f"Mod setting {reason}", mod_id=mod_id, key=key)
+                continue
+            result[key] = normalized
+        return result
+
+    def apply_declared_settings(self, mod_id: str) -> bool:
+        overrides = self.read_declared_settings(mod_id)
+        if not overrides:
+            return False
+        self._write_overrides_into_default_profile(overrides)
+        active_id = str(self.settings.get().active_profile_id or "default").strip()
+        if active_id == "default":
+            self.settings.update(**overrides)
+        self.logging.log("info", "Mod settings applied to default profile", mod_id=mod_id, keys=sorted(overrides))
+        return True
+
+    def _write_overrides_into_default_profile(self, overrides: dict[str, object]) -> None:
+        profiles_path = self.storage.paths.data_dir / "profiles.json"
+        profiles = self.storage.read_json(profiles_path, default=[]) or []
+        if not isinstance(profiles, list):
+            return
+        for item in profiles:
+            if isinstance(item, dict) and item.get("id") == "default":
+                snapshot = item.get("settings_snapshot")
+                if not isinstance(snapshot, dict):
+                    snapshot = {}
+                snapshot.update(overrides)
+                item["settings_snapshot"] = snapshot
+                self.storage.write_json(profiles_path, profiles)
+                return
 
     def remove(self, mod_id: str) -> None:
         installed = [item for item in self.list_installed() if item.id != mod_id]
@@ -408,6 +508,7 @@ class ModsManager:
         enabled_ids = {item.id for item in installed if item.enabled}
         self.settings.update(enabled_mod_ids=sorted(enabled_ids))
         self.merge.rebuild()
+        self.apply_declared_settings(entry.id)
         self.logging.log("info", "Zapret bundle imported", mod_id=mod_id, path=str(target_dir), generals=general_scripts, source=source_url or "local")
         return entry
 
