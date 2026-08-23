@@ -315,6 +315,44 @@ def _reconfigure_zapret(context):
     _finish_zapret_reconfiguration(context, restart=was_running)
 
 
+_TG_PROXY_SETTINGS_FIELDS = (
+    "tg_proxy_host",
+    "tg_proxy_port",
+    "tg_proxy_secret",
+    "tg_proxy_dc_ip",
+    "tg_proxy_media_mode",
+    "tg_proxy_cfproxy_enabled",
+    "tg_proxy_cfproxy_priority",
+    "tg_proxy_cfproxy_domain",
+    "tg_proxy_fake_tls_domain",
+    "tg_proxy_buf_kb",
+    "tg_proxy_pool_size",
+)
+
+
+def _tg_settings_signature(context):
+    settings = context.settings.get()
+    return tuple(getattr(settings, field, None) for field in _TG_PROXY_SETTINGS_FIELDS)
+
+
+def _is_component_running(context, component_id: str) -> bool:
+    for item in context.processes.list_states():
+        if item.component_id == component_id and item.status == "running":
+            return True
+    return False
+
+
+def _restart_tg_ws_proxy_if_settings_changed(context, signature_before, was_running: bool) -> None:
+    if not was_running or _tg_settings_signature(context) == signature_before:
+        return
+    try:
+        context.processes.stop_component("tg-ws-proxy")
+        context.processes.start_component("tg-ws-proxy")
+        context.logging.log("info", "tg-ws-proxy restarted after mod settings change")
+    except Exception as error:
+        context.logging.log("warning", "Failed to restart tg-ws-proxy after mod settings change", error=str(error))
+
+
 def _run_action(context, action: str, payload: dict[str, Any], emit_progress: callable | None = None) -> dict[str, Any]:
     payload = {key: value for key, value in payload.items() if not str(key).startswith("_")}
     context.settings.reload()
@@ -672,6 +710,8 @@ def _handle_toggle_mod(context, payload, emit_progress):
     mod_id = str(payload.get("mod_id", "")).strip()
     if not mod_id:
         return {}
+    tg_sig_before = _tg_settings_signature(context)
+    tg_was_running = _is_component_running(context, "tg-ws-proxy")
     with _reconfigure_zapret(context):
         installed = {item.id: item for item in context.mods.list_installed()}
         if mod_id not in installed:
@@ -679,6 +719,7 @@ def _handle_toggle_mod(context, payload, emit_progress):
             installed = {item.id: item for item in context.mods.list_installed()}
         if mod_id in installed:
             context.mods.set_enabled(mod_id, not installed[mod_id].enabled)
+    _restart_tg_ws_proxy_if_settings_changed(context, tg_sig_before, tg_was_running)
     result = {"mod_id": mod_id}
     result.update(_snapshot(context))
     result.update(_mods_payload(context))
@@ -784,12 +825,15 @@ def _handle_import_mod_from_github(context, payload, emit_progress):
     repo_url = str(payload.get("repo_url", "")).strip()
     previous_selected_general = str(payload.get("previous_selected_general", "")).strip()
     imported_id = ""
+    tg_sig_before = _tg_settings_signature(context)
+    tg_was_running = _is_component_running(context, "tg-ws-proxy")
     with _reconfigure_zapret(context):
         if repo_url:
             entry = context.mods.import_from_github(repo_url)
             imported_id = str(entry.id)
             if previous_selected_general:
                 context.settings.update(selected_zapret_general=previous_selected_general)
+    _restart_tg_ws_proxy_if_settings_changed(context, tg_sig_before, tg_was_running)
     if imported_id:
         _check_mod_welcome(context, imported_id)
     result = {"repo_url": repo_url}
@@ -805,12 +849,15 @@ def _handle_import_mod_from_paths(context, payload, emit_progress):
     paths = [str(item).strip() for item in raw_paths if str(item).strip()]
     previous_selected_general = str(payload.get("previous_selected_general", "")).strip()
     imported_id = ""
+    tg_sig_before = _tg_settings_signature(context)
+    tg_was_running = _is_component_running(context, "tg-ws-proxy")
     with _reconfigure_zapret(context):
         if paths:
             entry = context.mods.import_from_paths(paths)
             imported_id = str(entry.id)
             if previous_selected_general:
                 context.settings.update(selected_zapret_general=previous_selected_general)
+    _restart_tg_ws_proxy_if_settings_changed(context, tg_sig_before, tg_was_running)
     if imported_id:
         _check_mod_welcome(context, imported_id)
     result = {"paths": paths}
@@ -825,12 +872,15 @@ def _handle_import_mod_from_path(context, payload, emit_progress):
     path = str(payload.get("path", "")).strip()
     previous_selected_general = str(payload.get("previous_selected_general", "")).strip()
     imported_id = ""
+    tg_sig_before = _tg_settings_signature(context)
+    tg_was_running = _is_component_running(context, "tg-ws-proxy")
     with _reconfigure_zapret(context):
         if path:
             entry = context.mods.import_from_path(path)
             imported_id = str(entry.id)
             if previous_selected_general:
                 context.settings.update(selected_zapret_general=previous_selected_general)
+    _restart_tg_ws_proxy_if_settings_changed(context, tg_sig_before, tg_was_running)
     if imported_id:
         _check_mod_welcome(context, imported_id)
     result = {"path": path}
