@@ -24,6 +24,8 @@ class RuntimeDiagnostics:
         list_zapret_generals: Callable[[], list[dict[str, str]]],
         build_zapret_args: Callable[[Path, Path], list[str]],
         load_standard_test_targets: Callable[[], list[dict[str, str]]],
+        run_connectivity_check: Callable[..., dict[str, object]] | None = None,
+        set_diagnostic_override: Callable[[bool], None] | None = None,
     ) -> None:
         self.logging = logging
         self.settings = settings
@@ -33,7 +35,14 @@ class RuntimeDiagnostics:
         self._list_zapret_generals = list_zapret_generals
         self._build_zapret_args = build_zapret_args
         self._load_standard_test_targets = load_standard_test_targets
+        self._run_connectivity_check = run_connectivity_check
+        self._set_diagnostic_override = set_diagnostic_override
         self._diagnostic_runtime_override = False
+
+    def _set_runtime_override(self, value: bool) -> None:
+        self._diagnostic_runtime_override = value
+        if self._set_diagnostic_override is not None:
+            self._set_diagnostic_override(value)
 
     def capture_diagnostic_settings(self) -> dict[str, object]:
         settings = self.settings.get()
@@ -108,7 +117,7 @@ class RuntimeDiagnostics:
         if option is None:
             return {"status": "error", "error": "general not found", "passed_targets": 0, "total_targets": 0}
         settings_snapshot = self.capture_diagnostic_settings()
-        self._diagnostic_runtime_override = True
+        self._set_runtime_override(True)
         original_running = self.prepare_diagnostic_runtime(
             general_id=general_id,
             ipset_mode=ipset_mode,
@@ -136,7 +145,7 @@ class RuntimeDiagnostics:
         finally:
             self._stop_component("zapret")
             self.restore_diagnostic_settings(settings_snapshot)
-            self._diagnostic_runtime_override = False
+            self._set_runtime_override(False)
             if original_running and str(settings_snapshot.get("selected_zapret_general", "")):
                 self._start_component("zapret")
 
@@ -156,7 +165,7 @@ class RuntimeDiagnostics:
         per_general_steps = max(2, len(targets) + 1)
         total_steps = len(options) * per_general_steps
         try:
-            self._diagnostic_runtime_override = True
+            self._set_runtime_override(True)
             if original_running:
                 self._stop_component("zapret")
             for index, option in enumerate(options, start=1):
@@ -204,7 +213,7 @@ class RuntimeDiagnostics:
                 )
                 self._stop_component("zapret")
         finally:
-            self._diagnostic_runtime_override = False
+            self._set_runtime_override(False)
             self.restore_diagnostic_settings(settings_snapshot)
             if original_running and str(settings_snapshot.get("selected_zapret_general", "")):
                 self._start_component("zapret")
@@ -266,4 +275,6 @@ class RuntimeDiagnostics:
     ) -> dict[str, object]:
         if targets is None:
             targets = self._load_standard_test_targets()
-        return {"status": "error", "passed_targets": 0, "total_targets": len(targets), "failed_targets": [], "error": "Not implemented — delegate to ProcessManager"}
+        if self._run_connectivity_check is None:
+            return {"status": "error", "passed_targets": 0, "total_targets": len(targets), "failed_targets": [], "error": "connectivity check is unavailable"}
+        return dict(self._run_connectivity_check(general_id, stop_callback=stop_callback, targets=targets, progress_callback=progress_callback))

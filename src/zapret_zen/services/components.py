@@ -202,6 +202,8 @@ class ProcessManager:
             list_zapret_generals=self.list_zapret_generals,
             build_zapret_args=self._build_zapret_args,
             load_standard_test_targets=self._load_standard_test_targets,
+            run_connectivity_check=self._run_general_connectivity_check,
+            set_diagnostic_override=self._set_diagnostic_runtime_override,
         )
         self.updates = RuntimeUpdateManager(
             storage, logging, self.github,
@@ -909,6 +911,9 @@ Get-NetAdapter -ErrorAction SilentlyContinue | ForEach-Object {
 
     def _fortnite_service_selected(self) -> bool:
         return "fortnite" in {str(item) for item in list(self.settings.get().selected_service_ids or [])}
+
+    def _set_diagnostic_runtime_override(self, enabled: bool) -> None:
+        self._diagnostic_runtime_override = bool(enabled)
 
     def _should_force_fortnite_runtime_modes(self) -> bool:
         return self._fortnite_service_selected() and not self._diagnostic_runtime_override
