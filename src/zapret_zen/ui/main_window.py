@@ -14542,7 +14542,52 @@ class MainWindow(QMainWindow):
         except Exception as error:
             self._show_error(self._t("Mods"), str(error))
 
+    def _show_mod_welcome(self, welcome: dict[str, str]) -> None:
+        mod_name = str(welcome.get("mod_name", ""))
+        text = str(welcome.get("text", ""))
+        while self.mods_cards_layout.count():
+            child = self.mods_cards_layout.takeAt(0)
+            widget = child.widget()
+            if widget is not None:
+                widget.deleteLater()
+        card, card_layout = self._card()
+        card.setProperty("class", "modCard")
+        card_layout.setContentsMargins(24, 24, 24, 24)
+        card_layout.setSpacing(16)
+        if mod_name:
+            title = QLabel(self._t("Привет от мода", "Welcome from") + " " + mod_name)
+            title.setProperty("class", "title")
+            card_layout.addWidget(title)
+        text_edit = QTextEdit()
+        text_edit.setReadOnly(True)
+        text_edit.setMarkdown(text)
+        text_edit.setMinimumHeight(200)
+        text_edit.setMaximumHeight(400)
+        card_layout.addWidget(text_edit, 1)
+        btn_row = QHBoxLayout()
+        btn_row.addStretch(1)
+        continue_btn = QPushButton(self._t("Продолжить", "Continue"))
+        continue_btn.setProperty("class", "primary")
+        continue_btn.setMinimumHeight(38)
+        continue_btn.setMinimumWidth(160)
+        self._attach_button_animations(continue_btn)
+
+        def _dismiss() -> None:
+            self.context.settings.update(pending_mod_welcome={})
+            self.refresh_mods()
+
+        continue_btn.clicked.connect(_dismiss)
+        btn_row.addWidget(continue_btn)
+        card_layout.addLayout(btn_row)
+        self.mods_cards_layout.addWidget(card)
+        self.mods_cards_layout.addStretch(1)
+
     def refresh_mods(self, payload: object | None = None) -> None:
+        welcome = self.context.settings.get().pending_mod_welcome
+        if isinstance(welcome, dict) and welcome.get("text"):
+            self._show_mod_welcome(welcome)
+            return
+
         def _field(obj: object, name: str, default: object = "") -> object:
             if isinstance(obj, dict):
                 return obj.get(name, default)

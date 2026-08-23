@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import multiprocessing as mp
 import os
 import queue
@@ -47,6 +48,26 @@ def _mods_payload(context) -> dict[str, Any]:
         "index": context.mods.fetch_index(),
         "installed": list(context.mods.list_installed()),
     }
+
+
+def _check_mod_welcome(context, mod_id: str) -> None:
+    installed = {item.id: item for item in context.mods.list_installed()}
+    entry = installed.get(mod_id)
+    if entry is None:
+        return
+    mod_path = Path(str(entry.path or ""))
+    meta_path = mod_path / "mod.json"
+    if not meta_path.is_file():
+        return
+    try:
+        meta = json.loads(meta_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return
+    welcome = meta.get("welcome")
+    if not isinstance(welcome, str) or not welcome.strip():
+        return
+    mod_name = str(meta.get("name", entry.name or mod_id))
+    context.settings.update(pending_mod_welcome={"mod_name": mod_name, "text": welcome.strip()})
 
 def _general_file_records(context) -> list[FileRecord]:
     records: list[FileRecord] = []
@@ -669,6 +690,7 @@ def _handle_install_mod(context, payload, emit_progress):
     mod_id = str(payload.get("mod_id", "")).strip()
     if mod_id:
         context.mods.install(mod_id)
+        _check_mod_welcome(context, mod_id)
     result = {"mod_id": mod_id}
     result.update(_snapshot(context))
     result.update(_mods_payload(context))
@@ -761,11 +783,15 @@ def _handle_delete_mod_file(context, payload, emit_progress):
 def _handle_import_mod_from_github(context, payload, emit_progress):
     repo_url = str(payload.get("repo_url", "")).strip()
     previous_selected_general = str(payload.get("previous_selected_general", "")).strip()
+    imported_id = ""
     with _reconfigure_zapret(context):
         if repo_url:
-            context.mods.import_from_github(repo_url)
+            entry = context.mods.import_from_github(repo_url)
+            imported_id = str(entry.id)
             if previous_selected_general:
                 context.settings.update(selected_zapret_general=previous_selected_general)
+    if imported_id:
+        _check_mod_welcome(context, imported_id)
     result = {"repo_url": repo_url}
     result.update(_snapshot(context))
     result.update(_mods_payload(context))
@@ -778,11 +804,15 @@ def _handle_import_mod_from_paths(context, payload, emit_progress):
     raw_paths = payload.get("paths", []) or []
     paths = [str(item).strip() for item in raw_paths if str(item).strip()]
     previous_selected_general = str(payload.get("previous_selected_general", "")).strip()
+    imported_id = ""
     with _reconfigure_zapret(context):
         if paths:
-            context.mods.import_from_paths(paths)
+            entry = context.mods.import_from_paths(paths)
+            imported_id = str(entry.id)
             if previous_selected_general:
                 context.settings.update(selected_zapret_general=previous_selected_general)
+    if imported_id:
+        _check_mod_welcome(context, imported_id)
     result = {"paths": paths}
     result.update(_snapshot(context))
     result.update(_mods_payload(context))
@@ -794,11 +824,15 @@ def _handle_import_mod_from_paths(context, payload, emit_progress):
 def _handle_import_mod_from_path(context, payload, emit_progress):
     path = str(payload.get("path", "")).strip()
     previous_selected_general = str(payload.get("previous_selected_general", "")).strip()
+    imported_id = ""
     with _reconfigure_zapret(context):
         if path:
-            context.mods.import_from_path(path)
+            entry = context.mods.import_from_path(path)
+            imported_id = str(entry.id)
             if previous_selected_general:
                 context.settings.update(selected_zapret_general=previous_selected_general)
+    if imported_id:
+        _check_mod_welcome(context, imported_id)
     result = {"path": path}
     result.update(_snapshot(context))
     result.update(_mods_payload(context))
