@@ -7442,7 +7442,7 @@ class MainWindow(QMainWindow):
             (self._t("No DC override"), "empty"),
         ]
         tg_section.addWidget(QLabel(self._t("Media mode")))
-        media_w, media_grp = _segment(tg_media_items, "default", "tg_media_mode")
+        media_w, media_grp = _segment(tg_media_items, settings.tg_proxy_media_mode, "tg_media_mode")
         tg_section.addWidget(media_w)
         tg_dc = QTextEdit()
         tg_dc.setFixedHeight(72)
@@ -7719,8 +7719,6 @@ class MainWindow(QMainWindow):
 
         def _make_button_handler(key: str):
             def handler(btn: QAbstractButton) -> None:
-                if hasattr(btn, "_seg_value"):
-                    all_ctrl[f"_last_{key}"] = str(btn._seg_value)
                 self._save_settings_page(page)
             return handler
 
@@ -7862,9 +7860,6 @@ class MainWindow(QMainWindow):
         payload: dict[str, object] = {}
 
         def _read_seg(key: str) -> str | None:
-            cached = ctrl.get(f"_last_{key}")
-            if cached is not None:
-                return str(cached)
             grp = ctrl.get(key)
             if isinstance(grp, QButtonGroup):
                 for btn in grp.buttons():
