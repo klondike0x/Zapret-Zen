@@ -24,7 +24,7 @@ from zapret_zen.services.storage import StorageManager
 class ModsManager:
     METADATA_FILENAME = "mod.json"
     UNKNOWN_AUTHOR = "неизвестен"
-    ALLOWED_MOD_SUFFIXES = {".txt", ".ps1", ".bat"}
+    ALLOWED_MOD_SUFFIXES = {".txt", ".ps1", ".bat", ".json"}
     _EMOJI_CHOICES = ["✨", "🪄", "🔥", "⚡", "🧩", "🎮", "🌐", "🛡️", "🚀", "💎", "📦", "🧪"]
     def __init__(
         self,

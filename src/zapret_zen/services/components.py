@@ -1179,6 +1179,7 @@ Get-NetAdapter -ErrorAction SilentlyContinue | ForEach-Object {
         try:
             dns = self._import_dns_manager()
             presets = []
+            existing_ids: set[str] = set()
             for key, p in dns.PRESETS.items():
                 presets.append({
                     "id": key,
@@ -1187,10 +1188,64 @@ Get-NetAdapter -ErrorAction SilentlyContinue | ForEach-Object {
                     "ipv6": ", ".join(p.get("ipv6", [])),
                     "doh": p.get("doh", ""),
                 })
+                existing_ids.add(key)
+            presets.extend(self._load_mod_dns_presets(existing_ids))
             return presets
         except Exception as error:
             self.logging.log("warning", "Failed to list DNS presets", error=str(error))
             return []
+
+    def _load_mod_dns_presets(self, existing_ids: set[str]) -> list[dict[str, str]]:
+        installed_path = self.storage.paths.data_dir / "installed_mods.json"
+        if not installed_path.exists():
+            return []
+        try:
+            installed = json.loads(installed_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            return []
+        if not isinstance(installed, list):
+            return []
+        presets: list[dict[str, str]] = []
+        for mod_entry in installed:
+            if not isinstance(mod_entry, dict):
+                continue
+            if not mod_entry.get("enabled", False):
+                continue
+            mod_path = Path(str(mod_entry.get("path", "")))
+            dns_file = mod_path / "utils" / "dns_manager.json"
+            if not dns_file.is_file():
+                continue
+            try:
+                raw = json.loads(dns_file.read_text(encoding="utf-8"))
+            except (json.JSONDecodeError, OSError):
+                self.logging.log("warning", "Failed to read dns_manager.json", mod_id=mod_entry.get("id", ""))
+                continue
+            if not isinstance(raw, list):
+                continue
+            mod_id = str(mod_entry.get("id", "mod"))
+            for entry in raw:
+                if not isinstance(entry, dict):
+                    continue
+                preset_id = str(entry.get("id", "")).strip()
+                if not preset_id:
+                    continue
+                if preset_id in existing_ids:
+                    continue
+                existing_ids.add(preset_id)
+                ipv4_list = entry.get("ipv4", [])
+                ipv6_list = entry.get("ipv6", [])
+                if not isinstance(ipv4_list, list):
+                    ipv4_list = []
+                if not isinstance(ipv6_list, list):
+                    ipv6_list = []
+                presets.append({
+                    "id": preset_id,
+                    "name": str(entry.get("name", preset_id)),
+                    "ipv4": ", ".join(str(ip) for ip in ipv4_list),
+                    "ipv6": ", ".join(str(ip) for ip in ipv6_list),
+                    "doh": entry.get("doh", ""),
+                })
+        return presets
 
     def _build_worker_command(self, worker: str, **kwargs: Any) -> list[str]:
         cmd: list[str]
