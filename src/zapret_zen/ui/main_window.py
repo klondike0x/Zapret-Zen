@@ -11,6 +11,7 @@ import time
 import sys
 import threading
 import webbrowser
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
@@ -4406,6 +4407,11 @@ class MainWindow(QMainWindow):
         self._file_tag_render_timer.timeout.connect(self._render_file_tags_chunk)
         self._backend_tasks: dict[str, str] = {}
         self._backend_attached = False
+        self._deferred_autostart_fn: Callable[[], None] | None = None
+        self._autostart_watchdog = QTimer(self)
+        self._autostart_watchdog.setSingleShot(True)
+        self._autostart_watchdog.setInterval(120000)
+        self._autostart_watchdog.timeout.connect(self._on_autostart_watchdog_timeout)
         self._component_defs_cache: dict[str, ComponentDefinition] = {}
         self._component_states_cache: dict[str, ComponentState] = {}
         self._mods_index_cache: list[object] = []
@@ -4541,15 +4547,26 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
-    def attach_backend_client(self, backend) -> None:
+    def attach_backend_client(self, backend, deferred_autostart: Callable[[], None] | None = None) -> None:
         self.context.backend = backend
         self._backend_attached = True
         self._connect_backend_signals(backend)
         self._ensure_local_runtime_snapshot()
         self.refresh_dashboard()
         self._sync_power_aura_geometry()
-        if not self._startup_snapshot_ready:
+        self._deferred_autostart_fn = deferred_autostart
+        if not self._startup_snapshot_ready or deferred_autostart is not None:
             QTimer.singleShot(0, lambda: self._submit_backend_task("load_startup_snapshot", action_id="__startup_snapshot__"))
+
+    def _run_deferred_autostart(self) -> None:
+        fn = self._deferred_autostart_fn
+        if fn is None:
+            return
+        self._deferred_autostart_fn = None
+        try:
+            fn()
+        except Exception as error:
+            self.context.logging.log("warning", "deferred_autostart_failed", error=str(error))
 
     def _themed_icon_color(self, filename: str) -> QColor | None:
         if filename not in {"power.svg", "share.svg", "trash.svg", "search.svg", "refresh.svg", "external.svg", "vpn.svg", "vpn.png"}:
@@ -8098,13 +8115,16 @@ class MainWindow(QMainWindow):
             return
         self._toggle_master_runtime()
 
-    def start_enabled_components_async(self, *, autostart_only: bool = False) -> None:
+    def start_enabled_components_async(self, *, autostart_only: bool = False, _attempt: int = 0) -> None:
         if self._toggle_in_progress:
+            if _attempt < 30:
+                QTimer.singleShot(1000, lambda a=autostart_only, n=_attempt + 1: self.start_enabled_components_async(autostart_only=a, _attempt=n))
             return
         self._loading_action = "connect"
         self._toggle_in_progress = True
         if autostart_only:
             self._autostart_in_progress = True
+            self._autostart_watchdog.start()
         self._loading_timer.start()
         self._advance_loading_caption()
         self._state_generation += 1
@@ -8795,6 +8815,7 @@ class MainWindow(QMainWindow):
                 "installed": payload.get("installed", []),
             }
             self._mark_dirty("dashboard", "services", "components", "mods", "files", "tray")
+            self._run_deferred_autostart()
             return
         if action == "apply_settings":
             desired_autostart = bool(self.context.settings.get().autostart_windows)
@@ -9005,6 +9026,7 @@ class MainWindow(QMainWindow):
             self._ensure_local_runtime_snapshot()
             self._startup_snapshot_ready = True
             self._mark_dirty("dashboard", "components", "tray")
+            self._run_deferred_autostart()
             return
         if action in {"toggle_master_runtime", "start_enabled_components", "select_general"}:
             self._profile_restart_pending = False
@@ -10481,6 +10503,7 @@ class MainWindow(QMainWindow):
 
     def _on_master_toggle_finished(self) -> None:
         self._loading_timer.stop()
+        self._autostart_watchdog.stop()
         self._toggle_in_progress = False
         self._autostart_in_progress = False
         self.power_button.setEnabled(bool(self._startup_snapshot_ready))
@@ -10495,6 +10518,37 @@ class MainWindow(QMainWindow):
             title, text = self._pending_info_message
             self._pending_info_message = None
             self._show_info(title, text)
+
+    def _on_autostart_watchdog_timeout(self) -> None:
+        worker_alive = True
+        backend = self.context.backend
+        process = getattr(backend, "_process", None) if backend is not None else None
+        if process is not None and hasattr(process, "is_alive"):
+            try:
+                worker_alive = bool(process.is_alive())
+            except Exception:
+                worker_alive = True
+        self.context.logging.log(
+            "warning",
+            "autostart_watchdog_timeout",
+            worker_alive=worker_alive,
+        )
+        self._autostart_watchdog.stop()
+        self._loading_timer.stop()
+        self._toggle_in_progress = False
+        self._autostart_in_progress = False
+        self._profile_restart_pending = False
+        self.power_button.setEnabled(bool(self._startup_snapshot_ready))
+        self._update_power_icon()
+        if isinstance(self.power_button, AnimatedPowerButton):
+            self.power_button.set_spinner_active(False)
+        self._component_states_cache = {}
+        self._ensure_local_runtime_snapshot()
+        self._mark_dirty("dashboard", "components", "tray")
+        self.refresh_all()
+        self._toggle_status_card.setVisible(False)
+        self._toggle_status_label.setText("")
+        self._stop_toggle_pulse()
 
     def _advance_loading_caption(self) -> None:
         if not self._toggle_in_progress:
