@@ -7377,6 +7377,10 @@ class MainWindow(QMainWindow):
         ctrl["udp_exclude"] = udp_excl
         zapret_section.addWidget(QLabel(self._t("Exclude UDP ports")))
         zapret_section.addWidget(udp_excl)
+        quic_cb = QCheckBox(self._t("Block QUIC (UDP 443)"))
+        quic_cb.setChecked(settings.zapret_block_quic)
+        ctrl["block_quic"] = quic_cb
+        zapret_section.addWidget(quic_cb)
 
         layout.addStretch(1)
         return page, ctrl
@@ -7828,6 +7832,9 @@ class MainWindow(QMainWindow):
         inp = ctrl.get("udp_exclude")
         if isinstance(inp, QLineEdit):
             inp.setText(settings.zapret_udp_exclude_ports or "")
+        cb = ctrl.get("block_quic")
+        if isinstance(cb, QCheckBox):
+            cb.setChecked(settings.zapret_block_quic)
 
         inp = ctrl.get("tg_host")
         if isinstance(inp, QLineEdit):
@@ -7920,6 +7927,9 @@ class MainWindow(QMainWindow):
         inp = ctrl.get("udp_exclude")
         if isinstance(inp, QLineEdit):
             payload["zapret_udp_exclude_ports"] = inp.text()
+        cb = ctrl.get("block_quic")
+        if isinstance(cb, QCheckBox):
+            payload["zapret_block_quic"] = cb.isChecked()
 
         inp = ctrl.get("tg_host")
         if isinstance(inp, QLineEdit):

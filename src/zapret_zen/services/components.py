@@ -915,6 +915,54 @@ Get-NetAdapter -ErrorAction SilentlyContinue | ForEach-Object {
     def _set_diagnostic_runtime_override(self, enabled: bool) -> None:
         self._diagnostic_runtime_override = bool(enabled)
 
+    QUIC_BLOCK_RULE_NAME = "Zapret-Zen Block QUIC"
+
+    def _quic_block_rule_exists(self) -> bool:
+        try:
+            proc = self._run_quiet([
+                "netsh", "advfirewall", "firewall", "show", "rule",
+                f"name={self.QUIC_BLOCK_RULE_NAME}",
+            ])
+        except Exception as error:
+            self.logging.log("warning", "Failed to query QUIC firewall rule", error=str(error))
+            return False
+        return proc.returncode == 0
+
+    def set_quic_blocked(self, blocked: bool) -> bool:
+        exists = self._quic_block_rule_exists()
+        if blocked == exists:
+            return True
+        command = [
+            "netsh", "advfirewall", "firewall",
+            "add" if blocked else "delete", "rule",
+            f"name={self.QUIC_BLOCK_RULE_NAME}",
+        ]
+        if blocked:
+            command += ["dir=out", "action=block", "protocol=udp", "remoteport=443"]
+        try:
+            proc = self._run_quiet(command)
+        except Exception as error:
+            self.logging.log("warning", "Failed to change QUIC firewall rule", enable=blocked, error=str(error))
+            return False
+        ok = proc.returncode == 0
+        if ok:
+            self.logging.log("info", "QUIC firewall rule updated", enabled=blocked)
+        else:
+            self.logging.log(
+                "warning",
+                "QUIC firewall rule change failed",
+                enabled=blocked,
+                output=(proc.stderr or proc.stdout or "").strip(),
+            )
+        return ok
+
+    def ensure_quic_firewall_state(self) -> None:
+        try:
+            desired = bool(self.settings.get().zapret_block_quic)
+        except Exception:
+            return
+        self.set_quic_blocked(desired)
+
     def _should_force_fortnite_runtime_modes(self) -> bool:
         return self._fortnite_service_selected() and not self._diagnostic_runtime_override
 

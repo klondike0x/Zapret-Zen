@@ -14,6 +14,7 @@ _SNAPSHOT_SKIP = {
     "dismissed_component_updates",
     "notifications_enabled",
     "work_root",
+    "zapret_block_quic",
 }
 
 

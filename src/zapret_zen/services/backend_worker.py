@@ -239,6 +239,10 @@ def _worker_main(task_queue, result_queue) -> None:
         result_queue.put({"id": task_id, "action": action, "ok": True, "kind": "progress", "payload": payload})
 
     context = bootstrap_application()
+    try:
+        context.processes.ensure_quic_firewall_state()
+    except Exception:
+        pass
     while True:
         task = task_queue.get()
         if not isinstance(task, dict):
@@ -522,6 +526,7 @@ def _handle_apply_settings(context, payload, emit_progress):
     theme_before = before.theme
     language_before = before.language
     autostart_before = bool(before.autostart_windows)
+    quic_before = bool(before.zapret_block_quic)
     context.settings.update(**effective_payload)
     if "fortnite" in {str(item) for item in list(before.selected_service_ids or [])}:
         effective_payload["zapret_ipset_mode"] = "any"
@@ -560,6 +565,9 @@ def _handle_apply_settings(context, payload, emit_progress):
     zapret_restarted = False
     if zapret_before != zapret_after:
         zapret_restarted = _finish_zapret_reconfiguration(context, restart=zapret_was_running)
+    quic_after = bool(effective_payload.get("zapret_block_quic", context.settings.get().zapret_block_quic))
+    if quic_before != quic_after:
+        context.processes.set_quic_blocked(quic_after)
     result = {
         "theme_changed": theme_before != context.settings.get().theme,
         "language_changed": language_before != context.settings.get().language,
