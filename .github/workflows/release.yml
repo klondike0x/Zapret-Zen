@@ -195,6 +195,7 @@ jobs:
             $tag = "${{ inputs.tag }}"
           }
           if (-not $tag -or $tag -eq "") { $tag = "v0.0.0" }
+          $tag = $tag.Trim()
           $version = $tag.TrimStart("v")
           $name = "${{ inputs.release_name }}"
           if (-not $name -or $name -eq "") { $name = "Zapret-Zen $version" }
@@ -370,13 +371,35 @@ jobs:
   publish-sourceforge:
     needs: package-and-release
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
       - name: Download release assets
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          TAG="${{ needs.package-and-release.outputs.tag }}"
+          echo "Resolved tag: '${TAG}'"
+          if [ -z "$TAG" ]; then
+            echo "::error::tag output from package-and-release is empty"
+            exit 1
+          fi
+          gh release view "$TAG" --json tagName,name,isDraft,assets \
+            --jq '{tag: .tagName, name: .name, draft: .isDraft, assets: [.assets[].name]}'
           mkdir -p sf_assets
-          gh release download "${{ needs.package-and-release.outputs.tag }}" --dir sf_assets --clobber
+          ok=0
+          for attempt in 1 2 3 4 5; do
+            echo "Download attempt ${attempt}..."
+            if gh release download "$TAG" --dir sf_assets --clobber; then
+              ok=1
+              break
+            fi
+            sleep 10
+          done
+          if [ "$ok" -ne 1 ]; then
+            echo "::error::Failed to download release assets after 5 attempts"
+            exit 1
+          fi
           ls -la sf_assets
 
       - name: Set up SSH key
