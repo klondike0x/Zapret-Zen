@@ -8,8 +8,9 @@
 
 **Утилита для удобного и быстрого обхода блокировок на Windows**
 
-<br />
-<br />
+<a href="https://peshk0v.github.io/Zapret-Zen/">
+  <img src="https://img.shields.io/badge/Официальный_Сайт-Zapret--Zen-42a5f5?style=for-the-badge&logo=github" alt="Официальный сайт проекта" />
+</a>
 
 [![Version](https://img.shields.io/github/v/release/peshk0v/Zapret-Zen?style=for-the-badge&logo=github&color=5865F2&label=Версия)](https://github.com/peshk0v/Zapret-Zen/releases)
 [![Views](https://img.shields.io/endpoint?url=https://hits.dwyl.com/peshk0v/Zapret-Zen.json&style=for-the-badge&color=42a5f5&label=Просмотров)](https://github.com/peshk0v/Zapret-Zen)
