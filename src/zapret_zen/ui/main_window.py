@@ -4564,6 +4564,7 @@ class MainWindow(QMainWindow):
             return
         self._deferred_autostart_fn = None
         try:
+            self.context.logging.log("info", "deferred_autostart_fired")
             fn()
         except Exception as error:
             self.context.logging.log("warning", "deferred_autostart_failed", error=str(error))
@@ -8128,8 +8129,10 @@ class MainWindow(QMainWindow):
     def start_enabled_components_async(self, *, autostart_only: bool = False, _attempt: int = 0) -> None:
         if self._toggle_in_progress:
             if _attempt < 30:
+                self.context.logging.log("info", "start_enabled_components_retry", attempt=_attempt + 1, autostart_only=autostart_only)
                 QTimer.singleShot(1000, lambda a=autostart_only, n=_attempt + 1: self.start_enabled_components_async(autostart_only=a, _attempt=n))
             return
+        self.context.logging.log("info", "start_enabled_components_requested", autostart_only=autostart_only, attempt=_attempt)
         self._loading_action = "connect"
         self._toggle_in_progress = True
         if autostart_only:

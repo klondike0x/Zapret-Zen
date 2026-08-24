@@ -437,14 +437,22 @@ def _handle_start_enabled_components(context, payload, emit_progress):
     _sync_dns_manager_component_from_services(context)
     autostart_only = bool(payload.get("autostart_only", False)) if isinstance(payload, dict) else False
     components = context.processes.list_components()
-    if autostart_only:
-        for component in components:
-            if component.enabled and component.autostart:
-                context.processes.start_component(component.id)
-    else:
-        for component in components:
-            if component.enabled:
-                context.processes.start_component(component.id)
+    states = {item.component_id: item for item in context.processes.list_states()}
+    started: list[str] = []
+    skipped: list[str] = []
+    for component in components:
+        if not component.enabled:
+            continue
+        if autostart_only and not component.autostart:
+            continue
+        state = states.get(component.id)
+        if state is not None and state.status == "running":
+            skipped.append(component.id)
+            continue
+        context.processes.start_component(component.id)
+        started.append(component.id)
+    if started or skipped:
+        context.logging.log("info", "Start enabled components completed", started=started, skipped_running=skipped, autostart_only=autostart_only)
     # Force fresh state computation after all components started
     import time
     context.processes._invalidate_state_cache()
