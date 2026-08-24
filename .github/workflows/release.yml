@@ -385,7 +385,8 @@ jobs:
             exit 1
           fi
           gh release view "$TAG" --json tagName,name,isDraft,assets \
-            --jq '{tag: .tagName, name: .name, draft: .isDraft, assets: [.assets[].name]}'
+            --jq '{tag: .tagName, name: .name, draft: .isDraft, assets: [.assets[].name]}' \
+            || { echo "::warning::Release '$TAG' not visible via API yet; existing releases:"; gh release list --limit 20 || true; }
           mkdir -p sf_assets
           ok=0
           for attempt in 1 2 3 4 5; do
