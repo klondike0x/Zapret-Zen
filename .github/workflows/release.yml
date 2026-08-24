@@ -379,22 +379,25 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           TAG="${{ needs.package-and-release.outputs.tag }}"
-          echo "Resolved tag: '${TAG}'"
+          echo "::notice::Resolved tag: '${TAG}'"
           if [ -z "$TAG" ]; then
             echo "::error::tag output from package-and-release is empty"
             exit 1
           fi
-          gh release view "$TAG" --json tagName,name,isDraft,assets \
-            --jq '{tag: .tagName, name: .name, draft: .isDraft, assets: [.assets[].name]}' \
-            || { echo "::warning::Release '$TAG' not visible via API yet; existing releases:"; gh release list --limit 20 || true; }
+          if ! view_out=$(gh release view "$TAG" --json tagName,name,draft,isPrerelease,assets 2>&1); then
+            echo "::warning::gh release view failed: ${view_out//$'\n'/ | }"
+          else
+            echo "::notice::Release found: ${view_out}"
+          fi
           mkdir -p sf_assets
           ok=0
           for attempt in 1 2 3 4 5; do
             echo "Download attempt ${attempt}..."
-            if gh release download "$TAG" --dir sf_assets --clobber; then
+            if out=$(gh release download "$TAG" --dir sf_assets --clobber 2>&1); then
               ok=1
               break
             fi
+            echo "::warning::Download attempt ${attempt} failed: ${out//$'\n'/ | }"
             sleep 10
           done
           if [ "$ok" -ne 1 ]; then
