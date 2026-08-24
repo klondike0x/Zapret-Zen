@@ -24,6 +24,10 @@ on:
         required: false
         default: ""
 
+env:
+  SF_USERNAME: peshk0v
+  SF_PROJECT: zapret-zen
+
 jobs:
   build-windows-x64:
     runs-on: windows-latest
@@ -133,6 +137,9 @@ jobs:
     runs-on: windows-latest
     permissions:
       contents: write
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+      version: ${{ steps.meta.outputs.version }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -251,34 +258,50 @@ jobs:
           }
           "exists=$exists" >> $env:GITHUB_OUTPUT
 
-      - name: Read release notes for new release
-        id: notes
-        if: steps.release_check.outputs.exists == 'false'
+      - name: Prepare release body
         shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DISPATCH_BODY: ${{ inputs.body }}
+          RELEASE_EXISTS: ${{ steps.release_check.outputs.exists }}
         run: |
-          $body = ""
-          $inputBody = "${{ inputs.body }}"
+          $ErrorActionPreference = "Stop"
+          $version = "${{ steps.meta.outputs.version }}"
+          $tag = "${{ steps.meta.outputs.tag }}"
 
-          # Priority 1: workflow_dispatch body input
-          if ($inputBody.Trim()) {
-            $body = $inputBody
-          }
-          # Priority 2: release_note.md file
-          elseif (Test-Path "release_note.md") {
-            $content = Get-Content "release_note.md" -Raw -Encoding UTF8
-            if ($content -and $content.Trim()) {
-              $body = $content.TrimEnd()
+          $body = ""
+          if ($env:DISPATCH_BODY -and $env:DISPATCH_BODY.Trim()) {
+            $body = $env:DISPATCH_BODY
+          } elseif (Test-Path "release_note.md") {
+            $fileBody = Get-Content "release_note.md" -Raw -Encoding UTF8
+            if ($fileBody -and $fileBody.Trim()) {
+              $body = $fileBody.TrimEnd()
             }
           }
 
-          # Priority 3: default fallback
-          if (-not $body.Trim()) {
-            $body = "Zapret-Zen ${{ steps.meta.outputs.version }} release."
+          if (-not $body.Trim() -and $env:RELEASE_EXISTS -eq "true") {
+            $existing = gh release view $tag --json body --jq .body 2>$null
+            if ($LASTEXITCODE -eq 0 -and $existing -and $existing.Trim()) {
+              $body = $existing
+            }
           }
 
-          # Write to temp file for gh release create
-          $body | Out-File -FilePath "release_body.txt" -Encoding UTF8 -NoNewline
-          Write-Host "Release notes prepared (length: $($body.Length) chars)"
+          if (-not $body.Trim()) {
+            $body = "Zapret-Zen $version release."
+          }
+
+          if ($body -notmatch "sourceforge\.net/projects/$env:SF_PROJECT") {
+            $repoUrl = "https://github.com/${{ github.repository }}/releases/tag/$tag"
+            $sfProject = "https://sourceforge.net/projects/$env:SF_PROJECT/"
+            $sfFiles = "${sfProject}files/$version/"
+            $body += "`n`n---`n`n## Зеркала загрузки`n" +
+              "- [GitHub Releases]($repoUrl)`n" +
+              "- [SourceForge — проект]($sfProject)`n" +
+              "- [SourceForge — файлы $version]($sfFiles)"
+          }
+
+          $body | Out-File -FilePath "release_body.txt" -Encoding utf8NoBOM -NoNewline
+          Write-Host "Release body prepared (length: $($body.Length) chars)"
 
       - name: Create new GitHub release
         if: steps.release_check.outputs.exists == 'false'
@@ -323,7 +346,13 @@ jobs:
           $tag = "${{ steps.meta.outputs.tag }}"
           $version = "${{ steps.meta.outputs.version }}"
 
-          Write-Host "Updating assets for existing release $tag (preserving title and description)"
+          Write-Host "Updating release $tag (body from prepared release_body.txt)"
+
+          gh release edit $tag --notes-file "release_body.txt"
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "Failed to update release body"
+            exit 1
+          }
 
           # Upload all files with --clobber to replace existing assets
           $files = Get-ChildItem ".\release_$version\*" -File
@@ -337,3 +366,30 @@ jobs:
           }
 
           Write-Host "All assets updated successfully"
+
+  publish-sourceforge:
+    needs: package-and-release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p sf_assets
+          gh release download "${{ needs.package-and-release.outputs.tag }}" --dir sf_assets --clobber
+          ls -la sf_assets
+
+      - name: Set up SSH key
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SF_SSH_KEY }}" > ~/.ssh/sf_key
+          chmod 600 ~/.ssh/sf_key
+          ssh-keyscan -H -t rsa,ecdsa,ed25519 frs.sourceforge.net >> ~/.ssh/known_hosts
+
+      - name: Upload to SourceForge files
+        run: |
+          VERSION="${{ needs.package-and-release.outputs.version }}"
+          rsync -avzP \
+            -e "ssh -i $HOME/.ssh/sf_key -o StrictHostKeyChecking=yes" \
+            sf_assets/ \
+            "$SF_USERNAME@frs.sourceforge.net:/home/frs/p/$SF_PROJECT/$VERSION/"

@@ -1,0 +1,41 @@
+name: Mirror to SourceForge
+
+on:
+  push:
+    branches:
+      - main
+      - master
+    tags:
+      - '**'
+  workflow_dispatch:
+
+env:
+  SF_USERNAME: peshk0v
+  SF_PROJECT: zapret-zen
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Prepare known_hosts
+        id: known_hosts
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -H -t rsa,ecdsa,ed25519 git.code.sf.net > sf_known_hosts.tmp
+          {
+            echo "hosts<<EOF"
+            cat sf_known_hosts.tmp
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Push mirror to SourceForge
+        uses: pixta-dev/repository-mirroring-action@v1
+        with:
+          target_repo_url: ${{ env.SF_USERNAME }}@git.code.sf.net:p/${{ env.SF_PROJECT }}/code
+          ssh_private_key: ${{ secrets.SF_SSH_KEY }}
+          known_hosts: ${{ steps.known_hosts.outputs.hosts }}
