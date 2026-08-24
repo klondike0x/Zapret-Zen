@@ -12,7 +12,7 @@ APP_ID = "1539264958054006825"
 
 class DiscordRPCService:
     def __init__(self) -> None:
-        self._detail = "Использует для обхода блокировок."
+        self._detail = "Использует для обхода блокировок"
         self._running = False
         self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
