@@ -4407,7 +4407,6 @@ class MainWindow(QMainWindow):
         self._file_tag_render_timer.timeout.connect(self._render_file_tags_chunk)
         self._backend_tasks: dict[str, str] = {}
         self._backend_attached = False
-        self._deferred_autostart_fn: Callable[[], None] | None = None
         self._autostart_watchdog = QTimer(self)
         self._autostart_watchdog.setSingleShot(True)
         self._autostart_watchdog.setInterval(120000)
@@ -4547,27 +4546,15 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
-    def attach_backend_client(self, backend, deferred_autostart: Callable[[], None] | None = None) -> None:
+    def attach_backend_client(self, backend) -> None:
         self.context.backend = backend
         self._backend_attached = True
         self._connect_backend_signals(backend)
         self._ensure_local_runtime_snapshot()
         self.refresh_dashboard()
         self._sync_power_aura_geometry()
-        self._deferred_autostart_fn = deferred_autostart
-        if not self._startup_snapshot_ready or deferred_autostart is not None:
+        if not self._startup_snapshot_ready:
             QTimer.singleShot(0, lambda: self._submit_backend_task("load_startup_snapshot", action_id="__startup_snapshot__"))
-
-    def _run_deferred_autostart(self) -> None:
-        fn = self._deferred_autostart_fn
-        if fn is None:
-            return
-        self._deferred_autostart_fn = None
-        try:
-            self.context.logging.log("info", "deferred_autostart_fired")
-            fn()
-        except Exception as error:
-            self.context.logging.log("warning", "deferred_autostart_failed", error=str(error))
 
     def _themed_icon_color(self, filename: str) -> QColor | None:
         if filename not in {"power.svg", "share.svg", "trash.svg", "search.svg", "refresh.svg", "external.svg", "vpn.svg", "vpn.png"}:
@@ -8828,7 +8815,6 @@ class MainWindow(QMainWindow):
                 "installed": payload.get("installed", []),
             }
             self._mark_dirty("dashboard", "services", "components", "mods", "files", "tray")
-            self._run_deferred_autostart()
             return
         if action == "apply_settings":
             desired_autostart = bool(self.context.settings.get().autostart_windows)
@@ -9039,7 +9025,6 @@ class MainWindow(QMainWindow):
             self._ensure_local_runtime_snapshot()
             self._startup_snapshot_ready = True
             self._mark_dirty("dashboard", "components", "tray")
-            self._run_deferred_autostart()
             return
         if action in {"toggle_master_runtime", "start_enabled_components", "select_general"}:
             self._profile_restart_pending = False

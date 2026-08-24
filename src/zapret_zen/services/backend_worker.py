@@ -1151,11 +1151,19 @@ class BackendWorkerClient(QObject):
     task_failed = Signal(dict)
     task_progress = Signal(dict)
 
-    def __init__(self, parent: QObject | None = None) -> None:
+    def __init__(
+        self,
+        parent: QObject | None = None,
+        bootstrap_tasks: list[tuple[str, dict[str, Any] | None]] | None = None,
+    ) -> None:
         super().__init__(parent)
         ctx = mp.get_context("spawn")
         self._task_queue = ctx.Queue()
         self._result_queue = ctx.Queue()
+        # Enqueue bootstrap tasks before any other submit can land: FIFO
+        # guarantees the worker executes them first thing after boot.
+        for action, payload in bootstrap_tasks or []:
+            self._task_queue.put({"id": uuid.uuid4().hex, "action": action, "payload": dict(payload or {})})
         self._process = ctx.Process(target=_worker_main, args=(self._task_queue, self._result_queue), daemon=True)
         self._process.start()
         self._cancel_paths: dict[str, str] = {}

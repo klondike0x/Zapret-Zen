@@ -49,3 +49,6 @@ README.md
 .idea/
 .vscode/
 Zapret-Zen.wiki
+# tg-ws-proxy prebuilt binaries (AV false positives, unused: worker runs from source)
+runtime/tg-ws-proxy/*.exe
+runtime/tg-ws-proxy/bin/

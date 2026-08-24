@@ -329,13 +329,7 @@ def run(argv: list[str] | None = None) -> int:
                         pass
 
             app.aboutToQuit.connect(_cleanup_before_quit)
-            if known.autostart_launch and settings.auto_run_components:
-                def _start_after_backend() -> None:
-                    if context.backend is not None:
-                        window.start_enabled_components_async(autostart_only=True)
-                autostart_callback = _start_after_backend
-            else:
-                autostart_callback = None
+            bootstrap_autostart = bool(known.autostart_launch and settings.auto_run_components)
             if launch_hidden:
                 _startup_trace("finish_bootstrap: hide window")
                 window.hide()
@@ -346,10 +340,13 @@ def run(argv: list[str] | None = None) -> int:
 
             def _attach_backend_after_show() -> None:
                 _startup_trace("attach_backend: start")
-                backend = BackendWorkerClient(app)
+                bootstrap_tasks = (
+                    [("start_enabled_components", {"autostart_only": True})] if bootstrap_autostart else None
+                )
+                backend = BackendWorkerClient(app, bootstrap_tasks=bootstrap_tasks)
                 _startup_trace("attach_backend: client created")
                 context.backend = backend
-                window.attach_backend_client(backend, deferred_autostart=autostart_callback)
+                window.attach_backend_client(backend)
                 _startup_trace("attach_backend: attached")
 
             QTimer.singleShot(900, _attach_backend_after_show)

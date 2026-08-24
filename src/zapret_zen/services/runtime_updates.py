@@ -24,6 +24,7 @@ class RuntimeUpdateManager:
         start_component: Callable[[str], Any],
         is_image_running: Callable[[str], bool],
         rebuild_snapshot: Callable[[], None],
+        tg_running: Callable[[], bool] | None = None,
     ) -> None:
         self.storage = storage
         self.logging = logging
@@ -32,6 +33,7 @@ class RuntimeUpdateManager:
         self._start_component = start_component
         self._is_image_running = is_image_running
         self._rebuild_snapshot = rebuild_snapshot
+        self._tg_running = tg_running
 
     def fetch_latest_zapret_release(self) -> dict[str, str]:
         api_url = "https://api.github.com/repos/Flowseal/zapret-discord-youtube/releases/latest"
@@ -65,6 +67,7 @@ class RuntimeUpdateManager:
 
     def fetch_latest_tg_ws_proxy_release(self) -> dict[str, str]:
         api_url = "https://api.github.com/repos/Flowseal/tg-ws-proxy/releases/latest"
+        fallback_url = "https://codeload.github.com/Flowseal/tg-ws-proxy/zip/refs/heads/main"
         try:
             payload = self.github.github_json(api_url, timeout=20, purpose="tg-ws-proxy-release-metadata")
             if not isinstance(payload, dict):
@@ -73,25 +76,12 @@ class RuntimeUpdateManager:
             self.logging.log("warning", "TG WS Proxy release metadata fallback", error=str(error))
             return {
                 "latest_version": "",
-                "source_url": "https://codeload.github.com/Flowseal/tg-ws-proxy/zip/refs/heads/main",
-                "exe_url": "https://github.com/Flowseal/tg-ws-proxy/releases/latest/download/TgWsProxy_windows.exe",
-                "exe_name": "TgWsProxy_windows.exe",
+                "source_url": fallback_url,
             }
         latest_version = str(payload.get("tag_name") or payload.get("name") or "").strip().lstrip("v")
-        assets = [item for item in list(payload.get("assets") or []) if isinstance(item, dict)]
-        windows_asset = next(
-            (
-                item
-                for item in assets
-                if str(item.get("name", "")).strip().lower() == "tgwsproxy_windows.exe"
-            ),
-            None,
-        )
         return {
             "latest_version": latest_version,
-            "source_url": str(payload.get("zipball_url") or "").strip(),
-            "exe_url": str((windows_asset or {}).get("browser_download_url", "")).strip(),
-            "exe_name": str((windows_asset or {}).get("name", "")).strip() or "TgWsProxy_windows.exe",
+            "source_url": str(payload.get("zipball_url") or "").strip() or fallback_url,
         }
 
     def update_zapret_runtime(self) -> dict[str, str]:
@@ -165,64 +155,72 @@ class RuntimeUpdateManager:
         current_version = self.storage._detect_tgws_version()
         if latest_version and current_version == latest_version:
             return {"status": "up-to-date", "version": current_version}
-        source_url = str(release.get("source_url", "")).strip()
-        exe_url = str(release.get("exe_url", "")).strip()
-        if not source_url or not exe_url:
-            return {"status": "error", "error": "No tg-ws-proxy source or Windows asset found"}
+        candidates = [
+            (str(release.get("source_url", "")).strip(), "tg-ws-proxy-source.zip"),
+        ]
+        candidates = [(url, name) for url, name in candidates if url]
+        if not candidates:
+            return {"status": "error", "error": "No tg-ws-proxy source archive found"}
         runtime_root = self.storage.paths.runtime_dir / "tg-ws-proxy"
-        was_running = False
-        try:
-            from zapret_zen.services.components import ProcessManager
-        except ImportError:
-            pass
+        was_running = bool(self._tg_running()) if self._tg_running is not None else False
         temp_root = Path(tempfile.mkdtemp(prefix="zapret_zen_tgws_update_"))
         try:
-            source_root: Path | None = None
             last_error = ""
-            for url, name in [(exe_url, "TgWsProxy_windows.exe"), (source_url, "tg-ws-proxy-source.zip")]:
+            source_root: Path | None = None
+            for index, (archive_url, archive_name) in enumerate(candidates):
                 try:
-                    dest = temp_root / name
-                    self._download_to_file(url, dest)
-                    if name.endswith(".exe"):
-                        runtime_root.mkdir(parents=True, exist_ok=True)
-                        target = runtime_root / name
-                        shutil.copy2(dest, target)
-                        init_dir = runtime_root / "proxy"
-                        init_dir.mkdir(parents=True, exist_ok=True)
-                        (init_dir / "__init__.py").write_text(f'__version__ = "{latest_version}"\n', encoding="utf-8")
-                        self.storage.ensure_layout()
-                        self.logging.log("info", "TG WS Proxy updated", version=latest_version or current_version)
-                        self._rebuild_snapshot()
-                        return {"status": "updated", "version": latest_version or current_version}
-                    else:
-                        extract = temp_root / "extract"
-                        extract.mkdir(parents=True, exist_ok=True)
-                        with zipfile.ZipFile(dest, "r") as zf:
-                            zf.extractall(extract)
-                        source_root = next(
-                            (p for p in extract.iterdir() if p.is_dir()),
-                            None,
-                        )
-                        if source_root is not None:
-                            break
+                    zip_path = temp_root / f"{index}_{archive_name}"
+                    self._download_to_file(archive_url, zip_path)
+                    extract_root = temp_root / f"extract_{index}"
+                    extract_root.mkdir(parents=True, exist_ok=True)
+                    with zipfile.ZipFile(zip_path, "r") as archive:
+                        archive.extractall(extract_root)
+                    source_root = self._find_extracted_tgws_root(extract_root)
+                    if source_root is not None:
+                        break
+                    last_error = f"Invalid tg-ws-proxy archive structure: {archive_name}"
                 except Exception as error:
                     last_error = str(error)
+                    self.logging.log("warning", "TG WS Proxy archive download failed", url=archive_url, error=last_error)
             if source_root is None:
-                return {"status": "error", "error": last_error or "Failed to update tg-ws-proxy"}
-            runtime_root.mkdir(parents=True, exist_ok=True)
-            for item in source_root.iterdir():
-                target = runtime_root / item.name
-                if item.is_dir():
-                    if target.exists():
-                        shutil.rmtree(target)
-                    shutil.copytree(item, target)
-                else:
-                    shutil.copy2(item, target)
+                return {"status": "error", "error": last_error or "Invalid tg-ws-proxy archive"}
+            if was_running:
+                try:
+                    self._stop_component("tg-ws-proxy")
+                except Exception as error:
+                    self.logging.log("warning", "TG WS Proxy stop before update failed", error=str(error))
+            backup = None
+            if runtime_root.exists():
+                backup = self.storage.create_backup(runtime_root, "pre-update-tgws")
+                shutil.rmtree(runtime_root, ignore_errors=True)
+            shutil.copytree(source_root, runtime_root)
+            self.storage.ensure_layout()
             self._rebuild_snapshot()
-            self.logging.log("info", "TG WS Proxy updated from source", version=latest_version or current_version)
+            if was_running:
+                try:
+                    self._start_component("tg-ws-proxy")
+                except Exception as error:
+                    self.logging.log("warning", "TG WS Proxy restart after update failed", error=str(error))
+            self.logging.log(
+                "info",
+                "TG WS Proxy updated from source",
+                version=latest_version or current_version,
+                backup=str(backup or ""),
+            )
             return {"status": "updated", "version": latest_version or current_version}
         finally:
             shutil.rmtree(temp_root, ignore_errors=True)
+
+    def _find_extracted_tgws_root(self, extract_root: Path) -> Path | None:
+        candidates = [extract_root]
+        candidates.extend(path for path in extract_root.iterdir() if path.is_dir())
+        for candidate in candidates:
+            if (candidate / "proxy" / "tg_ws_proxy.py").exists():
+                return candidate
+        for candidate in extract_root.rglob("*"):
+            if candidate.is_dir() and (candidate / "proxy" / "tg_ws_proxy.py").exists():
+                return candidate
+        return None
 
     def _download_to_file(self, url: str, destination: Path, timeout: int = 60) -> None:
         self.github.github_download(url, destination, timeout=timeout, purpose=f"download:{Path(destination).name}", min_bytes=1024)

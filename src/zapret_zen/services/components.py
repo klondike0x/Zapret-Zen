@@ -211,7 +211,12 @@ class ProcessManager:
             start_component=self.start_component,
             is_image_running=self._is_image_running,
             rebuild_snapshot=self.rebuild_zapret_runtime_snapshot,
+            tg_running=self._tg_worker_alive,
         )
+
+    def _tg_worker_alive(self) -> bool:
+        worker = self._processes.get("tg-ws-proxy")
+        return worker is not None and worker.poll() is None
 
     def list_components(self) -> list[ComponentDefinition]:
         raw_items = self.storage.read_json(self.storage.paths.data_dir / "components.json", default=[])
