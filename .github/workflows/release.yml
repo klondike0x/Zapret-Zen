@@ -25,7 +25,6 @@ on:
         default: ""
 
 env:
-  SF_USERNAME: peshk0v
   SF_PROJECT: zapret-zen
 
 jobs:
@@ -137,9 +136,6 @@ jobs:
     runs-on: windows-latest
     permissions:
       contents: write
-    outputs:
-      tag: ${{ steps.meta.outputs.tag }}
-      version: ${{ steps.meta.outputs.version }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -293,12 +289,10 @@ jobs:
 
           if ($body -notmatch "sourceforge\.net/projects/$env:SF_PROJECT") {
             $repoUrl = "https://github.com/${{ github.repository }}/releases/tag/$tag"
-            $sfProject = "https://sourceforge.net/projects/$env:SF_PROJECT/"
-            $sfFiles = "${sfProject}files/$version/"
+            $sfFiles = "https://sourceforge.net/projects/$env:SF_PROJECT/files/$version/"
             $body += "`n`n---`n`n## Зеркала загрузки`n" +
               "- [GitHub Releases]($repoUrl)`n" +
-              "- [SourceForge — проект]($sfProject)`n" +
-              "- [SourceForge — файлы $version]($sfFiles)"
+              "- [SourceForge]($sfFiles)"
           }
 
           $body | Out-File -FilePath "release_body.txt" -Encoding utf8NoBOM -NoNewline
@@ -367,56 +361,3 @@ jobs:
           }
 
           Write-Host "All assets updated successfully"
-
-  publish-sourceforge:
-    needs: package-and-release
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    steps:
-      - name: Download release assets
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          TAG="${{ needs.package-and-release.outputs.tag }}"
-          echo "::notice::Resolved tag: '${TAG}'"
-          if [ -z "$TAG" ]; then
-            echo "::error::tag output from package-and-release is empty"
-            exit 1
-          fi
-          if ! view_out=$(gh release view "$TAG" --json tagName,name,draft,isPrerelease,assets 2>&1); then
-            echo "::warning::gh release view failed: ${view_out//$'\n'/ | }"
-          else
-            echo "::notice::Release found: ${view_out}"
-          fi
-          mkdir -p sf_assets
-          ok=0
-          for attempt in 1 2 3 4 5; do
-            echo "Download attempt ${attempt}..."
-            if out=$(gh release download "$TAG" --dir sf_assets --clobber 2>&1); then
-              ok=1
-              break
-            fi
-            echo "::warning::Download attempt ${attempt} failed: ${out//$'\n'/ | }"
-            sleep 10
-          done
-          if [ "$ok" -ne 1 ]; then
-            echo "::error::Failed to download release assets after 5 attempts"
-            exit 1
-          fi
-          ls -la sf_assets
-
-      - name: Set up SSH key
-        run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.SF_SSH_KEY }}" > ~/.ssh/sf_key
-          chmod 600 ~/.ssh/sf_key
-          ssh-keyscan -H -t rsa,ecdsa,ed25519 frs.sourceforge.net >> ~/.ssh/known_hosts
-
-      - name: Upload to SourceForge files
-        run: |
-          VERSION="${{ needs.package-and-release.outputs.version }}"
-          rsync -avzP \
-            -e "ssh -i $HOME/.ssh/sf_key -o StrictHostKeyChecking=yes" \
-            sf_assets/ \
-            "$SF_USERNAME@frs.sourceforge.net:/home/frs/p/$SF_PROJECT/$VERSION/"

@@ -64,7 +64,7 @@ class DiscordRPCService:
                 large_image="ds_icon",
                 large_text="Zapret Zen",
                 buttons=[
-                    {"label": "GitHub Репозиторий", "url": "https://github.com/peshk0v/Zapret-Zen"},
+                    {"label": "Подробнее", "url": "https://peshk0v.github.io/Zapret-Zen/"},
                 ],
             )
             logger.info("Discord RPC: presence set (detail=%s)", detail)
