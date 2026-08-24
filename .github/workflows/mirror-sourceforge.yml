@@ -28,6 +28,6 @@ jobs:
         run: |
           git clone --mirror "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" sf-mirror.git
           cd sf-mirror.git
-          git remote add sourceforge "$SF_USERNAME@git.code.sf.net:p/$SF_PROJECT/code"
+          git remote add sourceforge "ssh://$SF_USERNAME@git.code.sf.net/p/$SF_PROJECT/code"
           GIT_SSH_COMMAND="ssh -i $HOME/.ssh/sf_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes" \
             git push --force --prune sourceforge "refs/heads/*:refs/heads/*" "refs/tags/*:refs/tags/*"
