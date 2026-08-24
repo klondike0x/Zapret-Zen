@@ -17,25 +17,17 @@ jobs:
   mirror:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Prepare known_hosts
-        id: known_hosts
+      - name: Set up SSH key
         run: |
           mkdir -p ~/.ssh
-          ssh-keyscan -H -t rsa,ecdsa,ed25519 git.code.sf.net > sf_known_hosts.tmp
-          {
-            echo "hosts<<EOF"
-            cat sf_known_hosts.tmp
-            echo "EOF"
-          } >> "$GITHUB_OUTPUT"
+          printf '%s\n' "${{ secrets.SF_SSH_KEY }}" > ~/.ssh/sf_key
+          chmod 600 ~/.ssh/sf_key
+          ssh-keyscan -H -t rsa,ecdsa,ed25519 git.code.sf.net >> ~/.ssh/known_hosts
 
       - name: Push mirror to SourceForge
-        uses: pixta-dev/repository-mirroring-action@v1
-        with:
-          target_repo_url: ${{ env.SF_USERNAME }}@git.code.sf.net:p/${{ env.SF_PROJECT }}/code
-          ssh_private_key: ${{ secrets.SF_SSH_KEY }}
-          known_hosts: ${{ steps.known_hosts.outputs.hosts }}
+        run: |
+          git clone --mirror "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" sf-mirror.git
+          cd sf-mirror.git
+          git remote add sourceforge "$SF_USERNAME@git.code.sf.net:p/$SF_PROJECT/code"
+          GIT_SSH_COMMAND="ssh -i $HOME/.ssh/sf_key -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes" \
+            git push --force --prune sourceforge "refs/heads/*:refs/heads/*" "refs/tags/*:refs/tags/*"
