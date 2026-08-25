@@ -8896,6 +8896,10 @@ class MainWindow(QMainWindow):
             self._mark_dirty("dashboard", "mods", "files", "logs", "tray")
             return
         if action in {"install_mod", "remove_mod", "import_mod_from_github", "import_mod_from_paths", "import_mod_from_path"}:
+            if isinstance(payload, dict) and action in {"install_mod", "import_mod_from_github", "import_mod_from_paths", "import_mod_from_path"}:
+                pw = payload.get("pending_mod_welcome")
+                if isinstance(pw, dict) and pw.get("text"):
+                    QTimer.singleShot(0, lambda w=pw: self._show_mod_welcome(w))
             self._mark_dirty("dashboard", "mods", "components", "files", "logs", "tray")
             return
         if action in {"move_mod", "set_mod_emoji"}:
@@ -11138,6 +11142,10 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
+    @staticmethod
+    def _strip_markdown_images(text: str) -> str:
+        return re.sub(r'!\[[^\]]*\]\([^)]+\)', '', text).strip()
+
     def _show_update_prompt(self, release: dict[str, str]) -> None:
         is_hotfix = bool(release.get("is_hotfix"))
         dialog = AppDialog(self, self.context, self._t("Hotfix available") if is_hotfix else self._t("Update available"))
@@ -11224,7 +11232,8 @@ class MainWindow(QMainWindow):
             if body:
                 parts.append("")
                 parts.append(body)
-            notes.setPlainText("\n".join(parts).strip())
+            raw_text = "\n".join(parts).strip()
+            notes.setMarkdown(self._strip_markdown_images(raw_text))
 
         def _select_release(item: QListWidgetItem | None) -> None:
             _render_release(item.data(Qt.ItemDataRole.UserRole) if item is not None else {})
@@ -14597,25 +14606,13 @@ class MainWindow(QMainWindow):
     def _show_mod_welcome(self, welcome: dict[str, str]) -> None:
         mod_name = str(welcome.get("mod_name", ""))
         text = str(welcome.get("text", ""))
-        while self.mods_cards_layout.count():
-            child = self.mods_cards_layout.takeAt(0)
-            widget = child.widget()
-            if widget is not None:
-                widget.deleteLater()
-        card, card_layout = self._card()
-        card.setProperty("class", "modCard")
-        card_layout.setContentsMargins(24, 24, 24, 24)
-        card_layout.setSpacing(16)
-        if mod_name:
-            title = QLabel(self._t("Привет от мода", "Welcome from") + " " + mod_name)
-            title.setProperty("class", "title")
-            card_layout.addWidget(title)
+        dialog = AppDialog(self, self.context, self._t("Привет от мода", "Welcome from") + (" " + mod_name if mod_name else ""))
         text_edit = QTextEdit()
         text_edit.setReadOnly(True)
         text_edit.setMarkdown(text)
         text_edit.setMinimumHeight(200)
         text_edit.setMaximumHeight(400)
-        card_layout.addWidget(text_edit, 1)
+        dialog.body_layout.addWidget(text_edit, 1)
         btn_row = QHBoxLayout()
         btn_row.addStretch(1)
         continue_btn = QPushButton(self._t("Продолжить", "Continue"))
@@ -14626,18 +14623,18 @@ class MainWindow(QMainWindow):
 
         def _dismiss() -> None:
             self.context.settings.update(pending_mod_welcome={})
-            self.refresh_mods()
+            dialog.accept()
 
         continue_btn.clicked.connect(_dismiss)
         btn_row.addWidget(continue_btn)
-        card_layout.addLayout(btn_row)
-        self.mods_cards_layout.addWidget(card)
-        self.mods_cards_layout.addStretch(1)
+        dialog.body_layout.addLayout(btn_row)
+        dialog.prepare_and_center()
+        dialog.show()
 
     def refresh_mods(self, payload: object | None = None) -> None:
         welcome = self.context.settings.get().pending_mod_welcome
         if isinstance(welcome, dict) and welcome.get("text"):
-            self._show_mod_welcome(welcome)
+            QTimer.singleShot(0, lambda w=welcome: self._show_mod_welcome(w))
             return
 
         def _field(obj: object, name: str, default: object = "") -> object:

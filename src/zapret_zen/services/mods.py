@@ -503,7 +503,7 @@ class ModsManager:
         )
         installed.insert(0, entry)
         self.storage.write_json(self._installed_path, [asdict(item) for item in installed])
-        self._write_mod_metadata_file(entry)
+        self._write_mod_metadata_file(entry, metadata)
 
         enabled_ids = {item.id for item in installed if item.enabled}
         self.settings.update(enabled_mod_ids=sorted(enabled_ids))
@@ -520,7 +520,7 @@ class ModsManager:
             parts.append(f"Lists: {len(list_sources)}")
         return " | ".join(parts)
 
-    def _metadata_json(self, entry: InstalledMod) -> str:
+    def _metadata_json(self, entry: InstalledMod, extra: dict[str, object] | None = None) -> str:
         payload = {
             "schema": "zapret-zen-mod-v1",
             "id": entry.id,
@@ -532,15 +532,20 @@ class ModsManager:
             "source_type": entry.source_type,
             "emoji": entry.emoji,
         }
+        if isinstance(extra, dict):
+            for key, value in extra.items():
+                if key in payload or key in {"schema", "id"}:
+                    continue
+                payload[key] = value
         import json
 
         return json.dumps(payload, ensure_ascii=False, indent=2)
 
-    def _write_mod_metadata_file(self, entry: InstalledMod) -> None:
+    def _write_mod_metadata_file(self, entry: InstalledMod, extra: dict[str, object] | None = None) -> None:
         root = Path(entry.path)
         if not root.exists():
             return
-        (root / self.METADATA_FILENAME).write_text(self._metadata_json(entry), encoding="utf-8")
+        (root / self.METADATA_FILENAME).write_text(self._metadata_json(entry, extra), encoding="utf-8")
 
     def _read_staged_metadata(self, root: Path) -> dict[str, object]:
         for candidate in root.rglob(self.METADATA_FILENAME):

@@ -31,7 +31,7 @@ class AutostartManager:
             if not result:
                 result = self._set_run_entry(command)
         else:
-            result = not self.is_enabled()
+            result = self.is_enabled()
         self.logging.log("info", "Windows autostart changed", enabled=enabled, actual=result, command=command if enabled else "")
         return result
 
@@ -67,8 +67,6 @@ class AutostartManager:
                 "/F",
                 "/SC",
                 "ONLOGON",
-                "/RL",
-                "HIGHEST",
                 "/TN",
                 self.TASK_NAME,
                 "/TR",
@@ -81,7 +79,9 @@ class AutostartManager:
         return True
 
     def _delete_task(self) -> None:
-        self._run_schtasks(["/Delete", "/F", "/TN", self.TASK_NAME])
+        proc = self._run_schtasks(["/Delete", "/F", "/TN", self.TASK_NAME])
+        if proc.returncode != 0:
+            self.logging.log("warning", "Failed to delete autostart task (may require admin)", error=(proc.stderr or proc.stdout or "").strip())
 
     def _run_schtasks(self, args: list[str]) -> CompletedProcess[str]:
         proc = subprocess.run(

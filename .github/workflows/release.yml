@@ -279,7 +279,7 @@ jobs:
           if (-not $body.Trim() -and $env:RELEASE_EXISTS -eq "true") {
             $existing = gh release view $tag --json body --jq .body 2>$null
             if ($LASTEXITCODE -eq 0 -and $existing -and $existing.Trim()) {
-              $body = $existing
+              $body = $existing -replace "`r`n", "`n"
             }
           }
 
@@ -295,7 +295,8 @@ jobs:
               "- [SourceForge]($sfFiles)"
           }
 
-          $body | Out-File -FilePath "release_body.txt" -Encoding utf8NoBOM -NoNewline
+          $utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+          [System.IO.File]::WriteAllText("release_body.txt", $body, $utf8NoBom)
           Write-Host "Release body prepared (length: $($body.Length) chars)"
 
       - name: Create new GitHub release

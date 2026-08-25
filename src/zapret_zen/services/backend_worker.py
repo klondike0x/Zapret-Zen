@@ -47,6 +47,7 @@ def _mods_payload(context) -> dict[str, Any]:
     return {
         "index": context.mods.fetch_index(),
         "installed": list(context.mods.list_installed()),
+        "pending_mod_welcome": context.settings.get().pending_mod_welcome,
     }
 
 
