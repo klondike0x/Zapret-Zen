@@ -281,5 +281,21 @@ class StorageManager:
             shutil.copytree(source, destination, dirs_exist_ok=True)
         elif source.exists():
             shutil.copy2(source, destination)
+        self._cleanup_old_backups()
         return backup_dir
+
+    def _cleanup_old_backups(self, max_keep: int = 5) -> None:
+        try:
+            backups_dir = self.paths.backups_dir
+            if not backups_dir.is_dir():
+                return
+            dirs = sorted(
+                [d for d in backups_dir.iterdir() if d.is_dir()],
+                key=lambda d: d.name,
+                reverse=True,
+            )
+            for old in dirs[max_keep:]:
+                shutil.rmtree(old, ignore_errors=True)
+        except OSError:
+            pass
 
