@@ -14616,6 +14616,7 @@ class MainWindow(QMainWindow):
             self.context.settings.add_on_save_callback(cb)
         self._apply_theme()
         self._update_profile_carousel()
+        self._refresh_settings_profiles_list()
         states = self._component_states()
         active_ids = self._master_active_components()
         running_ids = {cid for cid in active_ids if states.get(cid) and states[cid].status == "running"}
