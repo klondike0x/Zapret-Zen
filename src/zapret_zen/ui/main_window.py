@@ -7425,7 +7425,6 @@ class MainWindow(QMainWindow):
         if profile_id == self._active_profile_id():
             return
         self._switch_profile(profile_id)
-        self._refresh_settings_profiles_list()
 
     def _settings_profile_card_rename(self, profile_id: str) -> None:
         if profile_id == "default":
@@ -11327,7 +11326,9 @@ class MainWindow(QMainWindow):
 
     @staticmethod
     def _strip_markdown_images(text: str) -> str:
-        return re.sub(r'!\[[^\]]*\]\([^)]+\)', '', text).strip()
+        text = re.sub(r'<img\s+[^>]*>', '', text, flags=re.IGNORECASE)
+        text = re.sub(r'!\[[^\]]*\]\([^)]+\)', '', text)
+        return text.strip()
 
     def _show_update_manager(self) -> None:
         try:
@@ -14616,7 +14617,7 @@ class MainWindow(QMainWindow):
             self.context.settings.add_on_save_callback(cb)
         self._apply_theme()
         self._update_profile_carousel()
-        self._refresh_settings_profiles_list()
+        self._update_profile_card_selection()
         states = self._component_states()
         active_ids = self._master_active_components()
         running_ids = {cid for cid in active_ids if states.get(cid) and states[cid].status == "running"}
@@ -14645,6 +14646,15 @@ class MainWindow(QMainWindow):
         p = self.context.profiles.get_profile(active)
         name = p.name if p else "Default"
         self._profile_carousel_label.setText(name)
+
+    def _update_profile_card_selection(self) -> None:
+        active = self._active_profile_id()
+        grid = self._settings_profiles_grid_layout
+        for i in range(grid.count()):
+            w = grid.itemAt(i).widget()
+            if isinstance(w, ProfileCardFrame):
+                w.set_selected_state(w.profile.id == active)
+                w.set_theme(self.context.settings.get().theme)
 
     def _create_profile(self) -> None:
         name, ok = QInputDialog.getText(self, self._t("Create profile"), self._t("Profile name:"))
