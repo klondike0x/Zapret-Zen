@@ -93,18 +93,25 @@ class ModsManager:
         self._installed_path = self.storage.paths.data_dir / "installed_mods.json"
         if not self._installed_path.exists():
             self.storage.write_json(self._installed_path, [])
+        self._cleanup_orphaned_installed()
         self._cleanup_installed_duplicate_generals()
+
+    _STALE_INDEX_IDS = {"unified-by-peshk0v"}
 
     def fetch_index(self, *, refresh_remote: bool = False) -> list[ModIndexItem]:
         settings = self.settings.get()
         if refresh_remote and settings.mods_index_url:
             try:
                 payload = self.github.github_json(settings.mods_index_url, timeout=10, purpose="mods-index")
+                if isinstance(payload, list):
+                    payload = [item for item in payload if isinstance(item, dict) and item.get("id") not in self._STALE_INDEX_IDS]
                 self.storage.write_json(self.storage.paths.cache_dir / "mods_index.json", payload)
                 self.logging.log("info", "Mods index refreshed from URL", url=settings.mods_index_url)
             except Exception as error:
                 self.logging.log("warning", "Failed to refresh mods index from URL", url=settings.mods_index_url, error=str(error))
         raw = self.storage.read_json(self.storage.paths.cache_dir / "mods_index.json", default=[]) or []
+        if isinstance(raw, list):
+            raw = [item for item in raw if isinstance(item, dict) and item.get("id") not in self._STALE_INDEX_IDS]
         return [ModIndexItem(**item) for item in raw]
 
     def list_installed(self) -> list[InstalledMod]:
@@ -797,6 +804,15 @@ class ModsManager:
                 continue
             names.add(lowered)
         return names
+
+    def _cleanup_orphaned_installed(self) -> None:
+        installed = self.list_installed()
+        cleaned = [item for item in installed if Path(item.path).exists()]
+        if len(cleaned) != len(installed):
+            removed_ids = {item.id for item in installed} - {item.id for item in cleaned}
+            self.storage.write_json(self._installed_path, [asdict(item) for item in cleaned])
+            for mod_id in removed_ids:
+                self.logging.log("info", "Removed orphaned installed mod entry", mod_id=mod_id)
 
     def _cleanup_installed_duplicate_generals(self) -> None:
         installed = self.list_installed()

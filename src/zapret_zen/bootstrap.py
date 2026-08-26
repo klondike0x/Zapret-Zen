@@ -18,7 +18,6 @@ from zapret_zen.services.mods import ModsManager
 from zapret_zen.services.notifications import NotificationManager
 from zapret_zen.services.profiles import ProfilesManager
 from zapret_zen.services.discord_rpc import DiscordRPCService
-from zapret_zen.services.service_catalog import FORTNITE_GENERAL_PRIORITY
 from zapret_zen.services.settings import SettingsManager
 from zapret_zen.services import translation as _tr
 from zapret_zen.services.storage import StorageManager

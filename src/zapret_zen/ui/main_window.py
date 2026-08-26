@@ -20,7 +20,6 @@ from zapret_zen import __version__
 from zapret_zen.domain import ComponentDefinition, ComponentState, ConfigProfile, FileRecord
 from zapret_zen.services.service_catalog import (
     ALWAYS_APPLY_SERVICE_IDS,
-    FORTNITE_GENERAL_PRIORITY,
     SERVICE_CATEGORIES,
     SERVICE_PRESETS,
     ServiceCategory,
@@ -15217,7 +15216,6 @@ class MainWindow(QMainWindow):
         welcome = self.context.settings.get().pending_mod_welcome
         if isinstance(welcome, dict) and welcome.get("text"):
             QTimer.singleShot(0, lambda w=welcome: self._show_mod_welcome(w))
-            return
 
         def _field(obj: object, name: str, default: object = "") -> object:
             if isinstance(obj, dict):
