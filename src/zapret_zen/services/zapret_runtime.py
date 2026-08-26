@@ -39,7 +39,6 @@ class ZapretRuntimeBuilder:
     def get_zapret_bundles(self, enabled_only: bool, *, include_hidden_generals: bool = False) -> list[dict[str, Any]]:
         bundles: list[dict[str, Any]] = []
         base = self.storage.paths.runtime_dir / "zapret-discord-youtube"
-        unified_root = self.storage.paths.mods_dir / "unified-by-peshk0v"
         index_map = {
             str(item.get("id", "")): str(item.get("name", "")).strip()
             for item in (self.storage.read_json(self.storage.paths.cache_dir / "mods_index.json", default=[]) or [])
@@ -55,12 +54,8 @@ class ZapretRuntimeBuilder:
             if not path.exists():
                 continue
             mod_id = str(raw.get("id", "bundle"))
-            if mod_id == "unified-by-peshk0v":
-                continue
             title = str(raw.get("name") or "").strip() or index_map.get(mod_id) or mod_id
             bundles.append({"id": mod_id, "title": title, "path": path})
-        if include_hidden_generals and unified_root.exists():
-            bundles.insert(0, {"id": "unified-general", "title": "Hub", "path": unified_root})
         if base.exists():
             bundles.append({"id": "base", "title": "", "path": base})
         return bundles
@@ -75,7 +70,7 @@ class ZapretRuntimeBuilder:
             number = int(match.group(1))
         elif lowered == "general.bat":
             number = 0
-        modified_rank = 0 if bundle_id == "unified-general" else 1 if bundle_id != "base" else 2
+        modified_rank = 0 if bundle_id != "base" else 2
         return (modified_rank, -number, lowered)
 
     def prepare_active_zapret_runtime(self, selected_bundle_root: Path, selected_bundle_id: str, selected_script_name: str) -> Path:
@@ -109,10 +104,6 @@ class ZapretRuntimeBuilder:
         selected_script = selected_bundle_root / selected_script_name
         if selected_script.exists():
             shutil.copy2(selected_script, active_root / selected_script.name)
-        if selected_bundle_id == "unified-general":
-            self._overlay_bundle_runtime(active_root, selected_bundle_root)
-            if selected_script.exists():
-                shutil.copy2(selected_script, active_root / selected_script.name)
 
         self._apply_user_collection_overrides(lists_target)
         self._apply_system_hosts_from_mods()

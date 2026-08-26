@@ -35,7 +35,7 @@ SERVICE_CATEGORIES: tuple[ServiceCategory, ...] = (
         description_ru="Игровые платформы и лаунчеры",
         description_en="Games and launchers",
         icon_file="gaming.svg",
-        member_ids=("epic-games", "battle-net", "fortnite", "league-of-legends", "riot-games", "roblox", "gaming-fix", "minecraft-fix", "dnd"),
+        member_ids=("epic-games", "battle-net", "league-of-legends", "riot-games", "roblox", "dnd"),
     ),
     ServiceCategory(
         id="socials",
@@ -82,14 +82,11 @@ SERVICE_PRESETS: tuple[ServicePreset, ...] = (
     ServicePreset("youtube", "YouTube", "YouTube", "Видео, превью, Shorts и CDN Google", "Video playback, thumbnails, Shorts, and Google CDN", "youtube.svg", "#ff0033"),
     ServicePreset("telegram-desktop", "Telegram", "Telegram", "Десктопное приложение Telegram для ПК", "Telegram desktop app for PC", "telegram.svg", "#26a5e4", "Десктопное приложение Telegram", "Telegram desktop app"),
     ServicePreset("roblox", "Roblox", "Roblox", "Игровая платформа и CDN Roblox", "Roblox platform and CDN", "roblox.svg", "#d8dde8"),
-    ServicePreset("gaming-fix", "Gaming Fix", "Gaming Fix", "EA, Origin, Geometry Dash и другие игровые сервисы", "EA, Origin, Geometry Dash, and other game services", "gaming.svg", "#f59e0b", "Обход блокировок игровых сервисов", "Game services unblocking"),
-    ServicePreset("minecraft-fix", "Minecraft", "Minecraft", "Mojang, Modrinth, CurseForge, Fabric и серверы Minecraft", "Mojang, Modrinth, CurseForge, Fabric, and Minecraft servers", "minecraft.svg", "#62b847", "Mojang, Modrinth, CurseForge, Fabric", "Mojang, Modrinth, CurseForge, Fabric"),
     ServicePreset("dnd", "D&D", "D&D", "D&D Beyond, Roll20, Foundry VTT и инструменты", "D&D Beyond, Roll20, Foundry VTT, and tools", "dnd.svg", "#9b2335", "D&D Beyond, Roll20, Foundry VTT", "D&D Beyond, Roll20, Foundry VTT"),
     ServicePreset("tiktok", "TikTok", "TikTok", "Лента, видео, авторизация и CDN TikTok", "Feed, video playback, auth, and TikTok CDN", "tiktok.svg", "#25f4ee", "Лента, видео, авторизация и CDN", "Feed, video, auth, and CDN"),
     ServicePreset("instagram", "Instagram", "Instagram", "Лента, фото, Reels и CDN Instagram", "Feed, photos, Reels, and Instagram CDN", "instagram.svg", "#e4405f"),
     ServicePreset("epic-games", "Epic Games", "Epic Games", "Магазин, лаунчер, загрузки и сервисы Epic", "Store, launcher, downloads, and Epic services", "epicgames.svg", "#eef2f8", "Магазин, лаунчер, загрузки и сервисы", "Store, launcher, downloads, and services"),
     ServicePreset("battle-net", "Battle.net", "Battle.net", "Лаунчер, игры Blizzard и загрузка контента", "Launcher, Blizzard games, and content delivery", "battledotnet.svg", "#148eff"),
-    ServicePreset("fortnite", "Fortnite", "Fortnite", "Матчмейкинг, лаунчер, загрузки и сервисы Epic", "Matchmaking, launcher, downloads, and Epic services", "fortnite.svg", "#7c5cff", "Матчмейкинг, лаунчер, загрузки и сервисы", "Matchmaking, launcher, downloads, and services"),
     ServicePreset("spotify", "Spotify", "Spotify", "Веб-плеер, авторизация и музыкальный CDN", "Web player, auth, and music delivery CDN", "spotify.svg", "#1ed760", "Веб-плеер и авторизация", "Web player and auth"),
     ServicePreset("reddit", "Reddit", "Reddit", "Форумы, медиа, API и статические файлы Reddit", "Communities, media, API, and Reddit static files", "reddit.svg", "#ff4500", "Форумы, медиа, API и файлы Reddit", "Forums, media, API, and Reddit files"),
     ServicePreset("x-twitter", "X / Twitter", "X / Twitter", "Лента, медиа, API и короткие ссылки X", "Timeline, media, API, and X short links", "x.svg", "#f2f6ff"),
@@ -106,98 +103,3 @@ SERVICE_PRESETS: tuple[ServicePreset, ...] = (
 
 
 SERVICE_PRESET_IDS = {item.id for item in SERVICE_PRESETS}
-
-FORTNITE_GENERAL_PRIORITY = (
-    "general (ALT9).bat",
-    "general (ALT9.1.1).bat",
-    "general (ALT9.1).bat",
-)
-
-GAMING_FIX_GENERAL_PRIORITY = (
-    "ea.bat",
-    "ea (alt).bat",
-    "ea (alt 2).bat",
-    "ea (alt 3).bat",
-)
-
-MINECRAFT_FIX_GENERAL_PRIORITY = (
-    "minecraft.bat",
-    "minecraft (alt).bat",
-    "minecraft (alt 2).bat",
-    "minecraft (alt 3).bat",
-    "minecraft (alt 4).bat",
-    "minecraft (alt 5).bat",
-    "minecraft (alt 6).bat",
-    "minecraft (alt 7).bat",
-    "minecraft (alt 8).bat",
-)
-
-DEDICATED_GENERAL_NAMES: dict[str, tuple[str, ...]] = {
-    "fortnite": FORTNITE_GENERAL_PRIORITY,
-    "gaming-fix": GAMING_FIX_GENERAL_PRIORITY,
-    "minecraft-fix": MINECRAFT_FIX_GENERAL_PRIORITY,
-}
-
-
-def services_with_dedicated_generals() -> set[str]:
-    return set(DEDICATED_GENERAL_NAMES.keys())
-
-
-def dedicated_generals_for_service(service_id: str) -> tuple[str, ...]:
-    return DEDICATED_GENERAL_NAMES.get(service_id, ())
-
-
-def _all_dedicated_general_names() -> set[str]:
-    names: set[str] = set()
-    for name_tuple in DEDICATED_GENERAL_NAMES.values():
-        names.update(name.lower() for name in name_tuple)
-    return names
-
-
-def filter_dedicated_generals(options: list[dict[str, str]]) -> list[dict[str, str]]:
-    dedicated = _all_dedicated_general_names()
-    return [opt for opt in options if str(opt.get("name", "")).strip().lower() not in dedicated]
-
-
-def prioritize_generals_for_services(
-    options: list[dict[str, str]],
-    selected_service_ids: list[str] | tuple[str, ...] | set[str],
-) -> list[dict[str, str]]:
-    normalized_ids = {str(item) for item in selected_service_ids}
-
-    priority_map: dict[str, tuple[str, ...]] = {}
-    if "fortnite" in normalized_ids:
-        priority_map["fortnite"] = FORTNITE_GENERAL_PRIORITY
-    if "gaming-fix" in normalized_ids:
-        priority_map["gaming-fix"] = GAMING_FIX_GENERAL_PRIORITY
-    if "minecraft-fix" in normalized_ids:
-        priority_map["minecraft-fix"] = MINECRAFT_FIX_GENERAL_PRIORITY
-
-    if not priority_map:
-        return list(options)
-
-    prioritized: list[dict[str, str]] = []
-    used: set[str] = set()
-
-    for service_id, wanted_list in priority_map.items():
-        for wanted in wanted_list:
-            for option in options:
-                if str(option.get("name", "")).strip().lower() != wanted.lower():
-                    continue
-                option_id = str(option.get("id", "") or "")
-                if not option_id or option_id in used:
-                    continue
-                candidate = dict(option)
-                if service_id == "fortnite":
-                    candidate["ipset_mode"] = "any"
-                    candidate["game_mode"] = "tcpudp"
-                prioritized.append(candidate)
-                used.add(option_id)
-                break
-
-    for option in options:
-        option_id = str(option.get("id", "") or "")
-        if option_id and option_id not in used:
-            prioritized.append(dict(option))
-            used.add(option_id)
-    return prioritized

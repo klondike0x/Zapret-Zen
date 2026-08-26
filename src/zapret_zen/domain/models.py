@@ -50,9 +50,6 @@ class AppSettings:
     favorite_zapret_generals: list[str] = field(default_factory=list)
     general_autotest_done: bool = False
     selected_service_ids: list[str] = field(default_factory=list)
-    auto_create_isolated_profile: bool = True
-    isolated_service_profiles_created: list[str] = field(default_factory=list)
-    service_profile_benchmarked: dict[str, bool] = field(default_factory=dict)
     selected_runtime_mode: str = "zapret"
     zapret_ipset_mode: str = "loaded"
     zapret_game_filter_mode: str = "disabled"

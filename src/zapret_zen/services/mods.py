@@ -125,7 +125,7 @@ class ModsManager:
             if not mod_dir.is_dir():
                 continue
             mod_id = mod_dir.name
-            if mod_id in registered_ids or mod_id == "unified-by-peshk0v":
+            if mod_id in registered_ids:
                 continue
             meta_path = mod_dir / self.METADATA_FILENAME
             if not meta_path.is_file():
@@ -153,7 +153,7 @@ class ModsManager:
                 enabled=False,
                 source_type="zapret_bundle",
                 general_scripts=general_scripts,
-                emoji=random.choice(self._EMOJI_CHOICES) if mod_id != "unified-by-peshk0v" else "🪄",
+                emoji=random.choice(self._EMOJI_CHOICES),
             )
             installed.append(asdict(entry))
             changed = True
@@ -192,8 +192,6 @@ class ModsManager:
         author: str,
         version: str,
     ) -> InstalledMod:
-        if mod_id == "unified-by-peshk0v":
-            raise ValueError("Hub is bundled and cannot be edited.")
         installed = self.list_installed()
         entry = next(item for item in installed if item.id == mod_id)
         entry.name = name.strip() or entry.name or mod_id
@@ -501,7 +499,7 @@ class ModsManager:
             enabled=True,
             source_type="zapret_bundle",
             general_scripts=general_scripts,
-            emoji="🪄" if mod_id == "unified-by-peshk0v" else random.choice(self._EMOJI_CHOICES),
+            emoji=random.choice(self._EMOJI_CHOICES),
         )
         installed.insert(0, entry)
         self.storage.write_json(self._installed_path, [asdict(item) for item in installed])
@@ -563,8 +561,6 @@ class ModsManager:
         return {}
 
     def _editable_mod_root(self, mod_id: str) -> Path:
-        if mod_id == "unified-by-peshk0v":
-            raise ValueError("Hub is bundled and cannot be edited.")
         entry = next(item for item in self.list_installed() if item.id == mod_id)
         root = Path(entry.path)
         if not root.exists():
