@@ -1,4 +1,4 @@
-
+<img width="950" height="512" alt="Untitled" src="https://github.com/user-attachments/assets/f90d6e26-e0fb-48b3-8168-3f7a25e8ebdc" />
 
 ### 📋 Список изменений (Changelog)
 
