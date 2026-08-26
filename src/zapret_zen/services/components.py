@@ -187,6 +187,7 @@ class ProcessManager:
 
         self.vpn_detector = VpnDetector(logging)
         self.runtime_builder = ZapretRuntimeBuilder(storage, logging, settings)
+        self._batch_current_bundle_id: str | None = None
         self.tg_proxy_manager = TelegramProxyManager(storage, logging, settings)
         self.github_recovery = GitHubRecovery(
             logging, settings,
@@ -204,6 +205,8 @@ class ProcessManager:
             build_zapret_args=self._build_zapret_args,
             load_standard_test_targets=self._load_standard_test_targets,
             run_connectivity_check=self._run_general_connectivity_check,
+            run_batch_connectivity_check=self._run_batch_connectivity_check,
+            reset_batch_state=self._reset_batch_state,
             set_diagnostic_override=self._set_diagnostic_runtime_override,
         )
         self.updates = RuntimeUpdateManager(
@@ -613,6 +616,122 @@ class ProcessManager:
             if active_root is not None:
                 self._reset_active_runtime_dir(active_root)
             self._current_zapret_runtime = None
+        self._states[component_id] = state
+        return state
+
+    def _start_zapret_for_batch(
+        self,
+        component_id: str,
+        *,
+        general_id: str,
+        ipset_mode: str,
+        game_mode: str,
+    ) -> ComponentState:
+        self.stop_component(component_id)
+        selected_option = self._resolve_selected_general_option()
+        if selected_option is None:
+            state = ComponentState(component_id=component_id, status="error", last_error="No general script found.")
+            self._states[component_id] = state
+            return state
+        selected_script = Path(selected_option["path"])
+        selected_bundle_root = Path(selected_script).parent
+        selected_bundle_id = str(selected_option.get("bundle_id", "") or "")
+        same_bundle = (
+            self._batch_current_bundle_id is not None
+            and self._batch_current_bundle_id == selected_bundle_id
+            and self._current_zapret_runtime is not None
+            and self._current_zapret_runtime.exists()
+        )
+        active_root: Path | None = None
+        process: subprocess.Popen[Any] | None = None
+        try:
+            if same_bundle:
+                active_root = self._current_zapret_runtime
+                self._apply_zapret_runtime_switches(active_root)
+            else:
+                active_root = self._prepare_active_zapret_runtime(
+                    selected_bundle_root=selected_bundle_root,
+                    selected_bundle_id=selected_bundle_id,
+                    selected_script_name=selected_script.name,
+                )
+                self._current_zapret_runtime = active_root
+                self._apply_zapret_runtime_switches(active_root)
+                self._ensure_zapret_user_lists(active_root / "lists")
+                self._materialize_visible_merged_runtime(active_root)
+            self._batch_current_bundle_id = selected_bundle_id
+            active_script = active_root / selected_script.name
+            bin_dir = active_root / "bin"
+            lists_dir = active_root / "lists"
+            if not active_script.exists():
+                raise FileNotFoundError(f"Selected general was not materialized: {active_script}")
+            if not (bin_dir / "winws.exe").exists():
+                raise FileNotFoundError(f"winws.exe was not materialized: {bin_dir / 'winws.exe'}")
+            winws_command = self._extract_winws_command(active_script, bin_dir=bin_dir, lists_dir=lists_dir)
+            winws_command = self._apply_selected_service_command_extensions(winws_command, lists_dir=lists_dir)
+            winws_command = self._apply_vpn_priority_to_command(winws_command, lists_dir=lists_dir)
+            if not winws_command:
+                state = ComponentState(
+                    component_id=component_id,
+                    status="error",
+                    last_error="Failed to parse winws command from selected general file.",
+                )
+                self._states[component_id] = state
+                return state
+            process = subprocess.Popen(
+                winws_command,
+                cwd=str(bin_dir),
+                creationflags=self._creationflags,
+                startupinfo=self._startupinfo,
+                stdout=self._open_source_log_stream("zapret"),
+                stderr=subprocess.STDOUT,
+            )
+            if self._job:
+                self._job.assign_pid(process.pid)
+            self._processes[component_id] = process
+            running = False
+            for _ in range(10):
+                if self._is_image_running("winws.exe"):
+                    running = True
+                    break
+                time.sleep(0.2)
+            if running:
+                try:
+                    (active_root / ".driver_path_in_use").write_text(datetime.utcnow().isoformat(), encoding="utf-8")
+                except Exception:
+                    pass
+                self._track_active_driver_services()
+                state = ComponentState(component_id=component_id, status="running", pid=process.pid)
+            else:
+                self._close_source_log_stream("zapret")
+                log_hint = self._recent_source_log_error("zapret")
+                error_message = log_hint or "winws did not start."
+                state = ComponentState(component_id=component_id, status="error", last_error=error_message)
+        except OSError as error:
+            if getattr(error, "winerror", 0) == 740:
+                state = ComponentState(
+                    component_id=component_id,
+                    status="error",
+                    last_error="Administrator rights are required for winws/WinDivert.",
+                )
+            else:
+                state = ComponentState(component_id=component_id, status="error", last_error=str(error))
+        except Exception as error:
+            state = ComponentState(component_id=component_id, status="error", last_error=str(error))
+        if state.status != "running":
+            if process and process.poll() is None:
+                try:
+                    process.terminate()
+                    process.wait(timeout=2)
+                except Exception:
+                    try:
+                        process.kill()
+                    except Exception:
+                        pass
+            if not same_bundle:
+                self._force_stop_zapret_runtime()
+                if active_root is not None:
+                    self._reset_active_runtime_dir(active_root)
+                self._current_zapret_runtime = None
         self._states[component_id] = state
         return state
 
@@ -1646,6 +1765,18 @@ Get-NetAdapter -ErrorAction SilentlyContinue | ForEach-Object {
     ) -> list[dict[str, str]]:
         return self.diagnostics.run_general_diagnostics(progress_callback=progress_callback, stop_callback=stop_callback)
 
+    def run_general_diagnostic_batch(
+        self,
+        batch: list[dict[str, str]],
+        *,
+        progress_callback: callable | None = None,
+        result_callback: callable | None = None,
+        stop_callback: callable | None = None,
+    ) -> list[dict[str, object]]:
+        return self.diagnostics.run_general_diagnostic_batch(
+            batch, progress_callback=progress_callback, result_callback=result_callback, stop_callback=stop_callback,
+        )
+
     def run_settings_diagnostics(
         self,
         progress_callback: callable | None = None,
@@ -1695,7 +1826,7 @@ Get-NetAdapter -ErrorAction SilentlyContinue | ForEach-Object {
         blocked_names: list[str] = []
         completed_targets = 0
         with ThreadPoolExecutor(max_workers=min(8, max(1, len(targets)))) as executor:
-            future_map = {executor.submit(self._target_is_reachable, target): target for target in targets}
+            future_map = {executor.submit(self._check_target, target): target for target in targets}
             for future in as_completed(future_map):
                 if stop_callback is not None and stop_callback():
                     executor.shutdown(wait=False, cancel_futures=True)
@@ -1709,16 +1840,15 @@ Get-NetAdapter -ErrorAction SilentlyContinue | ForEach-Object {
                     }
                 target = future_map[future]
                 try:
-                    ok = future.result()
+                    result = future.result()
                 except Exception:
-                    ok = False
-                if ok:
+                    result = "failed"
+                if result == "ok":
                     passed_targets += 1
+                elif result == "blocked":
+                    blocked_names.append(str(target["name"]))
                 else:
-                    if self._target_explicitly_blocked(target):
-                        blocked_names.append(str(target["name"]))
-                    else:
-                        failed_names.append(str(target["name"]))
+                    failed_names.append(str(target["name"]))
                 completed_targets += 1
                 if progress_callback is not None:
                     progress_callback(completed_targets, len(targets), str(target.get("name", "")))
@@ -1745,6 +1875,106 @@ Get-NetAdapter -ErrorAction SilentlyContinue | ForEach-Object {
             "failed_targets": [],
             "blocked_targets": [],
         }
+
+    def _run_batch_connectivity_check(
+        self,
+        general_id: str,
+        *,
+        ipset_mode: str = "loaded",
+        game_mode: str = "tcpudp",
+        stop_callback: callable | None = None,
+        targets: list[dict[str, str]] | None = None,
+    ) -> dict[str, object]:
+        self.settings.update(
+            selected_zapret_general=general_id,
+            zapret_ipset_mode=ipset_mode,
+            zapret_game_filter_mode=game_mode,
+        )
+        state = self._start_zapret_for_batch(
+            "zapret",
+            general_id=general_id,
+            ipset_mode=ipset_mode,
+            game_mode=game_mode,
+        )
+        if state.status != "running":
+            return {
+                "status": "error",
+                "error": state.last_error or "failed to start",
+                "passed_targets": 0,
+                "total_targets": 0,
+                "failed_targets": [],
+            }
+        targets = list(targets or self._load_standard_test_targets())
+        if not targets:
+            return {
+                "status": "ok",
+                "error": "",
+                "passed_targets": 0,
+                "total_targets": 0,
+                "failed_targets": [],
+            }
+        if stop_callback is not None and stop_callback():
+            return {
+                "status": "cancelled",
+                "error": "cancelled",
+                "passed_targets": 0,
+                "total_targets": len(targets),
+                "failed_targets": [str(t.get("name", "")) for t in targets],
+            }
+        passed_targets = 0
+        failed_names: list[str] = []
+        blocked_names: list[str] = []
+        with ThreadPoolExecutor(max_workers=min(8, max(1, len(targets)))) as executor:
+            future_map = {executor.submit(self._check_target, target): target for target in targets}
+            for future in as_completed(future_map):
+                if stop_callback is not None and stop_callback():
+                    executor.shutdown(wait=False, cancel_futures=True)
+                    return {
+                        "status": "cancelled",
+                        "error": "cancelled",
+                        "passed_targets": 0,
+                        "total_targets": len(targets),
+                        "failed_targets": [str(t.get("name", "")) for t in targets],
+                    }
+                target = future_map[future]
+                try:
+                    result = future.result()
+                except Exception:
+                    result = "failed"
+                if result == "ok":
+                    passed_targets += 1
+                elif result == "blocked":
+                    blocked_names.append(str(target["name"]))
+                else:
+                    failed_names.append(str(target["name"]))
+        if failed_names or blocked_names:
+            error_parts: list[str] = []
+            if failed_names:
+                error_parts.append(f"failed targets: {', '.join(failed_names[:6])}")
+            if blocked_names:
+                error_parts.append(f"explicitly blocked (HTTP 451): {', '.join(blocked_names[:6])}")
+            return {
+                "status": "error",
+                "error": "; ".join(error_parts),
+                "passed_targets": passed_targets,
+                "total_targets": len(targets),
+                "failed_targets": failed_names,
+                "blocked_targets": blocked_names,
+            }
+        return {
+            "status": "ok",
+            "error": "",
+            "passed_targets": passed_targets,
+            "total_targets": len(targets),
+            "failed_targets": [],
+            "blocked_targets": [],
+        }
+
+    def _reset_batch_state(self) -> None:
+        self._batch_current_bundle_id = None
+        self.stop_component("zapret")
+        self._force_stop_zapret_runtime()
+        self._current_zapret_runtime = None
 
     def with_github_connectivity_recovery(self, operation: Callable[[], Any], purpose: str) -> Any:
         snapshot = self._capture_github_recovery_snapshot()
@@ -1957,37 +2187,31 @@ Get-NetAdapter -ErrorAction SilentlyContinue | ForEach-Object {
         return {"name": name, "type": "url", "url": value, "host": host}
 
     def _target_is_reachable(self, target: dict[str, str]) -> bool:
+        return self._check_target(target) == "ok"
+
+    def _check_target(self, target: dict[str, str]) -> str:
         target_type = target.get("type", "url")
         if target_type == "ping":
-            return self._ping_target(target.get("host", ""))
-
+            return "ok" if self._ping_target(target.get("host", "")) else "failed"
         url = target.get("url", "").strip()
         if not url:
-            return False
+            return "failed"
         tests = [
             ["--http1.1"],
             ["--tlsv1.2", "--tls-max", "1.2"],
             ["--tlsv1.3", "--tls-max", "1.3"],
         ]
+        saw_451 = False
         for extra in tests:
             status = self._curl_status(url, extra)
             if status == 451:
-                return False
-            if status > 0:
-                return True
-        return False
+                saw_451 = True
+            elif status > 0:
+                return "ok"
+        return "blocked" if saw_451 else "failed"
 
     def _target_explicitly_blocked(self, target: dict[str, str]) -> bool:
-        target_type = target.get("type", "url")
-        if target_type == "ping":
-            return False
-        url = target.get("url", "").strip()
-        if not url:
-            return False
-        for extra in [["--http1.1"], ["--tlsv1.2", "--tls-max", "1.2"], ["--tlsv1.3", "--tls-max", "1.3"]]:
-            if self._curl_status(url, extra) == 451:
-                return True
-        return False
+        return self._check_target(target) == "blocked"
 
     def _curl_status(self, url: str, extra_args: list[str]) -> int:
         curl_path = shutil.which("curl.exe") or shutil.which("curl")

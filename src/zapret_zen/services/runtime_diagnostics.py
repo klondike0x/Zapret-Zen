@@ -25,6 +25,8 @@ class RuntimeDiagnostics:
         build_zapret_args: Callable[[Path, Path], list[str]],
         load_standard_test_targets: Callable[[], list[dict[str, str]]],
         run_connectivity_check: Callable[..., dict[str, object]] | None = None,
+        run_batch_connectivity_check: Callable[..., dict[str, object]] | None = None,
+        reset_batch_state: Callable[[], None] | None = None,
         set_diagnostic_override: Callable[[bool], None] | None = None,
     ) -> None:
         self.logging = logging
@@ -36,6 +38,8 @@ class RuntimeDiagnostics:
         self._build_zapret_args = build_zapret_args
         self._load_standard_test_targets = load_standard_test_targets
         self._run_connectivity_check = run_connectivity_check
+        self._run_batch_connectivity_check = run_batch_connectivity_check
+        self._reset_batch_state = reset_batch_state
         self._set_diagnostic_override = set_diagnostic_override
         self._diagnostic_runtime_override = False
 
@@ -149,6 +153,87 @@ class RuntimeDiagnostics:
             if original_running and str(settings_snapshot.get("selected_zapret_general", "")):
                 self._start_component("zapret")
 
+    def run_general_diagnostic_batch(
+        self,
+        batch: list[dict[str, str]],
+        *,
+        progress_callback: Callable | None = None,
+        result_callback: Callable | None = None,
+        stop_callback: Callable | None = None,
+    ) -> list[dict[str, object]]:
+        options_map = {item["id"]: item for item in self._list_zapret_generals()}
+        settings_snapshot = self.capture_diagnostic_settings()
+        original_running = self._is_image_running("winws.exe")
+        results: list[dict[str, object]] = []
+        targets = self._load_standard_test_targets()
+        total = max(1, len(batch))
+        check_fn = self._run_batch_connectivity_check or self._run_connectivity_check
+        try:
+            self._set_runtime_override(True)
+            if original_running:
+                self._stop_component("zapret")
+            for index, entry in enumerate(batch, start=1):
+                if stop_callback is not None and stop_callback():
+                    break
+                general_id = str(entry.get("general_id", "") or "").strip()
+                ipset_mode = str(entry.get("ipset_mode", "loaded") or "loaded")
+                game_mode = str(entry.get("game_mode", "tcpudp") or "tcpudp")
+                option = options_map.get(general_id)
+                if option is None:
+                    result: dict[str, object] = {
+                        "id": general_id,
+                        "name": general_id,
+                        "bundle": "",
+                        "status": "error",
+                        "error": "general not found",
+                        "passed_targets": 0,
+                        "total_targets": 0,
+                        "failed_targets": [],
+                        "ipset_mode": ipset_mode,
+                        "game_mode": game_mode,
+                    }
+                    results.append(result)
+                    if progress_callback is not None:
+                        progress_callback(index, total, general_id)
+                    if result_callback is not None:
+                        result_callback(result)
+                    continue
+                if progress_callback is not None:
+                    progress_callback(index, total, option.get("name", general_id))
+                outcome = check_fn(
+                    general_id,
+                    ipset_mode=ipset_mode,
+                    game_mode=game_mode,
+                    stop_callback=stop_callback,
+                    targets=targets,
+                )
+                result = {
+                    "id": option["id"],
+                    "name": option["name"],
+                    "bundle": option["bundle"],
+                    "status": str(outcome["status"]),
+                    "error": str(outcome.get("error", "")),
+                    "passed_targets": int(outcome.get("passed_targets", 0)),
+                    "total_targets": int(outcome.get("total_targets", 0)),
+                    "failed_targets": list(outcome.get("failed_targets", []) or []),
+                    "ipset_mode": ipset_mode,
+                    "game_mode": game_mode,
+                }
+                results.append(result)
+                if result_callback is not None:
+                    result_callback(result)
+                if stop_callback is not None and stop_callback():
+                    break
+        finally:
+            self._stop_component("zapret")
+            self.restore_diagnostic_settings(settings_snapshot)
+            self._set_runtime_override(False)
+            if original_running and str(settings_snapshot.get("selected_zapret_general", "")):
+                self._start_component("zapret")
+            if self._reset_batch_state is not None:
+                self._reset_batch_state()
+        return results
+
     def run_general_diagnostics(
         self,
         progress_callback: Callable | None = None,
@@ -235,6 +320,8 @@ class RuntimeDiagnostics:
         total = max(1, len(combinations))
         original_running = self._is_image_running("winws.exe")
         settings_snapshot = self.capture_diagnostic_settings()
+        targets = self._load_standard_test_targets()
+        check_fn = self._run_batch_connectivity_check or self._run_connectivity_check
         try:
             if original_running:
                 self._stop_component("zapret")
@@ -248,7 +335,13 @@ class RuntimeDiagnostics:
                 )
                 if progress_callback is not None:
                     progress_callback(index, total, f"{ipset_mode} / {game_mode}")
-                outcome = self._run_general_connectivity_check(general_id)
+                outcome = check_fn(
+                    general_id,
+                    ipset_mode=ipset_mode,
+                    game_mode=game_mode,
+                    stop_callback=stop_callback,
+                    targets=targets,
+                )
                 results.append({
                     "ipset_mode": ipset_mode,
                     "game_mode": game_mode,
@@ -259,9 +352,12 @@ class RuntimeDiagnostics:
                 })
                 self._stop_component("zapret")
         finally:
+            self._stop_component("zapret")
             self.restore_diagnostic_settings(settings_snapshot)
-            if original_running:
+            if original_running and str(settings_snapshot.get("selected_zapret_general", "")):
                 self._start_component("zapret")
+            if self._reset_batch_state is not None:
+                self._reset_batch_state()
         best = max(results, key=lambda r: int(r.get("passed_targets", 0))) if results else None
         return {"results": results, "best": best, "status": "ok" if results else "error"}
 

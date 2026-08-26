@@ -132,6 +132,32 @@ MINECRAFT_FIX_GENERAL_PRIORITY = (
     "minecraft (alt 8).bat",
 )
 
+DEDICATED_GENERAL_NAMES: dict[str, tuple[str, ...]] = {
+    "fortnite": FORTNITE_GENERAL_PRIORITY,
+    "gaming-fix": GAMING_FIX_GENERAL_PRIORITY,
+    "minecraft-fix": MINECRAFT_FIX_GENERAL_PRIORITY,
+}
+
+
+def services_with_dedicated_generals() -> set[str]:
+    return set(DEDICATED_GENERAL_NAMES.keys())
+
+
+def dedicated_generals_for_service(service_id: str) -> tuple[str, ...]:
+    return DEDICATED_GENERAL_NAMES.get(service_id, ())
+
+
+def _all_dedicated_general_names() -> set[str]:
+    names: set[str] = set()
+    for name_tuple in DEDICATED_GENERAL_NAMES.values():
+        names.update(name.lower() for name in name_tuple)
+    return names
+
+
+def filter_dedicated_generals(options: list[dict[str, str]]) -> list[dict[str, str]]:
+    dedicated = _all_dedicated_general_names()
+    return [opt for opt in options if str(opt.get("name", "")).strip().lower() not in dedicated]
+
 
 def prioritize_generals_for_services(
     options: list[dict[str, str]],

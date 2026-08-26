@@ -1101,6 +1101,31 @@ def _handle_run_general_diagnostic_single(context, payload, emit_progress):
     )
 
 
+@_register_action("run_general_diagnostic_batch")
+def _handle_run_general_diagnostic_batch(context, payload, emit_progress):
+    batch = payload.get("batch", [])
+    cancel_path = str(payload.get("cancel_path", "") or "")
+    results = context.processes.run_general_diagnostic_batch(
+        batch,
+        progress_callback=(
+            lambda current, total, name: emit_progress(
+                {"kind": "progress", "current": current, "total": total, "name": name}
+            )
+            if emit_progress is not None
+            else None
+        ),
+        result_callback=(
+            lambda result: emit_progress(
+                {"kind": "general_result", "result": result}
+            )
+            if emit_progress is not None
+            else None
+        ),
+        stop_callback=(lambda: bool(cancel_path) and os.path.exists(cancel_path)),
+    )
+    return {"results": results}
+
+
 @_register_action("run_settings_diagnostics")
 def _handle_run_settings_diagnostics(context, payload, emit_progress):
     cancel_path = str(payload.get("cancel_path", "") or "")
@@ -1176,7 +1201,7 @@ class BackendWorkerClient(QObject):
     def submit(self, action: str, payload: dict[str, Any] | None = None) -> str:
         task_id = uuid.uuid4().hex
         task_payload = dict(payload or {})
-        if action in {"run_general_diagnostics", "run_general_diagnostic_single", "run_settings_diagnostics"}:
+        if action in {"run_general_diagnostics", "run_general_diagnostic_single", "run_general_diagnostic_batch", "run_settings_diagnostics"}:
             cancel_path = os.path.join(tempfile.gettempdir(), f"zapret_zen_cancel_{task_id}.flag")
             try:
                 if os.path.exists(cancel_path):

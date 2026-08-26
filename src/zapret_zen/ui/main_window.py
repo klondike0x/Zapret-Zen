@@ -731,21 +731,18 @@ class ServiceCardFrame(BaseServiceCard):
             self.toggled.emit(self.preset.id, not self._selected)
 
     def _sync_style(self) -> None:
-        onboarding = self._visual_scope == "onboarding"
         accent = QColor(self.preset.accent)
         selected = bool(self._selected)
-        text_color = "#142033" if (onboarding or is_light_theme(self._theme)) else ("#f2f6ff" if selected else "#d2d9e5")
-        muted_color = "#5f6f86" if (onboarding or is_light_theme(self._theme)) else ("#c0ccdc" if selected else "#8d99aa")
+        light = is_light_theme(self._theme)
+        text_color = "#142033" if light else ("#f2f6ff" if selected else "#d2d9e5")
+        muted_color = "#5f6f86" if light else ("#c0ccdc" if selected else "#8d99aa")
         if self._selected:
-            muted_color = "#334154" if (onboarding or is_light_theme(self._theme)) else "#d5def0"
+            muted_color = "#334154" if light else "#d5def0"
         title_size = 15 if self._visual_scope == "onboarding" else 15
         desc_size = 13 if self._visual_scope == "onboarding" else 13
         self._title_label.setStyleSheet(f"color: {text_color}; background: transparent; font-size: {title_size}px; font-weight: 700;")
         self._desc_label.setStyleSheet(f"color: {muted_color}; background: transparent; font-size: {desc_size}px;")
-        if onboarding or is_light_theme(self._theme):
-            badge_fill = QColor(0, 0, 0, 0)
-        else:
-            badge_fill = QColor(0, 0, 0, 0)
+        badge_fill = QColor(0, 0, 0, 0)
         self._icon_badge.setStyleSheet(
             "QFrame {"
             f"background: {badge_fill.name(QColor.NameFormat.HexArgb)};"
@@ -1486,14 +1483,14 @@ class ServiceCategoryCard(BaseServiceCard):
         )
 
     def _sync_style(self) -> None:
-        onboarding = self._visual_scope == "onboarding"
         accent = self._card_accent()
         selected = bool(self._selected)
-        text_color = "#142033" if (onboarding or is_light_theme(self._theme)) else ("#f2f6ff" if selected else "#d2d9e5")
-        muted_color = "#5f6f86" if (onboarding or is_light_theme(self._theme)) else ("#c0ccdc" if selected else "#8d99aa")
-        desc_color = "#3a4a62" if (onboarding or is_light_theme(self._theme)) else ("#a0b0c8" if selected else "#6f7f95")
+        light = is_light_theme(self._theme)
+        text_color = "#142033" if light else ("#f2f6ff" if selected else "#d2d9e5")
+        muted_color = "#5f6f86" if light else ("#c0ccdc" if selected else "#8d99aa")
+        desc_color = "#3a4a62" if light else ("#a0b0c8" if selected else "#6f7f95")
         if self._selected:
-            muted_color = "#334154" if (onboarding or is_light_theme(self._theme)) else "#d5def0"
+            muted_color = "#334154" if light else "#d5def0"
         self._title_label.setStyleSheet(f"color: {text_color}; background: transparent; font-family: '{self._headers_font_family}'; font-size: 22px; font-weight: 400;")
         self._desc_label.setStyleSheet(f"color: {desc_color}; background: transparent; font-size: 14px; font-weight: 500;")
         if self._selected:
@@ -4391,6 +4388,12 @@ class MainWindow(QMainWindow):
         self._general_test_waiting_runtime_prepare = False
         self._general_test_runtime_restore_payload: dict[str, object] | None = None
         self._first_general_prompt: AppDialog | None = None
+        self._service_benchmark_profile_id: str = ""
+        self._service_benchmark_options: list[dict[str, str]] = []
+        self._service_benchmark_index: int = 0
+        self._service_benchmark_service_id: str = ""
+        self._service_benchmark_display_name: str = ""
+        self._service_benchmark_task_id: str | None = None
         self._onboarding_active = False
         self._onboarding_running = False
         self._onboarding_widget: QWidget | None = None
@@ -9147,7 +9150,15 @@ class MainWindow(QMainWindow):
             self._ui_signals.general_test_done.emit(payload.get("results", []))
             return
         if action == "run_general_diagnostic_single":
-            self._ui_signals.general_test_done.emit(payload)
+            if action_id == "__service_benchmark__":
+                self._on_service_benchmark_test_result(payload)
+            else:
+                self._ui_signals.general_test_done.emit(payload)
+            return
+        if action == "run_general_diagnostic_batch":
+            results = payload.get("results", []) if isinstance(payload, dict) else []
+            self._general_test_results = list(results) if isinstance(results, list) else []
+            self._ui_signals.general_test_done.emit(self._general_test_results)
             return
         if action == "run_settings_diagnostics":
             self._show_settings_diagnostics_result(payload)
@@ -9226,7 +9237,7 @@ class MainWindow(QMainWindow):
             if self._general_test_running and not self._general_test_cancelled:
                 self._start_next_general_test()
             return
-        if action in {"run_general_diagnostics", "run_general_diagnostic_single"}:
+        if action in {"run_general_diagnostics", "run_general_diagnostic_single", "run_general_diagnostic_batch"}:
             if self._general_test_cancelled:
                 self._general_test_task_id = None
                 self._general_test_eta_timer.stop()
@@ -9316,7 +9327,7 @@ class MainWindow(QMainWindow):
             self._general_test_runtime_restore_payload = dict(payload.get("restore_runtime") or {})
         self._mark_dirty("dashboard", "components", "tray")
         if self._general_test_running and not self._general_test_cancelled:
-            self._start_next_general_test()
+            self._start_batch_general_test()
 
     def _restore_general_test_runtime_after_run(self) -> None:
         restore_payload = self._general_test_runtime_restore_payload
@@ -9410,6 +9421,22 @@ class MainWindow(QMainWindow):
                     "config_total": max(1, self._general_test_total),
                 }
             )
+        if action == "run_general_diagnostic_batch" and isinstance(payload, dict):
+            kind = str(payload.get("kind", "") or "")
+            if kind == "general_result":
+                result = payload.get("result")
+                if isinstance(result, dict):
+                    self._on_batch_general_result(result)
+            else:
+                self._ui_signals.general_test_progress.emit(
+                    {
+                        "target_current": int(payload.get("current", 0) or 0),
+                        "target_total": int(payload.get("total", 0) or 0),
+                        "target_name": str(payload.get("name", "") or ""),
+                        "config_index": int(payload.get("current", 0) or 0),
+                        "config_total": int(payload.get("total", 0) or 0),
+                    }
+                )
         if action == "run_settings_diagnostics" and isinstance(payload, dict):
             if self._settings_diag_progress_bar is not None:
                 total = max(1, int(payload.get("total", 1) or 1))
@@ -10063,7 +10090,10 @@ class MainWindow(QMainWindow):
             ),
         )
 
-    def _general_options_for_current_service_tests(self, options: list[dict[str, str]]) -> list[dict[str, str]]:
+    def _general_options_for_current_service_tests(self, options: list[dict[str, str]], *, filter_dedicated: bool = False) -> list[dict[str, str]]:
+        if filter_dedicated:
+            from zapret_zen.services.service_catalog import filter_dedicated_generals
+            options = filter_dedicated_generals(options)
         return prioritize_generals_for_services(options, self._selected_service_ids())
 
     def _start_component_loading(self, component_id: str, button: QPushButton, base_text: str) -> None:
@@ -13551,6 +13581,10 @@ class MainWindow(QMainWindow):
             self.context.settings.update(selected_service_ids=normalized)
             if "fortnite" in normalized:
                 self._apply_fortnite_service_preferences_locally()
+            newly_added = set(normalized) - set(current)
+            if self.context.settings.get().auto_create_isolated_profile:
+                self._maybe_create_service_isolated_profiles(newly_added)
+            self._update_profile_carousel()
             self._refresh_category_cards()
             self._update_service_selection_summary()
             self._schedule_selected_services_backend_sync(normalized, revision)
@@ -13719,7 +13753,7 @@ class MainWindow(QMainWindow):
     def _run_general_tests_popup(self, auto_apply: bool = False, embedded: bool = False) -> None:
         if self._general_test_running:
             return
-        options = self._general_options_for_current_service_tests(self._sorted_general_options())
+        options = self._general_options_for_current_service_tests(self._sorted_general_options(), filter_dedicated=embedded)
         if not options:
             if embedded:
                 self._onboarding_running = False
@@ -13869,6 +13903,35 @@ class MainWindow(QMainWindow):
             action_id="__general_test__",
         )
 
+    def _start_batch_general_test(self) -> None:
+        if self._general_test_cancelled:
+            return
+        batch = [
+            {
+                "general_id": str(opt.get("id", "") or ""),
+                "ipset_mode": str(opt.get("ipset_mode", "loaded") or "loaded"),
+                "game_mode": str(opt.get("game_mode", "tcpudp") or "tcpudp"),
+            }
+            for opt in self._general_test_options
+        ]
+        if not batch:
+            self._on_general_test_done([])
+            return
+        if self._general_test_progress_bar is not None:
+            self._general_test_progress_bar.setMaximum(100)
+            self._general_test_progress_bar.setValue(0)
+        if self._general_test_counter_label is not None:
+            self._general_test_counter_label.setText(
+                self._format_general_test_counter(0, self._general_test_total)
+            )
+            self._general_test_counter_label.show()
+        self._set_windows_taskbar_progress(0)
+        self._general_test_task_id = self._submit_backend_task(
+            "run_general_diagnostic_batch",
+            {"batch": batch},
+            action_id="__general_test_batch__",
+        )
+
     def _format_general_test_counter(self, current: int, total: int) -> str:
         return self._t(
             f"{max(1, int(current))} конфигурация из {max(1, int(total))}",
@@ -13924,6 +13987,69 @@ class MainWindow(QMainWindow):
                 f"About {shown_seconds}s remaining.",
             )
         )
+
+    def _on_batch_general_result(self, result: dict) -> None:
+        if not self._general_test_running:
+            return
+        self._general_test_next_option_index += 1
+        self._general_test_last_progress_at = time.time()
+        passed = int(result.get("passed_targets", 0) or 0)
+        total_targets = int(result.get("total_targets", 0) or 0)
+        self._general_test_remaining_budget_seconds = max(
+            0,
+            self._general_test_remaining_budget_seconds - max(1, self._general_test_target_budget_seconds),
+        )
+        if self._general_test_progress_bar is not None:
+            self._general_test_progress_bar.setMaximum(100)
+            pct = int(round((self._general_test_next_option_index / max(1, self._general_test_total)) * 100))
+            self._general_test_progress_bar.setValue(min(100, pct))
+        if self._general_test_counter_label is not None:
+            self._general_test_counter_label.setText(
+                self._format_general_test_counter(self._general_test_next_option_index, self._general_test_total)
+            )
+            self._general_test_counter_label.show()
+        self._set_windows_taskbar_progress(min(100, int(round((self._general_test_next_option_index / max(1, self._general_test_total)) * 100))))
+        if str(result.get("status", "")) == "ok" and not self._general_test_found_working_id:
+            self._general_test_found_working_id = str(result.get("id", ""))
+            if self._general_test_embedded:
+                pass
+            else:
+                dialog = AppDialog(self, self.context, self._t("Working configuration found"))
+                label = QLabel(
+                    self._t(
+                        "Найдена полностью рабочая конфигурация. Остановиться и использовать её или продолжить проверку остальных?",
+                        "A fully working configuration has been found. Stop and use it, or continue checking the rest?",
+                    )
+                )
+                label.setWordWrap(True)
+                dialog.body_layout.addWidget(label)
+                row = QHBoxLayout()
+                row.addStretch(1)
+                stop_btn = QPushButton(self._t("Use found config"))
+                cont_btn = QPushButton(self._t("Check the rest"))
+                stop_btn.setProperty("class", "primary")
+                stop_btn.clicked.connect(dialog.accept)
+                cont_btn.clicked.connect(dialog.reject)
+                row.addWidget(cont_btn)
+                row.addWidget(stop_btn)
+                dialog.body_layout.addLayout(row)
+                dialog.prepare_and_center()
+                use_found = dialog.exec() == QDialog.DialogCode.Accepted
+                if use_found:
+                    chosen_id = self._general_test_found_working_id
+                    if chosen_id:
+                        chosen_raw = next((raw for raw in self._general_test_results if str(raw.get("id", "")) == chosen_id), {})
+                        current_settings = self.context.settings.get()
+                        self.context.settings.update(
+                            selected_zapret_general=chosen_id,
+                            zapret_ipset_mode=str(chosen_raw.get("ipset_mode", current_settings.zapret_ipset_mode) or current_settings.zapret_ipset_mode),
+                            zapret_game_filter_mode=str(chosen_raw.get("game_mode", current_settings.zapret_game_filter_mode) or current_settings.zapret_game_filter_mode),
+                            general_autotest_done=True,
+                        )
+                        self._set_general_favorite(chosen_id, True)
+                    self._general_test_cancelled = True
+                    if self.context.backend is not None and self._general_test_task_id:
+                        self.context.backend.cancel(self._general_test_task_id)
 
     def _on_general_test_done(self, results: object) -> None:
         if self._general_test_cancelled:
@@ -14618,6 +14744,7 @@ class MainWindow(QMainWindow):
         self._apply_theme()
         self._update_profile_carousel()
         self._update_profile_card_selection()
+        self._maybe_trigger_service_profile_benchmark(profile_id)
         states = self._component_states()
         active_ids = self._master_active_components()
         running_ids = {cid for cid in active_ids if states.get(cid) and states[cid].status == "running"}
@@ -14656,6 +14783,115 @@ class MainWindow(QMainWindow):
                 w.set_selected_state(w.profile.id == active)
                 w.set_theme(self.context.settings.get().theme)
 
+    def _maybe_trigger_service_profile_benchmark(self, profile_id: str) -> None:
+        from zapret_zen.services.service_catalog import services_with_dedicated_generals
+        profile = self.context.profiles.get_profile(profile_id)
+        if profile is None:
+            return
+        snapshot = profile.settings_snapshot or {}
+        current_general = str(snapshot.get("selected_zapret_general", "") or "").strip()
+        if current_general:
+            return
+        settings = self.context.settings.get()
+        benchmarked = dict(settings.service_profile_benchmarked or {})
+        if benchmarked.get(profile_id):
+            return
+        profile_services = set(snapshot.get("selected_service_ids") or [])
+        dedicated_services = services_with_dedicated_generals()
+        service_needs_bench = profile_services & dedicated_services
+        if not service_needs_bench:
+            return
+        benchmarked[profile_id] = True
+        self.context.settings.update(service_profile_benchmarked=benchmarked)
+        service_label = next(iter(service_needs_bench))
+        from zapret_zen.services.service_catalog import SERVICE_PRESETS
+        preset = next((p for p in SERVICE_PRESETS if p.id == service_label), None)
+        display_name = preset.title_en if preset else service_label
+        QTimer.singleShot(800, lambda: self._run_service_profile_benchmark(profile_id, service_label, display_name))
+
+    def _run_service_profile_benchmark(self, profile_id: str, service_id: str, display_name: str) -> None:
+        from zapret_zen.services.service_catalog import dedicated_generals_for_service
+        dedicated_names = dedicated_generals_for_service(service_id)
+        if not dedicated_names:
+            return
+        all_options = self._sorted_general_options()
+        dedicated_name_set = {n.lower() for n in dedicated_names}
+        service_options = [opt for opt in all_options if str(opt.get("name", "")).strip().lower() in dedicated_name_set]
+        if not service_options:
+            return
+        profile = self.context.profiles.get_profile(profile_id)
+        if profile is None or profile_id != self._active_profile_id():
+            return
+        snapshot = profile.settings_snapshot or {}
+        ipset_mode = str(snapshot.get("zapret_ipset_mode", "loaded") or "loaded")
+        game_mode = str(snapshot.get("zapret_game_filter_mode", "tcpudp") or "tcpudp")
+        for opt in service_options:
+            opt["ipset_mode"] = ipset_mode
+            opt["game_mode"] = game_mode
+        self._service_benchmark_profile_id = profile_id
+        self._service_benchmark_options = service_options
+        self._service_benchmark_index = 0
+        self._service_benchmark_service_id = service_id
+        self._service_benchmark_display_name = display_name
+        self._run_next_service_benchmark_test()
+
+    def _run_next_service_benchmark_test(self) -> None:
+        if self._service_benchmark_index >= len(self._service_benchmark_options):
+            self._on_service_benchmark_done()
+            return
+        option = self._service_benchmark_options[self._service_benchmark_index]
+        self._service_benchmark_task_id = self._submit_backend_task(
+            "run_general_diagnostic_single",
+            {
+                "general_id": option["id"],
+                "ipset_mode": option.get("ipset_mode", "loaded"),
+                "game_mode": option.get("game_mode", "tcpudp"),
+            },
+            action_id="__service_benchmark__",
+        )
+
+    def _on_service_benchmark_done(self) -> None:
+        profile_id = self._service_benchmark_profile_id
+        display = self._service_benchmark_display_name
+        self._service_benchmark_profile_id = ""
+        self._service_benchmark_options = []
+        if profile_id:
+            self._toast_notification(
+                "warning",
+                self._t("Стратегия не найдена", "No strategy found"),
+                self._t(
+                    f"Не удалось подобрать стратегию для {display}. Попробуйте выбрать вручную.",
+                    f"Could not find a strategy for {display}. Please select one manually.",
+                ),
+            )
+
+    def _on_service_benchmark_test_result(self, payload: object) -> None:
+        if not isinstance(payload, dict):
+            return
+        status = str(payload.get("status", "") or "")
+        profile_id = self._service_benchmark_profile_id
+        if status == "ok" and profile_id:
+            chosen_id = str(payload.get("id", "") or "")
+            if chosen_id:
+                profile = self.context.profiles.get_profile(profile_id)
+                if profile:
+                    snapshot = dict(profile.settings_snapshot or {})
+                    snapshot["selected_zapret_general"] = chosen_id
+                    self.context.profiles.update_profile(profile_id, settings_snapshot=snapshot)
+                    self._toast_notification(
+                        "success",
+                        self._t("Стратегия найдена", "Strategy found"),
+                        self._t(
+                            f"Для {self._service_benchmark_display_name} выбрана стратегия: {chosen_id}",
+                            f"Strategy selected for {self._service_benchmark_display_name}: {chosen_id}",
+                        ),
+                    )
+                self._service_benchmark_options = []
+                self._service_benchmark_profile_id = ""
+                return
+        self._service_benchmark_index += 1
+        self._run_next_service_benchmark_test()
+
     def _create_profile(self) -> None:
         name, ok = QInputDialog.getText(self, self._t("Create profile"), self._t("Profile name:"))
         if not ok or not name.strip():
@@ -14668,6 +14904,28 @@ class MainWindow(QMainWindow):
             snapshot = source.settings_snapshot or {}
         self.context.profiles.create_profile(name.strip(), snapshot)
         self._update_profile_carousel()
+
+    def _maybe_create_service_isolated_profiles(self, newly_added_service_ids: set[str]) -> None:
+        from zapret_zen.services.service_catalog import services_with_dedicated_generals, SERVICE_PRESETS
+        settings = self.context.settings.get()
+        already_created = set(settings.isolated_service_profiles_created or [])
+        dedicated_services = services_with_dedicated_generals()
+        for service_id in newly_added_service_ids:
+            if service_id not in dedicated_services:
+                continue
+            if service_id in already_created:
+                continue
+            preset = next((p for p in SERVICE_PRESETS if p.id == service_id), None)
+            if preset is None:
+                continue
+            profile_name = preset.title_en
+            current_id = self._active_profile_id()
+            source = self.context.profiles.get_profile(current_id)
+            snapshot = dict(source.settings_snapshot) if source else self.context.profiles._make_snapshot(self.context.settings)
+            snapshot["selected_service_ids"] = [service_id]
+            profile = self.context.profiles.create_profile(profile_name, snapshot)
+            already_created.add(service_id)
+            self.context.settings.update(isolated_service_profiles_created=list(already_created))
 
     def _rename_profile(self, profile_id: str) -> None:
         profile = self.context.profiles.get_profile(profile_id)

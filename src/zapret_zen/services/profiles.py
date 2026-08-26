@@ -15,6 +15,22 @@ _SNAPSHOT_SKIP = {
     "notifications_enabled",
     "work_root",
     "zapret_block_quic",
+    "auto_create_isolated_profile",
+    "isolated_service_profiles_created",
+    "service_profile_benchmarked",
+    "selected_service_ids",
+    "tg_proxy_host",
+    "tg_proxy_port",
+    "tg_proxy_secret",
+    "tg_proxy_dc_ip",
+    "tg_proxy_cfproxy_enabled",
+    "tg_proxy_cfproxy_priority",
+    "tg_proxy_cfproxy_domain",
+    "tg_proxy_fake_tls_domain",
+    "tg_proxy_buf_kb",
+    "tg_proxy_pool_size",
+    "tg_proxy_link_prompt_signature",
+    "tg_proxy_media_mode",
 }
 
 
