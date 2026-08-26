@@ -11,6 +11,8 @@ import shutil
 import tempfile
 import zipfile
 import random
+import ctypes
+import sys
 
 from zapret_zen import __version__
 from zapret_zen.domain import InstalledMod, ModIndexItem
@@ -569,6 +571,17 @@ class ModsManager:
             raise FileNotFoundError(f"Modification path not found: {root}")
         return root
 
+    @staticmethod
+    def _strip_zone_identifier(path: Path) -> None:
+        if sys.platform != "win32":
+            return
+        try:
+            kernel32 = ctypes.windll.kernel32
+            target = str(path) + ":Zone.Identifier"
+            kernel32.DeleteFileW(target)
+        except Exception:
+            pass
+
     def _safe_mod_file(self, mod_id: str, relative_path: str, *, must_exist: bool) -> Path:
         root = self._editable_mod_root(mod_id).resolve()
         rel = str(relative_path or "").strip().replace("\\", "/")
@@ -611,10 +624,14 @@ class ModsManager:
         utils_target.mkdir(parents=True, exist_ok=True)
 
         for name, script in general_sources.items():
-            shutil.copy2(script, target_dir / name)
+            dest = target_dir / name
+            shutil.copy2(script, dest)
+            self._strip_zone_identifier(dest)
 
         for name, source in utils_sources.items():
-            shutil.copy2(source, utils_target / name)
+            dest = utils_target / name
+            shutil.copy2(source, dest)
+            self._strip_zone_identifier(dest)
 
         for name, sources in list_sources.items():
             merged: list[str] = []
@@ -794,6 +811,9 @@ class ModsManager:
             bundle = Path(item.path)
             if not bundle.exists():
                 continue
+            for f in bundle.rglob("*"):
+                if f.is_file():
+                    self._strip_zone_identifier(f)
             normalized = sorted(
                 {
                     script.name

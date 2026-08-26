@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import re
 import shutil
+import sys
+import ctypes
 from pathlib import Path
 from typing import Any
 
@@ -10,6 +12,15 @@ from zapret_zen.services.service_catalog import ALWAYS_APPLY_SERVICE_IDS
 from zapret_zen.services.service_rules import SERVICE_RULES
 from zapret_zen.services.settings import SettingsManager
 from zapret_zen.services.storage import StorageManager
+
+
+def _strip_zone_identifier(path: Path) -> None:
+    if sys.platform != "win32":
+        return
+    try:
+        ctypes.windll.kernel32.DeleteFileW(str(path) + ":Zone.Identifier")
+    except Exception:
+        pass
 
 
 class ZapretRuntimeBuilder:
@@ -112,7 +123,9 @@ class ZapretRuntimeBuilder:
         for script in bundle_root.glob("*.bat"):
             if script.name.lower().startswith("service"):
                 continue
-            shutil.copy2(script, active_root / script.name)
+            dest = active_root / script.name
+            shutil.copy2(script, dest)
+            _strip_zone_identifier(dest)
         for folder_name in ("bin", "utils"):
             source_dir = bundle_root / folder_name
             target_dir = active_root / folder_name
@@ -121,7 +134,9 @@ class ZapretRuntimeBuilder:
             target_dir.mkdir(parents=True, exist_ok=True)
             for source in source_dir.glob("*"):
                 if source.is_file():
-                    shutil.copy2(source, target_dir / source.name)
+                    dest = target_dir / source.name
+                    shutil.copy2(source, dest)
+                    _strip_zone_identifier(dest)
 
     def _materialize_visible_merged_runtime(self, active_root: Path) -> None:
         target_root = self.storage.paths.merged_runtime_dir / "zapret"
