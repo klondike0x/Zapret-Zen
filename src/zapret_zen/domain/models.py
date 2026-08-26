@@ -198,6 +198,7 @@ class AppPaths:
     data_dir: Path
     ui_assets_dir: Path
     themes_dir: Path
+    is_portable: bool = False
 
 
 @dataclass(slots=True)

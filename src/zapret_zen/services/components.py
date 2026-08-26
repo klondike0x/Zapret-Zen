@@ -177,6 +177,7 @@ class ProcessManager:
         self.github = GitHubNetworkClient(logging, recovery_runner=self.with_github_connectivity_recovery)
         self._creationflags = 0
         self._startupinfo: subprocess.STARTUPINFO | None = None
+        self._app_started_services: set[str] = set()
         if sys.platform.startswith("win"):
             self._creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(subprocess, "DETACHED_PROCESS", 0)
             startup = subprocess.STARTUPINFO()
@@ -564,12 +565,17 @@ class ProcessManager:
                     (active_root / ".driver_path_in_use").write_text(datetime.utcnow().isoformat(), encoding="utf-8")
                 except Exception:
                     pass
+                self._track_active_driver_services()
                 state = ComponentState(component_id=component_id, status="running", pid=process.pid)
                 self.logging.log("info", "Zapret started", script=str(active_script), command=winws_command[0])
             else:
                 self._close_source_log_stream("zapret")
                 log_hint = self._recent_source_log_error("zapret")
                 error_message = log_hint or "winws did not start. Run app as Administrator and check antivirus exclusions for WinDivert."
+                if not log_hint:
+                    started_then_exited = self._check_log_hint("zapret", ("windivert", "capture is started"))
+                    if started_then_exited:
+                        error_message = "winws started but exited immediately. This script may not target the tested sites."
                 state = ComponentState(
                     component_id=component_id,
                     status="error",
@@ -1686,6 +1692,7 @@ Get-NetAdapter -ErrorAction SilentlyContinue | ForEach-Object {
 
         passed_targets = 0
         failed_names: list[str] = []
+        blocked_names: list[str] = []
         completed_targets = 0
         with ThreadPoolExecutor(max_workers=min(8, max(1, len(targets)))) as executor:
             future_map = {executor.submit(self._target_is_reachable, target): target for target in targets}
@@ -1695,9 +1702,10 @@ Get-NetAdapter -ErrorAction SilentlyContinue | ForEach-Object {
                     return {
                         "status": "cancelled",
                         "error": "cancelled",
-                        "passed_targets": passed_targets,
+                        "passed_targets": 0,
                         "total_targets": len(targets),
-                        "failed_targets": failed_names,
+                        "failed_targets": [str(target.get("name", "")) for target in targets],
+                        "blocked_targets": [],
                     }
                 target = future_map[future]
                 try:
@@ -1707,18 +1715,27 @@ Get-NetAdapter -ErrorAction SilentlyContinue | ForEach-Object {
                 if ok:
                     passed_targets += 1
                 else:
-                    failed_names.append(str(target["name"]))
+                    if self._target_explicitly_blocked(target):
+                        blocked_names.append(str(target["name"]))
+                    else:
+                        failed_names.append(str(target["name"]))
                 completed_targets += 1
                 if progress_callback is not None:
                     progress_callback(completed_targets, len(targets), str(target.get("name", "")))
 
-        if failed_names:
+        if failed_names or blocked_names:
+            error_parts: list[str] = []
+            if failed_names:
+                error_parts.append(f"failed targets: {', '.join(failed_names[:6])}")
+            if blocked_names:
+                error_parts.append(f"explicitly blocked (HTTP 451): {', '.join(blocked_names[:6])}")
             return {
                 "status": "error",
-                "error": f"failed targets: {', '.join(failed_names[:6])}",
+                "error": "; ".join(error_parts),
                 "passed_targets": passed_targets,
                 "total_targets": len(targets),
                 "failed_targets": failed_names,
+                "blocked_targets": blocked_names,
             }
         return {
             "status": "ok",
@@ -1726,6 +1743,7 @@ Get-NetAdapter -ErrorAction SilentlyContinue | ForEach-Object {
             "passed_targets": passed_targets,
             "total_targets": len(targets),
             "failed_targets": [],
+            "blocked_targets": [],
         }
 
     def with_github_connectivity_recovery(self, operation: Callable[[], Any], purpose: str) -> Any:
@@ -1952,14 +1970,29 @@ Get-NetAdapter -ErrorAction SilentlyContinue | ForEach-Object {
             ["--tlsv1.3", "--tls-max", "1.3"],
         ]
         for extra in tests:
-            if self._curl_target(url, extra):
+            status = self._curl_status(url, extra)
+            if status == 451:
+                return False
+            if status > 0:
                 return True
         return False
 
-    def _curl_target(self, url: str, extra_args: list[str]) -> bool:
+    def _target_explicitly_blocked(self, target: dict[str, str]) -> bool:
+        target_type = target.get("type", "url")
+        if target_type == "ping":
+            return False
+        url = target.get("url", "").strip()
+        if not url:
+            return False
+        for extra in [["--http1.1"], ["--tlsv1.2", "--tls-max", "1.2"], ["--tlsv1.3", "--tls-max", "1.3"]]:
+            if self._curl_status(url, extra) == 451:
+                return True
+        return False
+
+    def _curl_status(self, url: str, extra_args: list[str]) -> int:
         curl_path = shutil.which("curl.exe") or shutil.which("curl")
         if not curl_path:
-            return False
+            return 0
         proc = self._run_quiet(
             [
                 curl_path,
@@ -1979,7 +2012,12 @@ Get-NetAdapter -ErrorAction SilentlyContinue | ForEach-Object {
             ]
         )
         code = (proc.stdout or "").strip()
-        return proc.returncode == 0 and bool(code)
+        if not code or not code.isdigit():
+            return 0
+        return int(code)
+
+    def _curl_target(self, url: str, extra_args: list[str]) -> bool:
+        return self._curl_status(url, extra_args) > 0
 
     def _ping_target(self, host: str) -> bool:
         if not host:
@@ -2261,9 +2299,15 @@ Get-NetAdapter -ErrorAction SilentlyContinue | ForEach-Object {
         proc = self._run_quiet(["sc", "query", "zapret"])
         return proc.returncode == 0
 
+    def _track_active_driver_services(self) -> None:
+        for service_name in _ZAPRET_DRIVER_SERVICE_NAMES:
+            if self._service_exists(service_name):
+                self._app_started_services.add(service_name)
+
     def _cleanup_zapret_driver_services(self, runtime_root: Path | None = None) -> None:
         for service_name in _ZAPRET_DRIVER_SERVICE_NAMES:
             if not self._service_exists(service_name):
+                self._app_started_services.discard(service_name)
                 continue
             if service_name.lower() != "zapret":
                 image_path = self._service_image_path(service_name)
@@ -2276,8 +2320,39 @@ Get-NetAdapter -ErrorAction SilentlyContinue | ForEach-Object {
                     self.storage.paths.install_root,
                 ):
                     continue
-            self._run_quiet(["sc", "stop", service_name])
-            self._run_quiet(["sc", "delete", service_name])
+            owner = "app" if service_name in self._app_started_services else "external/unknown"
+            self.logging.log("info", "Stopping driver service", service_name=service_name, owner=owner)
+            stop_result = self._run_quiet(["sc", "stop", service_name])
+            if stop_result.returncode != 0:
+                self.logging.log(
+                    "warning",
+                    "sc stop failed for driver service",
+                    service_name=service_name,
+                    error=(stop_result.stderr or "").strip(),
+                )
+            for _ in range(10):
+                state = self._service_state(service_name)
+                if state in ("", "STOPPED"):
+                    break
+                time.sleep(0.5)
+            else:
+                final_state = self._service_state(service_name)
+                self.logging.log(
+                    "warning",
+                    "Driver service did not reach STOPPED in time",
+                    service_name=service_name,
+                    final_state=final_state,
+                )
+            del_result = self._run_quiet(["sc", "delete", service_name])
+            if del_result.returncode != 0:
+                self.logging.log(
+                    "warning",
+                    "sc delete failed for driver service",
+                    service_name=service_name,
+                    error=(del_result.stderr or "").strip(),
+                    hint="A program may still be using WinDivert. Close other DPI bypass tools, then restart the app.",
+                )
+            self._app_started_services.discard(service_name)
 
     def _driver_service_references_runtime(self, runtime_root: Path) -> bool:
         for service_name in _ZAPRET_DRIVER_SERVICE_NAMES:
@@ -2291,6 +2366,17 @@ Get-NetAdapter -ErrorAction SilentlyContinue | ForEach-Object {
     def _service_exists(self, service_name: str) -> bool:
         proc = self._run_quiet(["sc", "query", service_name])
         return proc.returncode == 0
+
+    def _service_state(self, service_name: str) -> str:
+        proc = self._run_quiet(["sc", "query", service_name])
+        if proc.returncode != 0:
+            return ""
+        for line in (proc.stdout or "").splitlines():
+            if "STATE" in line:
+                parts = line.split()
+                if len(parts) >= 4:
+                    return parts[3]
+        return ""
 
     def _service_image_path(self, service_name: str) -> str:
         proc = self._run_quiet(["sc", "qc", service_name])
@@ -2352,9 +2438,21 @@ Get-NetAdapter -ErrorAction SilentlyContinue | ForEach-Object {
             if not text or text.startswith("["):
                 continue
             lowered = text.lower()
+            if "windivert initialized" in lowered or "capture is started" in lowered:
+                continue
             if "error" in lowered or "failed" in lowered or "windivert" in lowered:
                 return text
         return ""
+
+    def _check_log_hint(self, source: str, phrases: tuple[str, ...]) -> bool:
+        path = Path(self.logging.source_log_path(source))
+        if not path.exists():
+            return False
+        try:
+            text = path.read_text(encoding="utf-8", errors="ignore").lower()
+        except Exception:
+            return False
+        return any(phrase in text for phrase in phrases)
 
     def _close_source_log_stream(self, source: str) -> None:
         handle = self._log_streams.pop(source, None)

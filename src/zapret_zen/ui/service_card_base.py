@@ -18,7 +18,7 @@ from PySide6.QtGui import (
     QPen,
     QRadialGradient,
 )
-from PySide6.QtWidgets import QFrame
+from PySide6.QtWidgets import QFrame, QWidget
 
 from zapret_zen.ui.theme import is_light_theme
 
@@ -40,6 +40,7 @@ class BaseServiceCard(QFrame):
         self._press_progress = 0.0
         self._burst_anim: QPropertyAnimation | None = None
         self._press_anim: QPropertyAnimation | None = None
+        self.setStyleSheet("background: transparent;")
 
     def _card_accent(self) -> QColor:
         raise NotImplementedError
@@ -92,7 +93,7 @@ class BaseServiceCard(QFrame):
         rect = QRectF(self.rect()).adjusted(0.5 + glow_pad + shrink, 0.5 + glow_pad + shrink, -0.5 - glow_pad - shrink, -0.5 - glow_pad - shrink)
         card_radius = 12.0
         accent = self._card_accent()
-        light = self._visual_scope == "onboarding" or is_light_theme(self._theme)
+        light = is_light_theme(self._theme)
         base_fill = QColor("#ffffff") if light else QColor("#141922" if self._theme == "night" else "#171b20")
         if self._theme == "oled" and not self._visual_scope == "onboarding":
             base_fill = QColor("#111418")

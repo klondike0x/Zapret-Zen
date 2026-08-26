@@ -1,5 +1,6 @@
 ﻿from dataclasses import asdict, dataclass
 from pathlib import Path
+import os
 import shutil
 import secrets
 from typing import Any
@@ -50,6 +51,14 @@ def bootstrap_application() -> ApplicationContext:
         install_root = development_install_root(__file__)
         resource_root = install_root
 
+    portable_flag = install_root / "portable.flag"
+    is_portable = not is_packaged_runtime() or portable_flag.exists()
+    if is_portable:
+        data_root = install_root
+    else:
+        appdata = os.environ.get("APPDATA") or str(Path.home() / "AppData" / "Roaming")
+        data_root = Path(appdata) / "Zapret-Zen"
+
     runtime_dir = install_root / "runtime"
     ui_assets_dir = install_root / "ui_assets"
     sample_data_dir = install_root / "sample_data"
@@ -71,12 +80,13 @@ def bootstrap_application() -> ApplicationContext:
         default_packs_dir=install_root / "default_packs",
         mods_dir=install_root / "mods",
         merged_runtime_dir=install_root / "merged_runtime",
-        backups_dir=install_root / "backups",
-        cache_dir=install_root / "cache",
-        logs_dir=install_root / "logs",
-        data_dir=install_root / "data",
+        backups_dir=data_root / "backups",
+        cache_dir=data_root / "cache",
+        logs_dir=data_root / "logs",
+        data_dir=data_root / "data",
         ui_assets_dir=ui_assets_dir,
         themes_dir=install_root / "themes",
+        is_portable=is_portable,
     )
     storage = StorageManager(paths)
     storage.ensure_layout()

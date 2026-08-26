@@ -632,7 +632,6 @@ class ServiceCardFrame(BaseServiceCard):
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setFixedHeight(136)
         self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, False)
 
         root = QVBoxLayout(self)
         root.setContentsMargins(14, 12, 14, 12)
@@ -770,6 +769,165 @@ class ServiceCardFrame(BaseServiceCard):
             self._selected_label.setText("")
             self._selected_label.setPixmap(QPixmap())
             self._selected_label.setStyleSheet("background: transparent;")
+
+
+class ProfileCardFrame(BaseServiceCard):
+    selected = Signal(str)
+    rename_requested = Signal(str)
+    delete_requested = Signal(str)
+
+    def __init__(self, profile, is_active: bool, translator=None, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.profile = profile
+        self._selected = is_active
+        self._theme = "dark"
+        self._hover_progress = 0.0
+        self._hover_anim: QPropertyAnimation | None = None
+        self._translator = translator
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setFixedHeight(110)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self._accent_hex = str((profile.settings_snapshot or {}).get("accent_color") or "#7380ff")
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(14, 12, 14, 12)
+        root.setSpacing(6)
+
+        top_row = QHBoxLayout()
+        top_row.setContentsMargins(0, 0, 0, 0)
+        top_row.setSpacing(0)
+
+        self._name_label = QLabel(profile.name)
+        self._name_label.setProperty("class", "title")
+        self._name_label.setWordWrap(True)
+        top_row.addWidget(self._name_label, 1)
+
+        self._check_label = QLabel()
+        self._check_label.setFixedSize(20, 20)
+        self._check_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        top_row.addWidget(self._check_label, 0, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignTop)
+        root.addLayout(top_row)
+
+        self._strategy_label = QLabel()
+        self._strategy_label.setWordWrap(True)
+        self._strategy_label.setProperty("class", "muted")
+        self._strategy_label.setMaximumHeight(32)
+        root.addWidget(self._strategy_label)
+
+        btn_row = QHBoxLayout()
+        btn_row.setContentsMargins(0, 0, 0, 0)
+        btn_row.setSpacing(4)
+        btn_row.addStretch(1)
+
+        self._rename_btn = QPushButton(self._t("Переименовать", "Rename"))
+        self._rename_btn.setFixedHeight(24)
+        self._rename_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._rename_btn.setStyleSheet(
+            "QPushButton { border: none; font-size: 11px; padding: 0 6px; border-radius: 4px; }"
+        )
+        self._rename_btn.clicked.connect(lambda: self.rename_requested.emit(profile.id))
+        btn_row.addWidget(self._rename_btn)
+
+        self._delete_btn = QPushButton(self._t("Удалить", "Delete"))
+        self._delete_btn.setFixedHeight(24)
+        self._delete_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._delete_btn.setStyleSheet(
+            "QPushButton { border: none; font-size: 11px; padding: 0 6px; border-radius: 4px; }"
+        )
+        self._delete_btn.clicked.connect(lambda: self.delete_requested.emit(profile.id))
+        btn_row.addWidget(self._delete_btn)
+
+        root.addLayout(btn_row)
+        self._sync_style()
+
+    def set_card_width(self, width: int) -> None:
+        self.setFixedWidth(max(132, width))
+
+    def set_theme(self, theme: str) -> None:
+        self._theme = theme
+        self._sync_style()
+        self.update()
+
+    def _card_accent(self) -> QColor:
+        return QColor(self._accent_hex)
+
+    def _burst_origin_widget(self) -> QFrame:
+        return self
+
+    def set_selected_state(self, active: bool) -> None:
+        if self._selected == active:
+            return
+        self._selected = active
+        self._sync_style()
+        self.update()
+
+    def _t(self, ru: str, en: str = "") -> str:
+        if self._translator is not None:
+            return self._translator(ru, en)
+        return ru
+
+    def mouseReleaseEvent(self, event: QMouseEvent) -> None:
+        super().mouseReleaseEvent(event)
+        if event.button() == Qt.MouseButton.LeftButton:
+            if not self._selected:
+                self._play_select_feedback()
+            self.selected.emit(self.profile.id)
+
+    def enterEvent(self, event: QEvent) -> None:
+        super().enterEvent(event)
+        self._animate_hover(1.0)
+
+    def leaveEvent(self, event: QEvent) -> None:
+        super().leaveEvent(event)
+        self._animate_hover(0.0)
+
+    def _animate_hover(self, target: float) -> None:
+        if self._hover_anim is not None:
+            self._hover_anim.stop()
+        self._hover_anim = QPropertyAnimation(self, b"hoverProgress", self)
+        self._hover_anim.setDuration(180)
+        self._hover_anim.setEndValue(target)
+        self._hover_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._hover_anim.start()
+
+    def _get_hover(self) -> float:
+        return self._hover_progress
+
+    def _set_hover(self, v: float) -> None:
+        self._hover_progress = float(v)
+        self.update()
+
+    hoverProgress = Property(float, _get_hover, _set_hover)
+
+    def _sync_style(self) -> None:
+        accent = QColor(self._accent_hex)
+        selected = self._selected
+        theme = self._theme
+        light = is_light_theme(theme)
+        text_color = "#142033" if light else ("#f2f6ff" if selected else "#d2d9e5")
+        muted_color = "#5f6f86" if light else ("#c0ccdc" if selected else "#8d99aa")
+        if selected:
+            muted_color = "#334154" if light else "#d5def0"
+        btn_color = accent.name(QColor.NameFormat.HexArgb) if selected else muted_color
+        self._name_label.setStyleSheet(f"color: {text_color}; background: transparent; font-size: 15px; font-weight: 700;")
+        self._strategy_label.setStyleSheet(f"color: {muted_color}; background: transparent; font-size: 12px;")
+        self._rename_btn.setStyleSheet(
+            f"QPushButton {{ color: {btn_color}; border: none; font-size: 11px; padding: 0 6px; border-radius: 4px; background: transparent; }}"
+            f"QPushButton:hover {{ background: rgba({accent.red()}, {accent.green()}, {accent.blue()}, 25); }}"
+        )
+        self._delete_btn.setStyleSheet(
+            f"QPushButton {{ color: {muted_color}; border: none; font-size: 11px; padding: 0 6px; border-radius: 4px; background: transparent; }}"
+            f"QPushButton:hover {{ background: rgba(255, 80, 80, 25); color: #ff5050; }}"
+        )
+        if selected:
+            self._check_label.setText("")
+            self._check_label.setStyleSheet(
+                f"background: {accent.name(QColor.NameFormat.HexArgb)}; border-radius: 10px; padding: 0px; margin: 0px;"
+            )
+        else:
+            self._check_label.setText("")
+            self._check_label.setPixmap(QPixmap())
+            self._check_label.setStyleSheet("background: transparent;")
 
 
 class ServiceToggleCard(QFrame):
@@ -5565,6 +5723,10 @@ class MainWindow(QMainWindow):
         check_updates.triggered.connect(self._check_updates_popup)
         menu.addAction(check_updates)
 
+        update_manager = QAction(self._t("Менеджер обновлений", "Update Manager"), self)
+        update_manager.triggered.connect(self._show_update_manager)
+        menu.addAction(update_manager)
+
         rebuild = QAction(self._t("Rebuild merged"), self)
         rebuild.triggered.connect(self._rebuild_runtime)
         menu.addAction(rebuild)
@@ -7190,58 +7352,111 @@ class MainWindow(QMainWindow):
         # --- Profiles section ---
         profiles_section = _section(self._t("Profiles"))
 
-        self._settings_profiles_list = QListWidget()
-        self._settings_profiles_list.setFixedHeight(120)
-        self._settings_profiles_list.setProperty("class", "settingsList")
+        self._settings_profiles_grid = QWidget()
+        self._settings_profiles_grid_layout = QGridLayout(self._settings_profiles_grid)
+        self._settings_profiles_grid_layout.setContentsMargins(8, 8, 8, 8)
+        self._settings_profiles_grid_layout.setSpacing(6)
+        self._settings_profiles_grid_layout.setColumnStretch(0, 1)
+        self._settings_profiles_grid_layout.setColumnStretch(1, 1)
+        self._settings_profiles_grid.setStyleSheet(
+            "QWidget#ProfilesGrid { background: rgba(128,128,128,18); border-radius: 10px; }"
+        )
+        self._settings_profiles_grid.setObjectName("ProfilesGrid")
 
-        profiles_section.addWidget(self._settings_profiles_list)
+        profiles_scroll = QScrollArea()
+        profiles_scroll.setWidgetResizable(True)
+        profiles_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        profiles_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        profiles_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        profiles_scroll.setWidget(self._settings_profiles_grid)
+        profiles_scroll.setMinimumHeight(280)
+        profiles_scroll.setStyleSheet("QScrollArea { background: transparent; border: none; }")
+        profiles_section.addWidget(profiles_scroll)
 
-        profile_btn_row = QWidget()
-        profile_btn_row.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, False)
-        pbr = QHBoxLayout(profile_btn_row)
-        pbr.setContentsMargins(0, 0, 0, 0)
-        pbr.setSpacing(6)
-
-        create_pb = QPushButton(self._t("+ Create"))
-        create_pb.setFixedHeight(30)
-        create_pb.setProperty("class", "settingsSegment")
-        create_pb.setCursor(Qt.CursorShape.PointingHandCursor)
-        create_pb.clicked.connect(self._settings_create_profile)
-
-        rename_pb = QPushButton(self._t("Rename"))
-        rename_pb.setFixedHeight(30)
-        rename_pb.setProperty("class", "settingsSegment")
-        rename_pb.setCursor(Qt.CursorShape.PointingHandCursor)
-        rename_pb.clicked.connect(self._settings_rename_profile)
-
-        delete_pb = QPushButton(self._t("Delete"))
-        delete_pb.setFixedHeight(30)
-        delete_pb.setProperty("class", "settingsSegment")
-        delete_pb.setCursor(Qt.CursorShape.PointingHandCursor)
-        delete_pb.clicked.connect(self._settings_delete_profile)
-
-        pbr.addWidget(create_pb)
-        pbr.addWidget(rename_pb)
-        pbr.addWidget(delete_pb)
-        pbr.addStretch(1)
-        profiles_section.addWidget(profile_btn_row)
+        add_profile_btn = QPushButton(self._t("+ Добавить профиль", "+ Add profile"))
+        add_profile_btn.setFixedHeight(38)
+        add_profile_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        add_profile_btn.clicked.connect(self._settings_create_profile)
+        profiles_section.addWidget(add_profile_btn)
 
         self._refresh_settings_profiles_list()
 
         layout.addStretch(1)
         return page, ctrl
 
+    def _resolve_general_display_name(self, general_id: str) -> str:
+        if not general_id:
+            return self._t("Не выбрана", "Not set")
+        for opt in self._sorted_general_options():
+            if opt.get("id") == general_id:
+                return str(opt.get("name") or general_id).strip()
+        name = general_id
+        if "|" in name:
+            name = name.rsplit("|", 1)[-1]
+        if name.lower().endswith(".bat"):
+            name = name[:-4]
+        return name.strip() or general_id
+
     def _refresh_settings_profiles_list(self) -> None:
-        self._settings_profiles_list.clear()
+        grid = self._settings_profiles_grid_layout
+        while grid.count():
+            item = grid.takeAt(0)
+            w = item.widget()
+            if w is not None:
+                w.setParent(None)
         active = self._active_profile_id()
-        for p in self.context.profiles.list_profiles():
-            item = QListWidgetItem(p.name)
-            item.setData(Qt.ItemDataRole.UserRole, p.id)
-            if p.id == active:
-                f = item.font()
-                f.setBold(True)
-                item.setFont(f)
-            self._settings_profiles_list.addItem(item)
+        profiles = self.context.profiles.list_profiles()
+        columns = 2
+        for idx, p in enumerate(profiles):
+            general_id = (p.settings_snapshot or {}).get("selected_zapret_general", "")
+            strategy_name = self._resolve_general_display_name(str(general_id))
+            card = ProfileCardFrame(p, p.id == active, translator=self._t)
+            card.set_theme(self.context.settings.get().theme)
+            card._strategy_label.setText(self._t("Стратегия:", "Strategy:") + " " + strategy_name)
+            card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+            card.selected.connect(self._settings_profile_card_selected)
+            card.rename_requested.connect(self._settings_profile_card_rename)
+            card.delete_requested.connect(self._settings_profile_card_delete)
+            row = idx // columns
+            col = idx % columns
+            grid.addWidget(card, row, col)
+
+    def _settings_profile_card_selected(self, profile_id: str) -> None:
+        if profile_id == self._active_profile_id():
+            return
+        self._switch_profile(profile_id)
+        self._refresh_settings_profiles_list()
+
+    def _settings_profile_card_rename(self, profile_id: str) -> None:
+        if profile_id == "default":
+            return
+        profile = self.context.profiles.get_profile(profile_id)
+        if profile is None:
+            return
+        name, ok = QInputDialog.getText(self, self._t("Rename profile"), self._t("New name:"), text=profile.name)
+        if not ok or not name.strip():
+            return
+        self.context.profiles.update_profile(profile_id, name=name.strip())
+        self._refresh_settings_profiles_list()
+        self._update_profile_carousel()
+
+    def _settings_profile_card_delete(self, profile_id: str) -> None:
+        if profile_id == "default":
+            return
+        profile = self.context.profiles.get_profile(profile_id)
+        if profile is None:
+            return
+        ok = self._ask_yes_no(
+            self._t("Delete profile"),
+            self._t('Delete profile "{name}"? This action cannot be undone.').replace("{name}", profile.name),
+        )
+        if not ok:
+            return
+        self.context.profiles.delete_profile(profile_id)
+        if self._active_profile_id() == profile_id:
+            self._switch_profile("default")
+        self._refresh_settings_profiles_list()
+        self._update_profile_carousel()
 
     def _settings_create_profile(self) -> None:
         name, ok = QInputDialog.getText(self, self._t("Create profile"), self._t("Profile name:"))
@@ -7254,39 +7469,6 @@ class MainWindow(QMainWindow):
         else:
             snapshot = source.settings_snapshot or {}
         self.context.profiles.create_profile(name.strip(), snapshot)
-        self._refresh_settings_profiles_list()
-        self._update_profile_carousel()
-
-    def _settings_rename_profile(self) -> None:
-        item = self._settings_profiles_list.currentItem()
-        if item is None:
-            return
-        pid = item.data(Qt.ItemDataRole.UserRole)
-        if pid == "default":
-            return
-        name, ok = QInputDialog.getText(self, self._t("Rename profile"), self._t("New name:"), text=item.text())
-        if not ok or not name.strip():
-            return
-        self.context.profiles.update_profile(pid, name=name.strip())
-        self._refresh_settings_profiles_list()
-        self._update_profile_carousel()
-
-    def _settings_delete_profile(self) -> None:
-        item = self._settings_profiles_list.currentItem()
-        if item is None:
-            return
-        pid = item.data(Qt.ItemDataRole.UserRole)
-        if pid == "default":
-            return
-        ok = self._ask_yes_no(
-            self._t("Delete profile"),
-            self._t('Delete profile "{name}"? This action cannot be undone.').replace("{name}", item.text()),
-        )
-        if not ok:
-            return
-        self.context.profiles.delete_profile(pid)
-        if self._active_profile_id() == pid:
-            self._switch_profile("default")
         self._refresh_settings_profiles_list()
         self._update_profile_carousel()
 
@@ -7574,6 +7756,7 @@ class MainWindow(QMainWindow):
         file_btn = _make_tool_btn(self._t("Install from file"), self._update_from_file)
         update_layout.addWidget(file_btn, 1)
         tools_section.addWidget(update_row)
+        tools_section.addWidget(_make_tool_btn(self._t("Менеджер обновлений", "Update Manager"), self._show_update_manager))
         tools_section.addWidget(_make_tool_btn(self._t("Rebuild merged"), self._rebuild_runtime))
         tools_section.addWidget(_make_tool_btn(self._t("Refresh all"), self.refresh_all))
 
@@ -11145,6 +11328,252 @@ class MainWindow(QMainWindow):
     @staticmethod
     def _strip_markdown_images(text: str) -> str:
         return re.sub(r'!\[[^\]]*\]\([^)]+\)', '', text).strip()
+
+    def _show_update_manager(self) -> None:
+        try:
+            self._show_update_manager_impl()
+        except Exception as exc:
+            self._show_error(self._t("Менеджер обновлений", "Update Manager"), str(exc))
+
+    def _show_update_manager_impl(self) -> None:
+        dialog = AppDialog(self, self.context, self._t("Менеджер обновлений", "Update Manager"))
+        status_label = QLabel(self._t("Проверка обновлений...", "Checking for updates..."))
+        status_label.setWordWrap(True)
+        dialog.body_layout.addWidget(status_label)
+
+        grid = QGridLayout()
+        grid.setSpacing(8)
+        headers = [
+            QLabel(self._t("Компонент", "Component")),
+            QLabel(self._t("Текущая", "Current")),
+            QLabel(self._t("Доступна", "Available")),
+            QLabel(self._t("Статус", "Status")),
+            QLabel(""),
+        ]
+        for col, h in enumerate(headers):
+            h.setProperty("class", "subtitle")
+            grid.addWidget(h, 0, col)
+        grid.setColumnStretch(0, 2)
+        grid.setColumnStretch(1, 1)
+        grid.setColumnStretch(2, 1)
+        grid.setColumnStretch(3, 1)
+        grid.setColumnStretch(4, 1)
+
+        components = [
+            ("tg_ws_proxy", "TG WS Proxy"),
+            ("zapret", "Zapret"),
+            ("application", self._t("Приложение", "Application")),
+        ]
+        self._update_manager_dialog = dialog
+        self._update_manager_rows: dict[str, dict[str, object]] = {}
+        self._update_manager_results: dict[str, dict[str, str]] = {}
+        self._update_manager_done = False
+        for idx, (cid, name) in enumerate(components, start=1):
+            name_label = QLabel(name)
+            current_label = QLabel("—")
+            latest_label = QLabel("—")
+            status_label_item = QLabel(self._t("Проверка...", "Checking..."))
+            update_btn = QPushButton(self._t("Обновить", "Update"))
+            update_btn.setObjectName("DialogPrimaryButton")
+            update_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            update_btn.setMinimumHeight(32)
+            update_btn.setEnabled(False)
+            grid.addWidget(name_label, idx, 0)
+            grid.addWidget(current_label, idx, 1)
+            grid.addWidget(latest_label, idx, 2)
+            grid.addWidget(status_label_item, idx, 3)
+            grid.addWidget(update_btn, idx, 4)
+            self._update_manager_rows[cid] = {
+                "current": current_label,
+                "latest": latest_label,
+                "status": status_label_item,
+                "btn": update_btn,
+            }
+        dialog.body_layout.addLayout(grid)
+
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(8)
+        btn_row.addStretch(1)
+        update_all_btn = QPushButton(self._t("Обновить всё", "Update All"))
+        update_all_btn.setObjectName("DialogPrimaryButton")
+        update_all_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        update_all_btn.setMinimumHeight(36)
+        update_all_btn.setEnabled(False)
+        update_all_btn.clicked.connect(self._update_manager_update_all)
+        btn_row.addWidget(update_all_btn)
+        close_btn = QPushButton(self._t("Закрыть", "Close"))
+        close_btn.setObjectName("DialogSecondaryButton")
+        close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        close_btn.setMinimumHeight(36)
+        close_btn.clicked.connect(dialog.reject)
+        btn_row.addWidget(close_btn)
+        dialog.body_layout.addLayout(btn_row)
+        self._update_manager_update_all_btn = update_all_btn
+
+        dialog.setMinimumWidth(640)
+        dialog.prepare_and_center()
+
+        self._update_manager_poll_timer = QTimer(self)
+        self._update_manager_poll_timer.setInterval(200)
+        self._update_manager_poll_timer.timeout.connect(self._poll_update_manager_results)
+
+        def _run_checks() -> None:
+            for cid, _name in components:
+                try:
+                    if cid == "tg_ws_proxy":
+                        release = self.context.processes.updates.fetch_latest_tg_ws_proxy_release()
+                        latest = str(release.get("latest_version", "")).strip()
+                        current = self.context.storage._detect_tgws_version()
+                        info: dict[str, str] = {"current_version": current, "latest_version": latest}
+                        info["status"] = "available" if (latest and current and latest != current) else "up-to-date"
+                    elif cid == "zapret":
+                        release = self.context.processes.updates.fetch_latest_zapret_release()
+                        latest = str(release.get("latest_version", "")).strip()
+                        current = self.context.storage._detect_zapret_version()
+                        info = {"current_version": current, "latest_version": latest}
+                        info["status"] = "available" if (latest and current and latest != current) else "up-to-date"
+                    elif cid == "application":
+                        branch = self.context.settings.get().update_branch
+                        release = self.context.updates.fetch_latest_application_release(update_branch=branch)
+                        info = {
+                            "current_version": __version__,
+                            "latest_version": str(release.get("latest_version", __version__)),
+                            "status": str(release.get("status", "error")),
+                            "body": str(release.get("body", "")),
+                            "html_url": str(release.get("html_url", "")),
+                        }
+                except Exception as exc:
+                    info = {"current_version": "—", "latest_version": "—", "status": "error", "error": str(exc)}
+                self._update_manager_results[cid] = info
+
+            self._update_manager_done = True
+
+        thread = threading.Thread(target=_run_checks, daemon=True)
+        thread.start()
+        self._update_manager_poll_timer.start()
+        dialog.exec()
+        self._update_manager_poll_timer.stop()
+
+    def _poll_update_manager_results(self) -> None:
+        try:
+            rows = getattr(self, "_update_manager_rows", {})
+            results = getattr(self, "_update_manager_results", {})
+            connected = getattr(self, "_update_manager_connected_btns", set())
+            for cid, w in rows.items():
+                info = results.get(cid)
+                if not info:
+                    continue
+                current = str(info.get("current_version", "") or "—")
+                latest = str(info.get("latest_version", "") or "—")
+                status = str(info.get("status", "error"))
+                w["current"].setText(current)
+                w["latest"].setText(latest)
+                has_update = status == "available"
+                if has_update:
+                    w["status"].setText(self._t("Доступно обновление", "Update available"))
+                elif status == "up-to-date":
+                    w["status"].setText(self._t("Актуально", "Up to date"))
+                else:
+                    err = str(info.get("error", "")) or self._t("Ошибка", "Error")
+                    w["status"].setText(err)
+                btn = w["btn"]
+                btn.setEnabled(has_update)
+                if has_update and cid not in connected:
+                    connected.add(cid)
+                    btn.clicked.connect(lambda c=cid: self._update_manager_apply(c))
+            self._update_manager_connected_btns = connected
+            if getattr(self, "_update_manager_done", False):
+                dialog = getattr(self, "_update_manager_dialog", None)
+                status_label_item = dialog.findChild(QLabel) if dialog else None
+                if status_label_item:
+                    status_label_item.setText(self._t("Проверка завершена.", "Check complete."))
+                has_any = any(str(r.get("status", "")) == "available" for r in results.values())
+                all_btn = getattr(self, "_update_manager_update_all_btn", None)
+                if all_btn:
+                    all_btn.setEnabled(has_any)
+        except Exception:
+            pass
+
+    def _update_manager_apply(self, component_id: str) -> None:
+        results = dict(getattr(self, "_update_manager_results", {}))
+        info = results.get(component_id, {})
+        dialog = getattr(self, "_update_manager_dialog", None)
+        if dialog is not None:
+            dialog.reject()
+        if component_id == "application":
+            QTimer.singleShot(150, lambda i=info: self._start_update_apply(None, i))
+        elif component_id == "tg_ws_proxy":
+            QTimer.singleShot(150, self._update_tg_ws_proxy_runtime)
+        elif component_id == "zapret":
+            QTimer.singleShot(150, self._update_zapret_runtime)
+
+    def _update_manager_update_all(self) -> None:
+        try:
+            results = dict(getattr(self, "_update_manager_results", {}))
+            queue: list[str] = []
+            for cid in ("tg_ws_proxy", "zapret", "application"):
+                info = results.get(cid, {})
+                if str(info.get("status", "")) == "available":
+                    queue.append(cid)
+            if not queue:
+                self._toast_notification("info", self._t("Менеджер обновлений", "Update Manager"), self._t("Нет доступных обновлений.", "No updates available."))
+                return
+            self._update_all_queue = list(queue)
+            dialog = getattr(self, "_update_manager_dialog", None)
+            if dialog is not None:
+                dialog.reject()
+            QTimer.singleShot(150, self._update_all_next)
+        except Exception as exc:
+            self._toast_notification("error", self._t("Менеджер обновлений", "Update Manager"), str(exc))
+
+    def _update_all_next(self) -> None:
+        try:
+            queue = getattr(self, "_update_all_queue", [])
+            if not queue:
+                self.refresh_all()
+                return
+            cid = queue[0]
+            results = dict(getattr(self, "_update_manager_results", {}))
+            info = results.get(cid, {})
+            name = "TG WS Proxy" if cid == "tg_ws_proxy" else ("Zapret" if cid == "zapret" else self._t("Приложение", "Application"))
+            current = str(info.get("current_version", ""))
+            latest = str(info.get("latest_version", ""))
+            dialog = AppDialog(self, self.context, self._t("Обновление", "Update"))
+            label = QLabel(self._t(
+                f"Обновление {name}: {current} → {latest}\n\nПродолжить?",
+                f"Update {name}: {current} → {latest}\n\nContinue?",
+            ))
+            label.setWordWrap(True)
+            dialog.body_layout.addWidget(label)
+            btn_row = QHBoxLayout()
+            btn_row.addStretch(1)
+            yes_btn = QPushButton(self._t("Да", "Yes"))
+            yes_btn.setObjectName("DialogPrimaryButton")
+            yes_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            yes_btn.setMinimumHeight(36)
+            yes_btn.clicked.connect(dialog.accept)
+            btn_row.addWidget(yes_btn)
+            skip_btn = QPushButton(self._t("Пропустить", "Skip"))
+            skip_btn.setObjectName("DialogSecondaryButton")
+            skip_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            skip_btn.setMinimumHeight(36)
+            skip_btn.clicked.connect(dialog.reject)
+            btn_row.addWidget(skip_btn)
+            dialog.body_layout.addLayout(btn_row)
+            dialog.prepare_and_center()
+            result = dialog.exec()
+            queue.pop(0)
+            self._update_all_queue = queue
+            if result == QDialog.DialogCode.Accepted:
+                if cid == "application":
+                    self._start_update_apply(None, info)
+                elif cid == "tg_ws_proxy":
+                    self._update_tg_ws_proxy_runtime()
+                elif cid == "zapret":
+                    self._update_zapret_runtime()
+            QTimer.singleShot(200, self._update_all_next)
+        except Exception as exc:
+            self._toast_notification("error", self._t("Обновление", "Update"), str(exc))
 
     def _show_update_prompt(self, release: dict[str, str]) -> None:
         is_hotfix = bool(release.get("is_hotfix"))
