@@ -20,12 +20,10 @@ from zapret_zen import __version__
 from zapret_zen.domain import ComponentDefinition, ComponentState, ConfigProfile, FileRecord
 from zapret_zen.services.service_catalog import (
     ALWAYS_APPLY_SERVICE_IDS,
-    FORTNITE_GENERAL_PRIORITY,
     SERVICE_CATEGORIES,
     SERVICE_PRESETS,
     ServiceCategory,
     ServicePreset,
-    prioritize_generals_for_services,
     service_ids_in_categories,
 )
 from PySide6.QtCore import QAbstractAnimation, QCoreApplication, QEasingCurve, QEvent, QEventLoop, QObject, QPoint, QPointF, QRect, QRectF, QSize, QSizeF, Qt, QTimer, Signal, QPropertyAnimation, QParallelAnimationGroup, Property, QByteArray, QVariantAnimation
@@ -4388,12 +4386,6 @@ class MainWindow(QMainWindow):
         self._general_test_waiting_runtime_prepare = False
         self._general_test_runtime_restore_payload: dict[str, object] | None = None
         self._first_general_prompt: AppDialog | None = None
-        self._service_benchmark_profile_id: str = ""
-        self._service_benchmark_options: list[dict[str, str]] = []
-        self._service_benchmark_index: int = 0
-        self._service_benchmark_service_id: str = ""
-        self._service_benchmark_display_name: str = ""
-        self._service_benchmark_task_id: str | None = None
         self._onboarding_active = False
         self._onboarding_running = False
         self._onboarding_widget: QWidget | None = None
@@ -9150,10 +9142,7 @@ class MainWindow(QMainWindow):
             self._ui_signals.general_test_done.emit(payload.get("results", []))
             return
         if action == "run_general_diagnostic_single":
-            if action_id == "__service_benchmark__":
-                self._on_service_benchmark_test_result(payload)
-            else:
-                self._ui_signals.general_test_done.emit(payload)
+            self._ui_signals.general_test_done.emit(payload)
             return
         if action == "run_general_diagnostic_batch":
             results = payload.get("results", []) if isinstance(payload, dict) else []
@@ -9928,8 +9917,6 @@ class MainWindow(QMainWindow):
         return ["✨", "🪄", "🔥", "⚡", "🧩", "🎮", "🌐", "🛡️", "🚀", "💎", "📦", "🧪"]
 
     def _resolve_mod_emoji(self, mod_id: str, emoji: str) -> str:
-        if mod_id == "unified-by-peshk0v":
-            return "🪄"
         if emoji in self._available_mod_emojis():
             return emoji
         return self._available_mod_emojis()[abs(hash(mod_id)) % len(self._available_mod_emojis())]
@@ -9961,8 +9948,6 @@ class MainWindow(QMainWindow):
         return "#141f32", "#304463", "#eef2fb", "#1d2740", "#273349"
 
     def _open_mod_emoji_menu(self, mod_id: str, button: QToolButton) -> None:
-        if mod_id == "unified-by-peshk0v":
-            return
         if self._active_emoji_popup is not None:
             try:
                 self._active_emoji_popup.close()
@@ -10090,11 +10075,8 @@ class MainWindow(QMainWindow):
             ),
         )
 
-    def _general_options_for_current_service_tests(self, options: list[dict[str, str]], *, filter_dedicated: bool = False) -> list[dict[str, str]]:
-        if filter_dedicated:
-            from zapret_zen.services.service_catalog import filter_dedicated_generals
-            options = filter_dedicated_generals(options)
-        return prioritize_generals_for_services(options, self._selected_service_ids())
+    def _general_options_for_current_service_tests(self, options: list[dict[str, str]]) -> list[dict[str, str]]:
+        return options
 
     def _start_component_loading(self, component_id: str, button: QPushButton, base_text: str) -> None:
         self._component_loading_buttons[component_id] = button
@@ -10954,8 +10936,6 @@ class MainWindow(QMainWindow):
             self._show_error(self._t("Mods"), str(error))
 
     def _open_mod_editor(self, mod_id: str) -> None:
-        if mod_id == "unified-by-peshk0v":
-            return
         try:
             installed = {item.id: item for item in self.context.mods.list_installed()}
             entry = installed[mod_id]
@@ -13582,8 +13562,6 @@ class MainWindow(QMainWindow):
             if "fortnite" in normalized:
                 self._apply_fortnite_service_preferences_locally()
             newly_added = set(normalized) - set(current)
-            if self.context.settings.get().auto_create_isolated_profile:
-                self._maybe_create_service_isolated_profiles(newly_added)
             self._update_profile_carousel()
             self._refresh_category_cards()
             self._update_service_selection_summary()
@@ -13753,7 +13731,7 @@ class MainWindow(QMainWindow):
     def _run_general_tests_popup(self, auto_apply: bool = False, embedded: bool = False) -> None:
         if self._general_test_running:
             return
-        options = self._general_options_for_current_service_tests(self._sorted_general_options(), filter_dedicated=embedded)
+        options = self._general_options_for_current_service_tests(self._sorted_general_options())
         if not options:
             if embedded:
                 self._onboarding_running = False
@@ -14744,7 +14722,6 @@ class MainWindow(QMainWindow):
         self._apply_theme()
         self._update_profile_carousel()
         self._update_profile_card_selection()
-        self._maybe_trigger_service_profile_benchmark(profile_id)
         states = self._component_states()
         active_ids = self._master_active_components()
         running_ids = {cid for cid in active_ids if states.get(cid) and states[cid].status == "running"}
@@ -14783,115 +14760,6 @@ class MainWindow(QMainWindow):
                 w.set_selected_state(w.profile.id == active)
                 w.set_theme(self.context.settings.get().theme)
 
-    def _maybe_trigger_service_profile_benchmark(self, profile_id: str) -> None:
-        from zapret_zen.services.service_catalog import services_with_dedicated_generals
-        profile = self.context.profiles.get_profile(profile_id)
-        if profile is None:
-            return
-        snapshot = profile.settings_snapshot or {}
-        current_general = str(snapshot.get("selected_zapret_general", "") or "").strip()
-        if current_general:
-            return
-        settings = self.context.settings.get()
-        benchmarked = dict(settings.service_profile_benchmarked or {})
-        if benchmarked.get(profile_id):
-            return
-        profile_services = set(snapshot.get("selected_service_ids") or [])
-        dedicated_services = services_with_dedicated_generals()
-        service_needs_bench = profile_services & dedicated_services
-        if not service_needs_bench:
-            return
-        benchmarked[profile_id] = True
-        self.context.settings.update(service_profile_benchmarked=benchmarked)
-        service_label = next(iter(service_needs_bench))
-        from zapret_zen.services.service_catalog import SERVICE_PRESETS
-        preset = next((p for p in SERVICE_PRESETS if p.id == service_label), None)
-        display_name = preset.title_en if preset else service_label
-        QTimer.singleShot(800, lambda: self._run_service_profile_benchmark(profile_id, service_label, display_name))
-
-    def _run_service_profile_benchmark(self, profile_id: str, service_id: str, display_name: str) -> None:
-        from zapret_zen.services.service_catalog import dedicated_generals_for_service
-        dedicated_names = dedicated_generals_for_service(service_id)
-        if not dedicated_names:
-            return
-        all_options = self._sorted_general_options()
-        dedicated_name_set = {n.lower() for n in dedicated_names}
-        service_options = [opt for opt in all_options if str(opt.get("name", "")).strip().lower() in dedicated_name_set]
-        if not service_options:
-            return
-        profile = self.context.profiles.get_profile(profile_id)
-        if profile is None or profile_id != self._active_profile_id():
-            return
-        snapshot = profile.settings_snapshot or {}
-        ipset_mode = str(snapshot.get("zapret_ipset_mode", "loaded") or "loaded")
-        game_mode = str(snapshot.get("zapret_game_filter_mode", "tcpudp") or "tcpudp")
-        for opt in service_options:
-            opt["ipset_mode"] = ipset_mode
-            opt["game_mode"] = game_mode
-        self._service_benchmark_profile_id = profile_id
-        self._service_benchmark_options = service_options
-        self._service_benchmark_index = 0
-        self._service_benchmark_service_id = service_id
-        self._service_benchmark_display_name = display_name
-        self._run_next_service_benchmark_test()
-
-    def _run_next_service_benchmark_test(self) -> None:
-        if self._service_benchmark_index >= len(self._service_benchmark_options):
-            self._on_service_benchmark_done()
-            return
-        option = self._service_benchmark_options[self._service_benchmark_index]
-        self._service_benchmark_task_id = self._submit_backend_task(
-            "run_general_diagnostic_single",
-            {
-                "general_id": option["id"],
-                "ipset_mode": option.get("ipset_mode", "loaded"),
-                "game_mode": option.get("game_mode", "tcpudp"),
-            },
-            action_id="__service_benchmark__",
-        )
-
-    def _on_service_benchmark_done(self) -> None:
-        profile_id = self._service_benchmark_profile_id
-        display = self._service_benchmark_display_name
-        self._service_benchmark_profile_id = ""
-        self._service_benchmark_options = []
-        if profile_id:
-            self._toast_notification(
-                "warning",
-                self._t("Стратегия не найдена", "No strategy found"),
-                self._t(
-                    f"Не удалось подобрать стратегию для {display}. Попробуйте выбрать вручную.",
-                    f"Could not find a strategy for {display}. Please select one manually.",
-                ),
-            )
-
-    def _on_service_benchmark_test_result(self, payload: object) -> None:
-        if not isinstance(payload, dict):
-            return
-        status = str(payload.get("status", "") or "")
-        profile_id = self._service_benchmark_profile_id
-        if status == "ok" and profile_id:
-            chosen_id = str(payload.get("id", "") or "")
-            if chosen_id:
-                profile = self.context.profiles.get_profile(profile_id)
-                if profile:
-                    snapshot = dict(profile.settings_snapshot or {})
-                    snapshot["selected_zapret_general"] = chosen_id
-                    self.context.profiles.update_profile(profile_id, settings_snapshot=snapshot)
-                    self._toast_notification(
-                        "success",
-                        self._t("Стратегия найдена", "Strategy found"),
-                        self._t(
-                            f"Для {self._service_benchmark_display_name} выбрана стратегия: {chosen_id}",
-                            f"Strategy selected for {self._service_benchmark_display_name}: {chosen_id}",
-                        ),
-                    )
-                self._service_benchmark_options = []
-                self._service_benchmark_profile_id = ""
-                return
-        self._service_benchmark_index += 1
-        self._run_next_service_benchmark_test()
-
     def _create_profile(self) -> None:
         name, ok = QInputDialog.getText(self, self._t("Create profile"), self._t("Profile name:"))
         if not ok or not name.strip():
@@ -14904,28 +14772,6 @@ class MainWindow(QMainWindow):
             snapshot = source.settings_snapshot or {}
         self.context.profiles.create_profile(name.strip(), snapshot)
         self._update_profile_carousel()
-
-    def _maybe_create_service_isolated_profiles(self, newly_added_service_ids: set[str]) -> None:
-        from zapret_zen.services.service_catalog import services_with_dedicated_generals, SERVICE_PRESETS
-        settings = self.context.settings.get()
-        already_created = set(settings.isolated_service_profiles_created or [])
-        dedicated_services = services_with_dedicated_generals()
-        for service_id in newly_added_service_ids:
-            if service_id not in dedicated_services:
-                continue
-            if service_id in already_created:
-                continue
-            preset = next((p for p in SERVICE_PRESETS if p.id == service_id), None)
-            if preset is None:
-                continue
-            profile_name = preset.title_en
-            current_id = self._active_profile_id()
-            source = self.context.profiles.get_profile(current_id)
-            snapshot = dict(source.settings_snapshot) if source else self.context.profiles._make_snapshot(self.context.settings)
-            snapshot["selected_service_ids"] = [service_id]
-            profile = self.context.profiles.create_profile(profile_name, snapshot)
-            already_created.add(service_id)
-            self.context.settings.update(isolated_service_profiles_created=list(already_created))
 
     def _rename_profile(self, profile_id: str) -> None:
         profile = self.context.profiles.get_profile(profile_id)
@@ -15154,11 +15000,48 @@ class MainWindow(QMainWindow):
             installed = dict(self._mods_installed_cache)
             target = installed.get(mod_id)
             if target is not None:
-                target.enabled = not bool(target.enabled)
+                was_enabled = bool(target.enabled)
+                target.enabled = not was_enabled
+                if not was_enabled:
+                    self._maybe_create_mod_isolated_profile(mod_id)
                 self.refresh_mods({"index": list(self._mods_index_cache), "installed": installed})
         except Exception:
             pass
         self._submit_backend_task("toggle_mod", {"mod_id": mod_id}, action_id=f"mod:{mod_id}")
+
+    def _maybe_create_mod_isolated_profile(self, mod_id: str) -> None:
+        try:
+            installed = self._mods_installed_cache.get(mod_id)
+            if installed is None:
+                return
+            mod_path = Path(installed.path)
+            meta_path = mod_path / "mod.json"
+            if not meta_path.is_file():
+                return
+            import json as _json
+            meta = _json.loads(meta_path.read_text(encoding="utf-8-sig"))
+            if not isinstance(meta, dict) or not meta.get("isolated_profile"):
+                return
+            profile_name = str(meta.get("name", mod_id) or mod_id)
+            existing_profiles = self.context.profiles.list_profiles()
+            if any(p.name == profile_name for p in existing_profiles):
+                return
+            current_id = self._active_profile_id()
+            source = self.context.profiles.get_profile(current_id)
+            snapshot = dict(source.settings_snapshot) if source else self.context.profiles._make_snapshot(self.context.settings)
+            snapshot["selected_service_ids"] = []
+            mod_settings = meta.get("settings") if isinstance(meta.get("settings"), dict) else {}
+            for key, value in mod_settings.items():
+                key = str(key).strip()
+                if key in {"ipset_mode", "game_filter_mode"}:
+                    normalized = str(value).strip().lower()
+                    if key == "ipset_mode" and normalized in {"loaded", "none", "any"}:
+                        snapshot["zapret_ipset_mode"] = normalized
+                    elif key == "game_filter_mode" and normalized in {"disabled", "tcp", "udp", "tcpudp", "all"}:
+                        snapshot["zapret_game_filter_mode"] = "tcpudp" if normalized == "all" else normalized
+            self.context.profiles.create_profile(profile_name, snapshot)
+        except Exception:
+            pass
 
     def _mod_circle_action_style(self, role: str, *, active: bool) -> str:
         theme = self.context.settings.get().theme
@@ -15333,7 +15216,6 @@ class MainWindow(QMainWindow):
         welcome = self.context.settings.get().pending_mod_welcome
         if isinstance(welcome, dict) and welcome.get("text"):
             QTimer.singleShot(0, lambda w=welcome: self._show_mod_welcome(w))
-            return
 
         def _field(obj: object, name: str, default: object = "") -> object:
             if isinstance(obj, dict):
@@ -15365,8 +15247,6 @@ class MainWindow(QMainWindow):
         for order, installed_item in enumerate(installed_items):
             mod_id = str(_field(installed_item, "id", "") or "")
             if not mod_id:
-                continue
-            if mod_id == "unified-by-peshk0v":
                 continue
             seen.add(mod_id)
             indexed = index_map.get(mod_id)
@@ -15405,8 +15285,6 @@ class MainWindow(QMainWindow):
         for item in index:
             item_id = str(_field(item, "id", "") or "")
             if not item_id or item_id in seen:
-                continue
-            if item_id == "unified-by-peshk0v":
                 continue
             combined.append(
                 {
@@ -15480,13 +15358,8 @@ class MainWindow(QMainWindow):
             mod_id = str(mod["id"])
             enabled = bool(mod["enabled"])
             state = str(mod["state"])
-            if mod_id == "unified-by-peshk0v":
-                mod["description"] = self._t(
-                    "Позволяет обойти блокировки самых популярных сервисов, включая игровые сервисы, социальные сети и другие платформы.",
-                    "Helps bypass restrictions for the most popular services, including gaming platforms, social networks, and other services.",
-                )
 
-            card = ModCardFrame(mod_id, bool(mod.get("installed")) and mod_id != "unified-by-peshk0v")
+            card = ModCardFrame(mod_id, bool(mod.get("installed")))
             card.setProperty("class", "modCard")
             card.clicked.connect(self._open_mod_editor)
             card_layout = QHBoxLayout(card)
@@ -15540,10 +15413,7 @@ class MainWindow(QMainWindow):
                 emoji_btn.setEmojiColor(palette_fg)
                 badge_dx, badge_dy = self._mod_badge_offset(str(mod["emoji"]))
                 emoji_btn.setEmojiOffset(badge_dx, badge_dy)
-                if mod_id == "unified-by-peshk0v":
-                    emoji_btn.setEnabled(False)
-                else:
-                    emoji_btn.clicked.connect(lambda _=False, mid=mod_id, btn=emoji_btn: self._open_mod_emoji_menu(mid, btn))
+                emoji_btn.clicked.connect(lambda _=False, mid=mod_id, btn=emoji_btn: self._open_mod_emoji_menu(mid, btn))
                 icon_row.addWidget(emoji_btn, 1, Qt.AlignmentFlag.AlignCenter)
             left_col.addWidget(icon_wrap, 0, Qt.AlignmentFlag.AlignHCenter)
 
@@ -15623,12 +15493,11 @@ class MainWindow(QMainWindow):
             share_btn.setFixedSize(36, 36)
             share_btn.setProperty("hoverRadius", 18)
             share_btn.setStyleSheet(self._mod_circle_action_style("share", active=enabled))
-            share_btn.setEnabled(bool(mod.get("installed")) and mod_id != "unified-by-peshk0v")
+            share_btn.setEnabled(bool(mod.get("installed")))
             share_btn.setAttribute(Qt.WidgetAttribute.WA_NoMousePropagation, True)
             share_btn.clicked.connect(lambda _=False, mid=mod_id: self._request_mod_export(mid))
             self._attach_button_animations(share_btn)
-            if mod_id != "unified-by-peshk0v":
-                actions.addWidget(share_btn)
+            actions.addWidget(share_btn)
 
             remove_btn = QToolButton()
             remove_btn.setToolTip(self._t("Delete modification"))
@@ -15640,8 +15509,7 @@ class MainWindow(QMainWindow):
             remove_btn.setAttribute(Qt.WidgetAttribute.WA_NoMousePropagation, True)
             remove_btn.clicked.connect(lambda _=False, mid=mod_id: self._remove_mod_with_confirmation(mid))
             self._attach_button_animations(remove_btn)
-            if mod_id != "unified-by-peshk0v":
-                actions.addWidget(remove_btn)
+            actions.addWidget(remove_btn)
             head.addLayout(actions)
             body.addLayout(head)
 

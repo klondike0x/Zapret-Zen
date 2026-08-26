@@ -28,7 +28,7 @@ from zapret_zen.domain import ComponentDefinition, ComponentState
 from zapret_zen.runtime_env import is_packaged_runtime
 from zapret_zen.services.github_network import GitHubNetworkClient, is_recoverable_github_error
 from zapret_zen.services.logging_service import LoggingManager
-from zapret_zen.services.service_catalog import ALWAYS_APPLY_SERVICE_IDS, prioritize_generals_for_services
+from zapret_zen.services.service_catalog import ALWAYS_APPLY_SERVICE_IDS
 from zapret_zen.services.service_rules import SERVICE_RULES
 from zapret_zen.services.settings import SettingsManager
 from zapret_zen.services.storage import StorageManager

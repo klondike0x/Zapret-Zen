@@ -7,7 +7,6 @@ from pathlib import Path
 from typing import Any, Callable
 
 from zapret_zen.services.logging_service import LoggingManager
-from zapret_zen.services.service_catalog import prioritize_generals_for_services
 from zapret_zen.services.settings import SettingsManager
 
 
@@ -240,7 +239,6 @@ class RuntimeDiagnostics:
         stop_callback: Callable | None = None,
     ) -> list[dict[str, str]]:
         options = self._list_zapret_generals()
-        options = prioritize_generals_for_services(options, self.settings.get().selected_service_ids)
         if not options:
             return []
         settings_snapshot = self.capture_diagnostic_settings()

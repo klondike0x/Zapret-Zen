@@ -93,18 +93,25 @@ class ModsManager:
         self._installed_path = self.storage.paths.data_dir / "installed_mods.json"
         if not self._installed_path.exists():
             self.storage.write_json(self._installed_path, [])
+        self._cleanup_orphaned_installed()
         self._cleanup_installed_duplicate_generals()
+
+    _STALE_INDEX_IDS = {"unified-by-peshk0v"}
 
     def fetch_index(self, *, refresh_remote: bool = False) -> list[ModIndexItem]:
         settings = self.settings.get()
         if refresh_remote and settings.mods_index_url:
             try:
                 payload = self.github.github_json(settings.mods_index_url, timeout=10, purpose="mods-index")
+                if isinstance(payload, list):
+                    payload = [item for item in payload if isinstance(item, dict) and item.get("id") not in self._STALE_INDEX_IDS]
                 self.storage.write_json(self.storage.paths.cache_dir / "mods_index.json", payload)
                 self.logging.log("info", "Mods index refreshed from URL", url=settings.mods_index_url)
             except Exception as error:
                 self.logging.log("warning", "Failed to refresh mods index from URL", url=settings.mods_index_url, error=str(error))
         raw = self.storage.read_json(self.storage.paths.cache_dir / "mods_index.json", default=[]) or []
+        if isinstance(raw, list):
+            raw = [item for item in raw if isinstance(item, dict) and item.get("id") not in self._STALE_INDEX_IDS]
         return [ModIndexItem(**item) for item in raw]
 
     def list_installed(self) -> list[InstalledMod]:
@@ -125,7 +132,7 @@ class ModsManager:
             if not mod_dir.is_dir():
                 continue
             mod_id = mod_dir.name
-            if mod_id in registered_ids or mod_id == "unified-by-peshk0v":
+            if mod_id in registered_ids:
                 continue
             meta_path = mod_dir / self.METADATA_FILENAME
             if not meta_path.is_file():
@@ -153,7 +160,7 @@ class ModsManager:
                 enabled=False,
                 source_type="zapret_bundle",
                 general_scripts=general_scripts,
-                emoji=random.choice(self._EMOJI_CHOICES) if mod_id != "unified-by-peshk0v" else "🪄",
+                emoji=random.choice(self._EMOJI_CHOICES),
             )
             installed.append(asdict(entry))
             changed = True
@@ -192,8 +199,6 @@ class ModsManager:
         author: str,
         version: str,
     ) -> InstalledMod:
-        if mod_id == "unified-by-peshk0v":
-            raise ValueError("Hub is bundled and cannot be edited.")
         installed = self.list_installed()
         entry = next(item for item in installed if item.id == mod_id)
         entry.name = name.strip() or entry.name or mod_id
@@ -501,7 +506,7 @@ class ModsManager:
             enabled=True,
             source_type="zapret_bundle",
             general_scripts=general_scripts,
-            emoji="🪄" if mod_id == "unified-by-peshk0v" else random.choice(self._EMOJI_CHOICES),
+            emoji=random.choice(self._EMOJI_CHOICES),
         )
         installed.insert(0, entry)
         self.storage.write_json(self._installed_path, [asdict(item) for item in installed])
@@ -563,8 +568,6 @@ class ModsManager:
         return {}
 
     def _editable_mod_root(self, mod_id: str) -> Path:
-        if mod_id == "unified-by-peshk0v":
-            raise ValueError("Hub is bundled and cannot be edited.")
         entry = next(item for item in self.list_installed() if item.id == mod_id)
         root = Path(entry.path)
         if not root.exists():
@@ -801,6 +804,15 @@ class ModsManager:
                 continue
             names.add(lowered)
         return names
+
+    def _cleanup_orphaned_installed(self) -> None:
+        installed = self.list_installed()
+        cleaned = [item for item in installed if Path(item.path).exists()]
+        if len(cleaned) != len(installed):
+            removed_ids = {item.id for item in installed} - {item.id for item in cleaned}
+            self.storage.write_json(self._installed_path, [asdict(item) for item in cleaned])
+            for mod_id in removed_ids:
+                self.logging.log("info", "Removed orphaned installed mod entry", mod_id=mod_id)
 
     def _cleanup_installed_duplicate_generals(self) -> None:
         installed = self.list_installed()

@@ -17,7 +17,6 @@ from PySide6.QtCore import QObject, QTimer, Signal
 
 from zapret_zen.domain import FileRecord
 from zapret_zen.services.service_catalog import (
-    FORTNITE_GENERAL_PRIORITY,
     SERVICE_PRESETS,
     SERVICE_PRESET_IDS,
 )
@@ -211,19 +210,6 @@ def _set_zapret_enabled_from_components(context, enabled_target: bool) -> dict[s
             context.processes.stop_component("zapret")
     return _snapshot(context)
 
-def _preferred_fortnite_general_id(context) -> str:
-    options = list(context.processes.list_zapret_generals())
-    for wanted in FORTNITE_GENERAL_PRIORITY:
-        for option in options:
-            if str(option.get("name", "")).strip().lower() == wanted.lower():
-                return str(option.get("id", "") or "")
-    return ""
-
-def _fortnite_zapret_settings(context) -> dict[str, str]:
-    return {
-        "zapret_ipset_mode": "any",
-        "zapret_game_filter_mode": "tcpudp",
-    }
 
 def _attach_telegram_proxy_info(context, result: dict[str, Any]) -> None:
     try:
@@ -660,8 +646,6 @@ def _handle_set_selected_services(context, payload, emit_progress):
     }
     if "ai" in requested:
         settings_changes["selected_dns_preset"] = "xbox-dns"
-    if "fortnite" in requested:
-        settings_changes.update(_fortnite_zapret_settings(context))
     context.settings.update(**settings_changes)
     zapret_restarted = _finish_zapret_reconfiguration(context, restart=zapret_was_running)
     result = {"selected_service_ids": ordered, "client_revision": client_revision, "zapret_restarted": zapret_restarted}
