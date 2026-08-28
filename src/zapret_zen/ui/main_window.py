@@ -1614,6 +1614,7 @@ class AnimatedPowerButton(QToolButton):
         self._theme_name = "night"
         self._active = False
         self._visual_mode = "off"
+        self._diagnostic_inactive = False
         self._visual_scale = 1.0
         self._hover_progress = 0.0
         self._glow_pos = QPointF(100.0, 100.0)
@@ -1708,6 +1709,17 @@ class AnimatedPowerButton(QToolButton):
         else:
             self._partial_timer.stop()
             self._partial_phase = 0.0
+        self.update()
+
+    def set_diagnostic_inactive(self, active: bool) -> None:
+        self._diagnostic_inactive = bool(active)
+        if active:
+            self._spinner_timer.start()
+            self.setCursor(Qt.CursorShape.ArrowCursor)
+        else:
+            self._spinner_timer.stop()
+            self._rotation_angle = 0.0
+            self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.update()
 
     def _advance_spinner(self) -> None:
@@ -1956,6 +1968,31 @@ class AnimatedPowerButton(QToolButton):
             gradient.setColorAt(0.0, off_top)
             gradient.setColorAt(1.0, off_bottom)
             border = off_border
+        if self._diagnostic_inactive:
+            dim_top = QColor(off_top)
+            dim_top.setAlpha(120)
+            dim_bottom = QColor(off_bottom)
+            dim_bottom.setAlpha(120)
+            dim_border = QColor(off_border)
+            dim_border.setAlpha(90)
+            dim_gradient = QRadialGradient(center.x(), center.y() - radius * 0.36, radius * 1.3)
+            dim_gradient.setColorAt(0.0, dim_top)
+            dim_gradient.setColorAt(1.0, dim_bottom)
+            painter.setPen(QPen(dim_border, 2))
+            painter.setBrush(dim_gradient)
+            painter.drawEllipse(center, radius, radius)
+            icon_size = 50
+            pixmap = self.icon().pixmap(icon_size, icon_size)
+            icon_rect = QRectF(center.x() - icon_size / 2.0, center.y() - icon_size / 2.0, icon_size, icon_size)
+            painter.save()
+            painter.setOpacity(0.5)
+            painter.drawPixmap(icon_rect, pixmap, QRectF(0, 0, pixmap.width(), pixmap.height()))
+            painter.restore()
+            self._paint_spinner_arc(painter, center, radius)
+            self._paint_glint(painter, center, radius)
+            self._paint_burst(painter, center, dim_border)
+            return
+
         painter.setPen(QPen(border, 2))
         painter.setBrush(gradient)
         painter.drawEllipse(center, radius, radius)
@@ -4389,6 +4426,8 @@ class MainWindow(QMainWindow):
         self._mod_welcome_shown = False
         self._isolated_profile_benchmark: dict[str, object] | None = None
         self._isolated_profile_benchmark_task_id: str | None = None
+        self._strategy_selection_active = False
+        self._mod_welcome_shown_signatures: set[tuple[str, str]] = set()
         self._first_general_prompt: AppDialog | None = None
         self._onboarding_active = False
         self._onboarding_running = False
@@ -8932,6 +8971,7 @@ class MainWindow(QMainWindow):
         self._settings_diag_progress_bar = bar
         dialog.rejected.connect(self._cancel_settings_diagnostics)
         self._settings_diag_task_id = self._submit_backend_task("run_settings_diagnostics", action_id="__settings_diag__")
+        self._set_strategy_selection_active(True)
 
     def _cancel_settings_diagnostics(self) -> None:
         self._settings_diag_cancelled = True
@@ -9273,6 +9313,7 @@ class MainWindow(QMainWindow):
             if self._isolated_profile_benchmark is not None:
                 self._isolated_profile_benchmark = None
                 self._isolated_profile_benchmark_task_id = None
+                self._set_strategy_selection_active(False)
                 self._mark_dirty("dashboard", "tray")
                 return
             if self._general_test_cancelled:
@@ -9296,6 +9337,7 @@ class MainWindow(QMainWindow):
             self._restore_general_test_runtime_after_run()
         if action == "run_settings_diagnostics":
             self._settings_diag_task_id = None
+            self._set_strategy_selection_active(False)
             if self._settings_diag_dialog is not None:
                 self._settings_diag_dialog.reject()
             self._settings_diag_dialog = None
@@ -9380,6 +9422,7 @@ class MainWindow(QMainWindow):
 
     def _show_settings_diagnostics_result(self, payload: object) -> None:
         self._settings_diag_task_id = None
+        self._set_strategy_selection_active(False)
         if self._settings_diag_dialog is not None:
             self._settings_diag_dialog.accept()
         self._settings_diag_dialog = None
@@ -9465,6 +9508,12 @@ class MainWindow(QMainWindow):
                 if isinstance(result, dict):
                     self._on_batch_general_result(result)
             else:
+                if self._isolated_profile_benchmark is not None:
+                    self._set_strategy_selection_active(
+                        True,
+                        current=int(payload.get("current", 0) or 0),
+                        total=int(payload.get("total", 0) or 0),
+                    )
                 self._ui_signals.general_test_progress.emit(
                     {
                         "target_current": int(payload.get("current", 0) or 0),
@@ -9480,6 +9529,7 @@ class MainWindow(QMainWindow):
                 current = max(0, min(total, int(payload.get("current", 0) or 0)))
                 self._settings_diag_progress_bar.setMaximum(total)
                 self._settings_diag_progress_bar.setValue(current)
+                self._set_strategy_selection_active(True, current=current, total=total)
             if self._settings_diag_status_label is not None:
                 self._settings_diag_status_label.setText(
                     self._t(
@@ -12616,6 +12666,31 @@ class MainWindow(QMainWindow):
         }
         return colors.get(state, colors["off"])
 
+    def _set_strategy_selection_active(self, active: bool, *, current: int = 0, total: int = 0) -> None:
+        if active:
+            self._strategy_selection_active = True
+            if isinstance(self.power_button, AnimatedPowerButton):
+                self.power_button.set_diagnostic_inactive(True)
+            self.power_button.setEnabled(False)
+            label = self._t("Подбор стратегии…", "Selecting strategy…")
+            if total > 0:
+                pct = max(0, min(100, int(current * 100.0 / total)))
+                label = f"{label} {pct}%"
+            self._toggle_status_label.setText(label)
+            if not self._toggle_status_card.isVisible():
+                self._toggle_status_card.setVisible(True)
+                self._start_toggle_pulse()
+        else:
+            if not self._strategy_selection_active:
+                return
+            self._strategy_selection_active = False
+            if isinstance(self.power_button, AnimatedPowerButton):
+                self.power_button.set_diagnostic_inactive(False)
+            self._toggle_status_label.setText("")
+            self._toggle_status_card.setVisible(False)
+            self._stop_toggle_pulse()
+            self.refresh_dashboard()
+
     def _update_toggle_status(self, status_key: str) -> None:
         labels = {
             "start_zapret": self._t("Запуск Zapret…", "Starting Zapret…"),
@@ -15262,6 +15337,7 @@ class MainWindow(QMainWindow):
                 {"batch": batch, "targets": targets},
                 action_id="__isolated_profile_benchmark__",
             )
+            self._set_strategy_selection_active(True)
         except Exception as error:
             self.context.logging.log(
                 "error",
@@ -15275,6 +15351,7 @@ class MainWindow(QMainWindow):
         benchmark = self._isolated_profile_benchmark
         self._isolated_profile_benchmark = None
         self._isolated_profile_benchmark_task_id = None
+        self._set_strategy_selection_active(False)
         if benchmark is None:
             return
         profile_id = str(benchmark.get("profile_id", "") or "")
@@ -15481,9 +15558,15 @@ class MainWindow(QMainWindow):
 
     def _show_mod_welcome_once(self) -> None:
         welcome = self.context.settings.get().pending_mod_welcome
-        if isinstance(welcome, dict) and welcome.get("text") and not self._mod_welcome_shown:
-            self._mod_welcome_shown = True
-            QTimer.singleShot(0, lambda w=welcome: self._show_mod_welcome(w))
+        if isinstance(welcome, dict) and welcome.get("text"):
+            signature = (
+                str(welcome.get("mod_name", "") or ""),
+                str(welcome.get("text", "") or ""),
+            )
+            if not self._mod_welcome_shown and signature not in self._mod_welcome_shown_signatures:
+                self._mod_welcome_shown = True
+                self._mod_welcome_shown_signatures.add(signature)
+                QTimer.singleShot(0, lambda w=welcome: self._show_mod_welcome(w))
 
     def _show_mod_welcome(self, welcome: dict[str, str]) -> None:
         mod_name = str(welcome.get("mod_name", ""))
