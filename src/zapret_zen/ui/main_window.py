@@ -15558,15 +15558,20 @@ class MainWindow(QMainWindow):
 
     def _show_mod_welcome_once(self) -> None:
         welcome = self.context.settings.get().pending_mod_welcome
-        if isinstance(welcome, dict) and welcome.get("text"):
-            signature = (
-                str(welcome.get("mod_name", "") or ""),
-                str(welcome.get("text", "") or ""),
-            )
-            if not self._mod_welcome_shown and signature not in self._mod_welcome_shown_signatures:
-                self._mod_welcome_shown = True
-                self._mod_welcome_shown_signatures.add(signature)
-                QTimer.singleShot(0, lambda w=welcome: self._show_mod_welcome(w))
+        if not isinstance(welcome, dict) or not welcome.get("text"):
+            return
+        mod_name = str(welcome.get("mod_name", "") or "")
+        text = str(welcome.get("text", "") or "")
+        signature = (mod_name, text)
+        seen = dict(self.context.settings.get().seen_mod_welcomes or {})
+        if seen.get(mod_name) == text:
+            return
+        if self._mod_welcome_shown or signature in self._mod_welcome_shown_signatures:
+            return
+        self._mod_welcome_shown = True
+        self._mod_welcome_shown_signatures.add(signature)
+        self.context.settings.update(seen_mod_welcomes={**seen, mod_name: text})
+        QTimer.singleShot(0, lambda w=welcome: self._show_mod_welcome(w))
 
     def _show_mod_welcome(self, welcome: dict[str, str]) -> None:
         mod_name = str(welcome.get("mod_name", ""))

@@ -32,6 +32,7 @@ class AppSettings:
     component_selection_initialized: bool = False
     enabled_mod_ids: list[str] = field(default_factory=list)
     pending_mod_welcome: dict[str, str] = field(default_factory=dict)
+    seen_mod_welcomes: dict[str, str] = field(default_factory=dict)
     mods_index_url: str = ""
     app_update_url: str = ""
     tg_proxy_host: str = "127.0.0.1"

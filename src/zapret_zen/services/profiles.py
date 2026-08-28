@@ -15,6 +15,8 @@ _SNAPSHOT_SKIP = {
     "notifications_enabled",
     "work_root",
     "zapret_block_quic",
+    "pending_mod_welcome",
+    "seen_mod_welcomes",
     "selected_service_ids",
     "tg_proxy_host",
     "tg_proxy_port",
