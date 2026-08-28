@@ -156,6 +156,7 @@ class RuntimeDiagnostics:
         self,
         batch: list[dict[str, str]],
         *,
+        targets: list[dict[str, str]] | None = None,
         progress_callback: Callable | None = None,
         result_callback: Callable | None = None,
         stop_callback: Callable | None = None,
@@ -164,7 +165,7 @@ class RuntimeDiagnostics:
         settings_snapshot = self.capture_diagnostic_settings()
         original_running = self._is_image_running("winws.exe")
         results: list[dict[str, object]] = []
-        targets = self._load_standard_test_targets()
+        targets = targets if targets else self._load_standard_test_targets()
         total = max(1, len(batch))
         check_fn = self._run_batch_connectivity_check or self._run_connectivity_check
         try:

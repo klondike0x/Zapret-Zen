@@ -491,6 +491,8 @@ class ProcessManager:
         self.settings.update(enabled_component_ids=enabled_ids)
         if not target.enabled:
             self.stop_component(component_id)
+        elif component_id == "dns-manager":
+            self.start_component(component_id)
         self.logging.log("info", "Component enabled state changed", component_id=component_id, enabled=target.enabled)
         self._invalidate_state_cache()
         return target
@@ -1281,6 +1283,13 @@ Get-NetAdapter -ErrorAction SilentlyContinue | ForEach-Object {
         settings = self.settings.get()
         preset = (settings.selected_dns_preset or "").strip()
         if not preset:
+            try:
+                presets = self.list_dns_presets()
+                if presets:
+                    preset = str(presets[0].get("id", "")).strip()
+            except Exception:
+                preset = ""
+        if not preset:
             state = ComponentState(
                 component_id=component_id,
                 status="error",
@@ -1293,15 +1302,24 @@ Get-NetAdapter -ErrorAction SilentlyContinue | ForEach-Object {
             state_file = self._dns_manager_state_file()
 
             if self._dns_manager_is_active():
-                state = dns.read_state(state_file)
-                adapters = state.get("previous_adapters")
-                if adapters:
-                    try:
-                        dns.restore_windows_dns(adapters)
-                    except RuntimeError:
-                        pass
-                dns.reset_windows_dns()
-                dns.write_state(state_file, {"active": False})
+                try:
+                    state = dns.read_state(state_file)
+                    adapters = state.get("previous_adapters")
+                    if adapters:
+                        try:
+                            dns.restore_windows_dns(adapters)
+                        except RuntimeError:
+                            pass
+                except Exception:
+                    pass
+                try:
+                    dns.reset_windows_dns()
+                except RuntimeError:
+                    pass
+                try:
+                    dns.write_state(state_file, {"active": False})
+                except Exception:
+                    pass
 
             p = dns.PRESETS.get(preset)
             if p is None:
@@ -1346,15 +1364,31 @@ Get-NetAdapter -ErrorAction SilentlyContinue | ForEach-Object {
             if adapters:
                 try:
                     dns.restore_windows_dns(adapters)
-                except RuntimeError:
-                    pass
-
-            dns.reset_windows_dns()
-            dns.write_state(state_file, {"active": False, "reset_at": datetime.utcnow().isoformat()})
+                except RuntimeError as error:
+                    self.logging.log("warning", "DNS Manager restore had issues", error=str(error))
+            try:
+                dns.reset_windows_dns()
+            except RuntimeError as error:
+                state.last_error = str(error)
+                self.logging.log("warning", "DNS Manager reset had issues", error=str(error))
+            dns.write_state(state_file, {
+                "active": False,
+                "reset_at": datetime.utcnow().isoformat(),
+                "last_error": state.last_error,
+            })
             self.logging.log("info", "DNS Manager stopped (DNS reset)")
         except Exception as error:
             state.last_error = str(error)
-            self.logging.log("warning", "DNS Manager reset had issues", error=str(error))
+            try:
+                dns = self._import_dns_manager()
+                dns.write_state(self._dns_manager_state_file(), {
+                    "active": False,
+                    "reset_at": datetime.utcnow().isoformat(),
+                    "last_error": str(error),
+                })
+            except Exception:
+                pass
+            self.logging.log("warning", "DNS Manager reset failed", error=str(error))
         self._states[component_id] = state
         return state
 
@@ -1769,12 +1803,14 @@ Get-NetAdapter -ErrorAction SilentlyContinue | ForEach-Object {
         self,
         batch: list[dict[str, str]],
         *,
+        targets: list[dict[str, str]] | None = None,
         progress_callback: callable | None = None,
         result_callback: callable | None = None,
         stop_callback: callable | None = None,
     ) -> list[dict[str, object]]:
         return self.diagnostics.run_general_diagnostic_batch(
-            batch, progress_callback=progress_callback, result_callback=result_callback, stop_callback=stop_callback,
+            batch, targets=targets, progress_callback=progress_callback,
+            result_callback=result_callback, stop_callback=stop_callback,
         )
 
     def run_settings_diagnostics(

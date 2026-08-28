@@ -4385,6 +4385,10 @@ class MainWindow(QMainWindow):
         self._general_test_original_general = ""
         self._general_test_waiting_runtime_prepare = False
         self._general_test_runtime_restore_payload: dict[str, object] | None = None
+        self._isolated_profile_pending_benchmark_mods: set[str] = set()
+        self._mod_welcome_shown = False
+        self._isolated_profile_benchmark: dict[str, object] | None = None
+        self._isolated_profile_benchmark_task_id: str | None = None
         self._first_general_prompt: AppDialog | None = None
         self._onboarding_active = False
         self._onboarding_running = False
@@ -4544,6 +4548,7 @@ class MainWindow(QMainWindow):
         self._pending_settings_payload: dict[str, object] | None = None
         self._settings_save_revision = 0
         self._settings_save_acked_revision = 0
+        self._theme_last_commit: tuple[str, str] | None = None
         self._loading_overlay_fade: QPropertyAnimation | None = None
         self._loading_overlay_context = ""
         self._profile_restart_pending = False
@@ -7850,28 +7855,35 @@ class MainWindow(QMainWindow):
         # --- Auto-save connections ---
 
         def _theme_changed() -> None:
+            mode_grp = all_ctrl.get("theme_mode")
+            pal_grp = all_ctrl.get("accent_palette")
+            mode = ""
+            accent = "#7380ff"
+            if isinstance(mode_grp, QButtonGroup):
+                checked = mode_grp.checkedButton()
+                if checked is not None and hasattr(checked, "_seg_value"):
+                    mode = str(checked._seg_value)
+            if isinstance(pal_grp, QButtonGroup):
+                checked = pal_grp.checkedButton()
+                if checked is not None and hasattr(checked, "_palette_value"):
+                    accent = str(checked._palette_value)
+            if not mode:
+                self._theme_busy = False
+                return
+            current = self.context.settings.get()
+            if mode == str(current.theme) and accent == str(current.accent_color):
+                self._theme_busy = False
+                return
+            self._pending_theme = None
             if getattr(self, '_theme_busy', False):
+                self._pending_theme = (mode, accent)
                 return
             self._theme_busy = True
             try:
-                mode_grp = all_ctrl.get("theme_mode")
-                pal_grp = all_ctrl.get("accent_palette")
-                mode = ""
-                accent = "#7380ff"
-                if isinstance(mode_grp, QButtonGroup):
-                    checked = mode_grp.checkedButton()
-                    if checked is not None and hasattr(checked, "_seg_value"):
-                        mode = str(checked._seg_value)
-                if isinstance(pal_grp, QButtonGroup):
-                    checked = pal_grp.checkedButton()
-                    if checked is not None and hasattr(checked, "_palette_value"):
-                        accent = str(checked._palette_value)
-                if mode:
-                    self.context.settings.update(theme=mode, accent_color=accent)
-                    self._apply_theme()
-                    QTimer.singleShot(0, _finish_theme_switch)
-                else:
-                    self._theme_busy = False
+                self.context.settings.update(theme=mode, accent_color=accent)
+                self._theme_last_commit = (str(mode), str(accent))
+                self._apply_theme()
+                QTimer.singleShot(0, _finish_theme_switch)
             except Exception:
                 self._theme_busy = False
                 raise
@@ -7880,6 +7892,21 @@ class MainWindow(QMainWindow):
             self._reload_settings_page()
             QTimer.singleShot(200, self._animate_settings_saved)
             self._theme_busy = False
+            pending = getattr(self, '_pending_theme', None)
+            if pending is not None:
+                self._pending_theme = None
+                mode, accent = pending
+                current = self.context.settings.get()
+                if str(mode) == str(current.theme) and str(accent) == str(current.accent_color):
+                    return
+                try:
+                    self.context.settings.update(theme=str(mode), accent_color=str(accent))
+                    self._theme_last_commit = (str(mode), str(accent))
+                    self._apply_theme()
+                    QTimer.singleShot(0, _finish_theme_switch)
+                except Exception:
+                    self._theme_busy = False
+                    raise
 
         def _lang_changed() -> None:
             grp = all_ctrl.get("language")
@@ -8056,14 +8083,6 @@ class MainWindow(QMainWindow):
                         return str(btn._seg_value)
             return None
 
-        val = _read_seg("theme_mode")
-        if val:
-            payload["theme"] = val
-        pal_grp = ctrl.get("accent_palette")
-        if isinstance(pal_grp, QButtonGroup):
-            checked = pal_grp.checkedButton()
-            if checked is not None and hasattr(checked, "_palette_value"):
-                payload["accent_color"] = str(checked._palette_value)
         val = _read_seg("language")
         if val:
             payload["language"] = val
@@ -8950,13 +8969,15 @@ class MainWindow(QMainWindow):
             self.context.settings.reload()
         if action == "apply_settings" and settings_response_revision:
             self._settings_save_acked_revision = max(self._settings_save_acked_revision, settings_response_revision)
-            if settings_response_revision >= self._settings_save_revision:
+            is_latest_settings_ack = settings_response_revision >= self._settings_save_revision
+            if is_latest_settings_ack:
                 self._pending_settings_payload = None
                 self._settings_save_acked_revision = self._settings_save_revision
-            # Restore theme if it was pending and got reverted by reload
             if pending_theme and self.context.settings.get().theme != pending_theme:
-                self.context.settings.update(theme=str(pending_theme))
-                self._apply_theme()
+                last_commit = getattr(self, "_theme_last_commit", None)
+                if is_latest_settings_ack and last_commit is not None and str(last_commit[0]) == str(pending_theme):
+                    self.context.settings.update(theme=str(pending_theme))
+                    self._apply_theme()
         self._restore_optimistic_settings_if_needed()
         self._restore_optimistic_service_selection_if_needed()
         if task_gen >= self._state_generation:
@@ -9066,6 +9087,10 @@ class MainWindow(QMainWindow):
             return
         if action == "toggle_mod":
             if isinstance(payload, dict):
+                mod_id = str(payload.get("mod_id", "") or "")
+                if mod_id in self._isolated_profile_pending_benchmark_mods:
+                    self._isolated_profile_pending_benchmark_mods.discard(mod_id)
+                    QTimer.singleShot(0, lambda mid=mod_id: self._maybe_run_isolated_profile_strategy_benchmark(mid))
                 self._page_payload_cache["mods"] = {
                     "index": payload.get("index", []),
                     "installed": payload.get("installed", []),
@@ -9074,9 +9099,11 @@ class MainWindow(QMainWindow):
             return
         if action in {"install_mod", "remove_mod", "import_mod_from_github", "import_mod_from_paths", "import_mod_from_path"}:
             if isinstance(payload, dict) and action in {"install_mod", "import_mod_from_github", "import_mod_from_paths", "import_mod_from_path"}:
-                pw = payload.get("pending_mod_welcome")
-                if isinstance(pw, dict) and pw.get("text"):
-                    QTimer.singleShot(0, lambda w=pw: self._show_mod_welcome(w))
+                self._show_mod_welcome_once()
+                if action in {"import_mod_from_github", "import_mod_from_paths", "import_mod_from_path"}:
+                    imported_id = str(payload.get("mod_id", "") or "")
+                    if imported_id:
+                        QTimer.singleShot(0, lambda mid=imported_id: self._maybe_run_isolated_profile_strategy_benchmark(mid))
             self._mark_dirty("dashboard", "mods", "components", "files", "logs", "tray")
             return
         if action in {"move_mod", "set_mod_emoji"}:
@@ -9145,6 +9172,9 @@ class MainWindow(QMainWindow):
             self._ui_signals.general_test_done.emit(payload)
             return
         if action == "run_general_diagnostic_batch":
+            if self._isolated_profile_benchmark is not None:
+                self._on_isolated_profile_benchmark_done(payload.get("results", []) if isinstance(payload, dict) else [])
+                return
             results = payload.get("results", []) if isinstance(payload, dict) else []
             self._general_test_results = list(results) if isinstance(results, list) else []
             self._ui_signals.general_test_done.emit(self._general_test_results)
@@ -9227,6 +9257,11 @@ class MainWindow(QMainWindow):
                 self._start_next_general_test()
             return
         if action in {"run_general_diagnostics", "run_general_diagnostic_single", "run_general_diagnostic_batch"}:
+            if self._isolated_profile_benchmark is not None:
+                self._isolated_profile_benchmark = None
+                self._isolated_profile_benchmark_task_id = None
+                self._mark_dirty("dashboard", "tray")
+                return
             if self._general_test_cancelled:
                 self._general_test_task_id = None
                 self._general_test_eta_timer.stop()
@@ -9502,13 +9537,19 @@ class MainWindow(QMainWindow):
         self._apply_file_search_style()
         if self._file_search_toggle is not None:
             self._file_search_toggle.setIcon(self._icon("search.svg"))
-        self.refresh_services()
+        QTimer.singleShot(80, self.refresh_services)
         if hasattr(self, "mods_cards_layout"):
+            QTimer.singleShot(80, self.refresh_mods)
+        self._update_profile_carousel()
+        grid = getattr(self, "_settings_profiles_grid_layout", None)
+        if grid is not None:
             try:
-                self.refresh_mods()
+                for i in range(grid.count()):
+                    w = grid.itemAt(i).widget()
+                    if isinstance(w, ProfileCardFrame):
+                        w.set_theme(theme)
             except Exception:
                 pass
-        self._update_profile_carousel()
 
     def _apply_onboarding_style(self) -> None:
         if self._content_surface is None:
@@ -10801,7 +10842,7 @@ class MainWindow(QMainWindow):
         if mod_id not in installed:
             self._show_info(self._t("Mod"), self._t("Install selected mod before enabling it."))
             return
-        self._submit_backend_task("toggle_mod", {"mod_id": mod_id}, action_id=f"mod:{mod_id}")
+        self._toggle_mod_by_id(mod_id)
 
     def _remove_selected_mod(self) -> None:
         mod_id = self._selected_mod_id()
@@ -12811,7 +12852,7 @@ class MainWindow(QMainWindow):
         self._submit_backend_task("set_favorite_generals", {"favorites": favorites}, action_id="__favorite__")
 
     def _master_active_components(self) -> list[str]:
-        return [c.id for c in self._component_defs().values() if c.enabled]
+        return [c.id for c in self._component_defs().values() if c.enabled and c.id != "dns-manager"]
 
     def _maybe_run_first_general_autotest(self) -> None:
         settings = self.context.settings.get()
@@ -13731,6 +13772,16 @@ class MainWindow(QMainWindow):
     def _run_general_tests_popup(self, auto_apply: bool = False, embedded: bool = False) -> None:
         if self._general_test_running:
             return
+        if self._isolated_profile_benchmark is not None:
+            self._toast_notification(
+                "info",
+                self._t("Find best configuration"),
+                self._t(
+                    "Дождитесь завершения автоматического подбора стратегии для изолированного профиля.",
+                    "Wait for the automatic strategy selection for the isolated profile to finish.",
+                ),
+            )
+            return
         options = self._general_options_for_current_service_tests(self._sorted_general_options())
         if not options:
             if embedded:
@@ -14365,6 +14416,12 @@ class MainWindow(QMainWindow):
             components = list(self._component_defs().values())
         if not states and not explicit_payload:
             states = self._component_states()
+        if any(getattr(component, "id", "") == "dns-manager" for component in components) and not self._dns_presets_cache:
+            try:
+                raw = list(self.context.processes.list_dns_presets())
+                self._dns_presets_cache = [item for item in raw if isinstance(item, dict) and item.get("id")]
+            except Exception:
+                pass
         order = {"zapret": 0, "dns-manager": 1, "tg-ws-proxy": 2}
         components = sorted(components, key=lambda item: order.get(item.id, 99))
         self.components_list.clear()
@@ -14579,6 +14636,8 @@ class MainWindow(QMainWindow):
                             first_id = pid
                     if not selected:
                         selected = first_id
+                        if first_id:
+                            self._on_dns_preset_selected(first_id)
                     picked_index = 0
                     for i in range(dns_combo.count()):
                         if dns_combo.itemData(i) == selected:
@@ -15003,29 +15062,32 @@ class MainWindow(QMainWindow):
                 was_enabled = bool(target.enabled)
                 target.enabled = not was_enabled
                 if not was_enabled:
-                    self._maybe_create_mod_isolated_profile(mod_id)
+                    profile_id = self._maybe_create_mod_isolated_profile(mod_id)
+                    if profile_id and not self._isolated_profile_has_mod_strategy(mod_id, profile_id):
+                        self._isolated_profile_pending_benchmark_mods.add(mod_id)
                 self.refresh_mods({"index": list(self._mods_index_cache), "installed": installed})
         except Exception:
             pass
         self._submit_backend_task("toggle_mod", {"mod_id": mod_id}, action_id=f"mod:{mod_id}")
 
-    def _maybe_create_mod_isolated_profile(self, mod_id: str) -> None:
+    def _maybe_create_mod_isolated_profile(self, mod_id: str) -> str | None:
         try:
             installed = self._mods_installed_cache.get(mod_id)
             if installed is None:
-                return
+                return None
             mod_path = Path(installed.path)
             meta_path = mod_path / "mod.json"
             if not meta_path.is_file():
-                return
+                return None
             import json as _json
             meta = _json.loads(meta_path.read_text(encoding="utf-8-sig"))
             if not isinstance(meta, dict) or not meta.get("isolated_profile"):
-                return
+                return None
             profile_name = str(meta.get("name", mod_id) or mod_id)
             existing_profiles = self.context.profiles.list_profiles()
-            if any(p.name == profile_name for p in existing_profiles):
-                return
+            for profile in existing_profiles:
+                if profile.name == profile_name:
+                    return profile.id
             current_id = self._active_profile_id()
             source = self.context.profiles.get_profile(current_id)
             snapshot = dict(source.settings_snapshot) if source else self.context.profiles._make_snapshot(self.context.settings)
@@ -15033,15 +15095,235 @@ class MainWindow(QMainWindow):
             mod_settings = meta.get("settings") if isinstance(meta.get("settings"), dict) else {}
             for key, value in mod_settings.items():
                 key = str(key).strip()
-                if key in {"ipset_mode", "game_filter_mode"}:
-                    normalized = str(value).strip().lower()
-                    if key == "ipset_mode" and normalized in {"loaded", "none", "any"}:
-                        snapshot["zapret_ipset_mode"] = normalized
-                    elif key == "game_filter_mode" and normalized in {"disabled", "tcp", "udp", "tcpudp", "all"}:
-                        snapshot["zapret_game_filter_mode"] = "tcpudp" if normalized == "all" else normalized
-            self.context.profiles.create_profile(profile_name, snapshot)
+                normalized = str(value).strip().lower()
+                if key in {"ipset_mode", "zapret_ipset_mode"} and normalized in {"loaded", "none", "any"}:
+                    snapshot["zapret_ipset_mode"] = normalized
+                elif key in {"game_mode", "game_filter_mode", "zapret_game_filter_mode"} and normalized in {"disabled", "tcp", "udp", "tcpudp", "all"}:
+                    snapshot["zapret_game_filter_mode"] = "tcpudp" if normalized == "all" else normalized
+                elif key in {"udp_exclude_ports", "zapret_udp_exclude_ports"}:
+                    raw_ports = str(value).strip()
+                    if raw_ports and re.fullmatch(r"[\d,\s]+", raw_ports):
+                        snapshot["zapret_udp_exclude_ports"] = raw_ports
+            created = self.context.profiles.create_profile(profile_name, snapshot)
+            self._refresh_settings_profiles_list()
+            self._update_profile_carousel()
+            return created.id
+        except Exception:
+            return None
+
+    def _find_isolated_profile_id(self, mod_id: str) -> str | None:
+        try:
+            installed = self._mods_installed_cache.get(mod_id)
+            if installed is None:
+                return None
+            meta_path = Path(installed.path) / "mod.json"
+            if not meta_path.is_file():
+                return None
+            import json as _json
+            meta = _json.loads(meta_path.read_text(encoding="utf-8-sig"))
+            if not isinstance(meta, dict) or not meta.get("isolated_profile"):
+                return None
+            profile_name = str(meta.get("name", mod_id) or mod_id)
+            for profile in self.context.profiles.list_profiles():
+                if profile.name == profile_name:
+                    return profile.id
         except Exception:
             pass
+        return None
+
+    def _isolated_profile_has_mod_strategy(self, mod_id: str, profile_id: str) -> bool:
+        try:
+            profile = self.context.profiles.get_profile(profile_id)
+            if profile is None:
+                return False
+            selected = str((profile.settings_snapshot or {}).get("selected_zapret_general", "") or "")
+            if not selected:
+                return False
+            bundle = selected.split("|", 1)[0].strip()
+            return bool(bundle) and bundle == str(mod_id)
+        except Exception:
+            return False
+
+    def _isolated_profile_candidate_options(self, mod_id: str) -> list[dict[str, str]]:
+        try:
+            options = list(self.context.processes.list_zapret_generals())
+        except Exception:
+            options = []
+        self._general_options_cache = list(options)
+        return [dict(option) for option in options if str(option.get("bundle_id", "") or "") == str(mod_id)]
+
+    def _load_mod_test_targets(self, mod_id: str) -> list[dict[str, str]] | None:
+        try:
+            installed = self._mods_installed_cache.get(mod_id)
+            if installed is None or not getattr(installed, "path", ""):
+                return None
+            mod_root = Path(installed.path)
+            targets_file = next(
+                (candidate for candidate in (mod_root / "utils" / "targets.txt", mod_root / "targets.txt") if candidate.is_file()),
+                None,
+            )
+            if targets_file is None:
+                return None
+            eq_pattern = re.compile(r'^\s*(.+?)\s*=\s*"(.+)"\s*$')
+            targets: list[dict[str, str]] = []
+            for raw in targets_file.read_text(encoding="utf-8", errors="ignore").splitlines():
+                line = raw.strip()
+                if not line or line.startswith("#"):
+                    continue
+                match = eq_pattern.match(line)
+                if match:
+                    name = match.group(1).strip()
+                    value = match.group(2).strip()
+                else:
+                    parts = line.split()
+                    if len(parts) < 2:
+                        continue
+                    name = parts[0].strip()
+                    value = parts[1].strip()
+                converted = self.context.processes._convert_test_target(name, value)
+                if converted:
+                    targets.append(converted)
+            return targets or None
+        except Exception:
+            return None
+
+    def _maybe_run_isolated_profile_strategy_benchmark(self, mod_id: str) -> None:
+        if self._isolated_profile_benchmark is not None:
+            return
+        try:
+            profile_id = self._find_isolated_profile_id(mod_id) or self._maybe_create_mod_isolated_profile(mod_id)
+            if not profile_id:
+                return
+            options = self._isolated_profile_candidate_options(mod_id)
+            if not options:
+                self.context.logging.log(
+                    "info",
+                    "Isolated profile has no bundled strategies to benchmark",
+                    mod_id=mod_id,
+                    profile_id=profile_id,
+                )
+                return
+            targets = self._load_mod_test_targets(mod_id)
+            if targets is None:
+                targets = self.context.processes._load_standard_test_targets()
+            if not targets:
+                self.context.logging.log(
+                    "warning",
+                    "Isolated profile benchmark has no test targets",
+                    mod_id=mod_id,
+                    profile_id=profile_id,
+                )
+                return
+            profile = self.context.profiles.get_profile(profile_id)
+            snapshot_settings: dict[str, object] = dict(profile.settings_snapshot) if profile else {}
+            default_ipset = str(snapshot_settings.get("zapret_ipset_mode", "loaded") or "loaded")
+            default_game = str(snapshot_settings.get("zapret_game_filter_mode", "tcpudp") or "tcpudp")
+            batch = [
+                {
+                    "general_id": str(option.get("id", "") or ""),
+                    "ipset_mode": default_ipset,
+                    "game_mode": default_game,
+                }
+                for option in options
+            ]
+            batch = [entry for entry in batch if str(entry.get("general_id", "") or "").strip()]
+            if not batch:
+                return
+            self._isolated_profile_benchmark = {
+                "mod_id": mod_id,
+                "profile_id": profile_id,
+                "profile_name": profile.name if profile else profile_id,
+                "started_at": time.time(),
+            }
+            profile_name = str(self._isolated_profile_benchmark.get("profile_name", profile_id) or profile_id)
+            self._toast_notification(
+                "info",
+                self._t("Подбор стратегии", "Strategy selection"),
+                self._t(
+                    f'Запущен подбор стратегии для профиля «{profile_name}»...',
+                    f'Strategy selection started for the profile "{profile_name}"...',
+                ),
+            )
+            self._submit_backend_task(
+                "run_general_diagnostic_batch",
+                {"batch": batch, "targets": targets},
+                action_id="__isolated_profile_benchmark__",
+            )
+        except Exception as error:
+            self.context.logging.log(
+                "error",
+                "Isolated profile benchmark failed to start",
+                mod_id=mod_id,
+                error=str(error),
+            )
+            self._isolated_profile_benchmark = None
+
+    def _on_isolated_profile_benchmark_done(self, results: object) -> None:
+        benchmark = self._isolated_profile_benchmark
+        self._isolated_profile_benchmark = None
+        self._isolated_profile_benchmark_task_id = None
+        if benchmark is None:
+            return
+        profile_id = str(benchmark.get("profile_id", "") or "")
+        profile_name = str(benchmark.get("profile_name", profile_id) or profile_id)
+        mod_id = str(benchmark.get("mod_id", "") or "")
+        ranked = [item for item in (results if isinstance(results, list) else []) if isinstance(item, dict)]
+        working = [item for item in ranked if str(item.get("status", "")) == "ok"]
+        chosen = next(iter(working), None)
+        if chosen is None and ranked:
+            chosen = max(ranked, key=lambda item: int(item.get("passed_targets", 0) or 0))
+        if chosen is None:
+            self.context.logging.log(
+                "warning",
+                "Isolated profile benchmark returned no usable results",
+                mod_id=mod_id,
+                profile_id=profile_id,
+            )
+            self._toast_notification(
+                "error",
+                self._t("Подбор стратегии", "Strategy selection"),
+                self._t(
+                    f'Не удалось подобрать стратегию для профиля «{profile_name}»: все стратегии неработоспособны.',
+                    f'Could not select a strategy for the profile "{profile_name}": all strategies are unusable.',
+                ),
+            )
+            return
+        chosen_id = str(chosen.get("id", "") or "")
+        if not chosen_id:
+            return
+        profile = self.context.profiles.get_profile(profile_id)
+        if profile is None:
+            return
+        snapshot = dict(profile.settings_snapshot or {})
+        snapshot["selected_zapret_general"] = chosen_id
+        snapshot["zapret_ipset_mode"] = str(chosen.get("ipset_mode", snapshot.get("zapret_ipset_mode", "loaded")) or "loaded")
+        snapshot["zapret_game_filter_mode"] = str(chosen.get("game_mode", snapshot.get("zapret_game_filter_mode", "tcpudp")) or "tcpudp")
+        favorites = [str(item) for item in (snapshot.get("favorite_zapret_generals") or []) if str(item)]
+        if chosen_id not in favorites:
+            favorites.append(chosen_id)
+        snapshot["favorite_zapret_generals"] = favorites
+        self.context.profiles.update_profile(profile_id, settings_snapshot=snapshot)
+        self._mark_dirty("dashboard", "tray")
+        passed = int(chosen.get("passed_targets", 0) or 0)
+        total = int(chosen.get("total_targets", 0) or 0)
+        chosen_label = str(chosen.get("name", "") or chosen_id)
+        self.context.logging.log(
+            "info",
+            "Isolated profile strategy selected",
+            mod_id=mod_id,
+            profile_id=profile_id,
+            strategy=chosen_id,
+            passed=passed,
+            total=total,
+        )
+        self._toast_notification(
+            "success",
+            self._t("Подбор стратегии", "Strategy selection"),
+            self._t(
+                f'Для профиля «{profile_name}» выбрана стратегия {chosen_label} ({passed}/{total}).',
+                f'Strategy {chosen_label} ({passed}/{total}) was selected for the profile "{profile_name}".',
+            ),
+        )
 
     def _mod_circle_action_style(self, role: str, *, active: bool) -> str:
         theme = self.context.settings.get().theme
@@ -15184,6 +15466,12 @@ class MainWindow(QMainWindow):
         except Exception as error:
             self._show_error(self._t("Mods"), str(error))
 
+    def _show_mod_welcome_once(self) -> None:
+        welcome = self.context.settings.get().pending_mod_welcome
+        if isinstance(welcome, dict) and welcome.get("text") and not self._mod_welcome_shown:
+            self._mod_welcome_shown = True
+            QTimer.singleShot(0, lambda w=welcome: self._show_mod_welcome(w))
+
     def _show_mod_welcome(self, welcome: dict[str, str]) -> None:
         mod_name = str(welcome.get("mod_name", ""))
         text = str(welcome.get("text", ""))
@@ -15203,6 +15491,7 @@ class MainWindow(QMainWindow):
         self._attach_button_animations(continue_btn)
 
         def _dismiss() -> None:
+            self._mod_welcome_shown = False
             self.context.settings.update(pending_mod_welcome={})
             dialog.accept()
 
@@ -15213,9 +15502,7 @@ class MainWindow(QMainWindow):
         dialog.show()
 
     def refresh_mods(self, payload: object | None = None) -> None:
-        welcome = self.context.settings.get().pending_mod_welcome
-        if isinstance(welcome, dict) and welcome.get("text"):
-            QTimer.singleShot(0, lambda w=welcome: self._show_mod_welcome(w))
+        self._show_mod_welcome_once()
 
         def _field(obj: object, name: str, default: object = "") -> object:
             if isinstance(obj, dict):

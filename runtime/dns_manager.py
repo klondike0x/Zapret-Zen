@@ -88,11 +88,29 @@ def eprint(*args: Any, **kwargs: Any) -> None:
 
 
 def _run_powershell(script: str) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script],
-        capture_output=True, text=True, check=False,
+    preamble = (
+        "$OutputEncoding = [System.Text.Encoding]::UTF8;"
+        "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8;"
+    )
+    proc = subprocess.run(
+        ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", preamble + script],
+        capture_output=True, text=False, check=False,
         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
+
+    def _decode(raw: bytes | None) -> str:
+        if not raw:
+            return ""
+        for encoding in ("utf-8-sig", "cp866", "cp1251", "latin-1"):
+            try:
+                return raw.decode(encoding)
+            except (UnicodeDecodeError, LookupError):
+                continue
+        return raw.decode("utf-8", errors="replace")
+
+    proc.stdout = _decode(proc.stdout or b"")
+    proc.stderr = _decode(proc.stderr or b"")
+    return proc
 
 
 # ─── DNS server fetching ────────────────────────────────────────────────────
@@ -341,7 +359,12 @@ foreach ($adapter in $adapters) {
     if (Test-Path -LiteralPath $root6) { try { Set-ItemProperty -LiteralPath $root6 -Name NameServer -Value "" -ErrorAction Stop } catch {} }
   } catch { $errors += "Adapter $($adapter.Name): $_" }
 }
-if ($errors.Count -gt 0) { throw ($errors -join "`n") }
+if ($errors.Count -gt 0) {
+  if ($adapters.Count -eq 0 -or $errors.Count -ge $adapters.Count) {
+    throw ($errors -join "`n")
+  }
+  Write-Warning ("Partial DNS reset: " + ($errors -join " | "))
+}
 """
     proc = _run_powershell(script)
     if proc.returncode != 0:

@@ -136,16 +136,6 @@ def _sync_telegram_component_from_services(context) -> None:
             autostart_component_ids=sorted(autostart),
         )
 
-def _sync_dns_manager_component_from_services(context) -> None:
-    settings = context.settings.get()
-    selected = {str(item) for item in list(settings.selected_service_ids or [])}
-    enabled = {str(item) for item in list(settings.enabled_component_ids or [])}
-
-    if "ai" in selected:
-        enabled.add("dns-manager")
-    if enabled != set(settings.enabled_component_ids or []):
-        context.settings.update(enabled_component_ids=sorted(enabled))
-
 def _runtime_running_states(context) -> tuple[dict[str, Any], bool, bool]:
     states = {item.component_id: item for item in context.processes.list_states()}
     any_running = any(item.status == "running" for item in states.values())
@@ -360,15 +350,14 @@ def _run_action(context, action: str, payload: dict[str, Any], emit_progress: ca
 @_register_action("toggle_master_runtime")
 def _handle_toggle_master_runtime(context, payload, emit_progress):
     _sync_telegram_component_from_services(context)
-    _sync_dns_manager_component_from_services(context)
     components = context.processes.list_components()
     comp_by_id = {c.id: c for c in components}
     states = {item.component_id: item for item in context.processes.list_states()}
-    active_ids = [c.id for c in components if c.enabled]
+    active_ids = [c.id for c in components if c.enabled and c.id != "dns-manager"]
     running_ids = {
         component_id
         for component_id, state in states.items()
-        if state.status == "running"
+        if state.status == "running" and component_id != "dns-manager"
     }
     if running_ids:
         for cid in list(running_ids):
@@ -393,7 +382,6 @@ def _handle_toggle_master_runtime(context, payload, emit_progress):
 @_register_action("load_startup_snapshot")
 def _handle_load_startup_snapshot(context, payload, emit_progress):
     _sync_telegram_component_from_services(context)
-    _sync_dns_manager_component_from_services(context)
     current = context.settings.get()
     if not str(current.selected_zapret_general or "").strip():
         options = context.processes.list_zapret_generals()
@@ -408,7 +396,6 @@ def _handle_load_startup_snapshot(context, payload, emit_progress):
 @_register_action("load_components_payload")
 def _handle_load_components_payload(context, payload, emit_progress):
     _sync_telegram_component_from_services(context)
-    _sync_dns_manager_component_from_services(context)
     current = context.settings.get()
     options = context.processes.list_zapret_generals()
     if not str(current.selected_zapret_general or "").strip() and options:
@@ -421,13 +408,14 @@ def _handle_load_components_payload(context, payload, emit_progress):
 @_register_action("start_enabled_components")
 def _handle_start_enabled_components(context, payload, emit_progress):
     _sync_telegram_component_from_services(context)
-    _sync_dns_manager_component_from_services(context)
     autostart_only = bool(payload.get("autostart_only", False)) if isinstance(payload, dict) else False
     components = context.processes.list_components()
     states = {item.component_id: item for item in context.processes.list_states()}
     started: list[str] = []
     skipped: list[str] = []
     for component in components:
+        if component.id == "dns-manager":
+            continue
         if not component.enabled:
             continue
         if autostart_only and not component.autostart:
@@ -625,15 +613,6 @@ def _handle_set_selected_services(context, payload, emit_progress):
                 context.processes.start_component("tg-ws-proxy")
             except Exception:
                 pass
-    if "ai" in requested:
-        enabled_components.add("dns-manager")
-    if "ai" in requested and "ai" not in before_services:
-        states = {item.component_id: item for item in context.processes.list_states()}
-        if any(item.status == "running" for item in states.values()):
-            try:
-                context.processes.start_component("dns-manager")
-            except Exception:
-                pass
     if not has_zapret_services:
         states = {item.component_id: item for item in context.processes.list_states()}
         if states.get("zapret") and states["zapret"].status == "running":
@@ -644,8 +623,6 @@ def _handle_set_selected_services(context, payload, emit_progress):
         "enabled_component_ids": sorted(enabled_components),
         "autostart_component_ids": sorted(autostart_components),
     }
-    if "ai" in requested:
-        settings_changes["selected_dns_preset"] = "xbox-dns"
     context.settings.update(**settings_changes)
     zapret_restarted = _finish_zapret_reconfiguration(context, restart=zapret_was_running)
     result = {"selected_service_ids": ordered, "client_revision": client_revision, "zapret_restarted": zapret_restarted}
@@ -837,7 +814,7 @@ def _handle_import_mod_from_github(context, payload, emit_progress):
     _restart_tg_ws_proxy_if_settings_changed(context, tg_sig_before, tg_was_running)
     if imported_id:
         _check_mod_welcome(context, imported_id)
-    result = {"repo_url": repo_url}
+    result = {"repo_url": repo_url, "mod_id": imported_id}
     result.update(_snapshot(context))
     result.update(_mods_payload(context))
     result["general_options"] = list(context.processes.list_zapret_generals())
@@ -861,7 +838,7 @@ def _handle_import_mod_from_paths(context, payload, emit_progress):
     _restart_tg_ws_proxy_if_settings_changed(context, tg_sig_before, tg_was_running)
     if imported_id:
         _check_mod_welcome(context, imported_id)
-    result = {"paths": paths}
+    result = {"paths": paths, "mod_id": imported_id}
     result.update(_snapshot(context))
     result.update(_mods_payload(context))
     result["general_options"] = list(context.processes.list_zapret_generals())
@@ -884,7 +861,7 @@ def _handle_import_mod_from_path(context, payload, emit_progress):
     _restart_tg_ws_proxy_if_settings_changed(context, tg_sig_before, tg_was_running)
     if imported_id:
         _check_mod_welcome(context, imported_id)
-    result = {"path": path}
+    result = {"path": path, "mod_id": imported_id}
     result.update(_snapshot(context))
     result.update(_mods_payload(context))
     result["general_options"] = list(context.processes.list_zapret_generals())
@@ -1088,9 +1065,11 @@ def _handle_run_general_diagnostic_single(context, payload, emit_progress):
 @_register_action("run_general_diagnostic_batch")
 def _handle_run_general_diagnostic_batch(context, payload, emit_progress):
     batch = payload.get("batch", [])
+    targets = payload.get("targets", None)
     cancel_path = str(payload.get("cancel_path", "") or "")
     results = context.processes.run_general_diagnostic_batch(
         batch,
+        targets=targets if isinstance(targets, list) else None,
         progress_callback=(
             lambda current, total, name: emit_progress(
                 {"kind": "progress", "current": current, "total": total, "name": name}
