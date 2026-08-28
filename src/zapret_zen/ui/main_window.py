@@ -5473,7 +5473,20 @@ class MainWindow(QMainWindow):
             progress_width = max(360, min(560, content_width - 80))
             self._onboarding_progress_bar.setFixedWidth(progress_width)
         if self._onboarding_services_panel is not None:
-            scroll_height = max(280, min(420, page_height - 120))
+            btn_reserved = 62
+            if self._onboarding_service_action_btn is not None:
+                btn_reserved = self._onboarding_service_action_btn.height() + 18
+            chrome_h = 20
+            if self._onboarding_title_label is not None:
+                title_fm = self._onboarding_title_label.fontMetrics()
+                title_rect = title_fm.boundingRect(0, 0, content_width, 0, int(Qt.TextFlag.TextWordWrap), self._onboarding_title_label.text())
+                chrome_h += max(26, title_rect.height() + 2)
+            if self._onboarding_desc_label is not None:
+                desc_fm = self._onboarding_desc_label.fontMetrics()
+                desc_rect = desc_fm.boundingRect(0, 0, max(420, min(720, content_width - 150)), 0, int(Qt.TextFlag.TextWordWrap), self._onboarding_desc_label.text())
+                chrome_h += max(34, desc_rect.height() + 2)
+            available = max(0, page_height - btn_reserved - chrome_h - 6)
+            scroll_height = max(240, min(400, available))
             self._onboarding_services_panel.setFixedSize(content_width, scroll_height)
         if getattr(self, "_onboarding_back_btn", None) is not None:
             self._onboarding_back_btn.move(18, 16)
