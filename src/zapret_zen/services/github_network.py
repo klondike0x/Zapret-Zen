@@ -16,13 +16,36 @@ from zapret_zen.services.logging_service import LoggingManager
 T = TypeVar("T")
 
 
+def _read_error_body(error: HTTPError) -> str:
+    try:
+        data = error.read(4096)
+        if isinstance(data, bytes):
+            return data.decode("utf-8", errors="replace")
+        return str(data)
+    except Exception:
+        return ""
+
+
+def is_github_rate_limit_error(error: BaseException) -> bool:
+    if isinstance(error, HTTPError):
+        if error.code == 429:
+            return True
+        if error.code == 403:
+            return "rate limit" in _read_error_body(error).lower()
+        return False
+    text = str(error).lower()
+    return "rate limit" in text
+
+
 def is_recoverable_github_error(error: BaseException) -> bool:
+    if is_github_rate_limit_error(error):
+        return False
     if isinstance(error, HTTPError):
         return error.code in {403, 429, 500, 502, 503, 504}
     if isinstance(error, (URLError, TimeoutError, OSError, ssl.SSLError)):
         return True
     text = str(error).lower()
-    return any(marker in text for marker in ("rate limit", "timed out", "timeout", "temporary failure", "certificate"))
+    return any(marker in text for marker in ("timed out", "timeout", "temporary failure", "certificate"))
 
 
 class GitHubNetworkClient:

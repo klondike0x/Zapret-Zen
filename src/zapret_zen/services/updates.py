@@ -7,13 +7,16 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import urllib.parse
+import xml.etree.ElementTree as ET
 import zipfile
 from datetime import datetime, timezone
+from html import unescape as html_unescape
 from pathlib import Path
 
 from zapret_zen import __version__
 from zapret_zen.domain import UpdateInfo
-from zapret_zen.services.github_network import GitHubNetworkClient
+from zapret_zen.services.github_network import GitHubNetworkClient, is_github_rate_limit_error
 from zapret_zen.services.logging_service import LoggingManager
 from zapret_zen.services.storage import StorageManager
 _PS1_TEMPLATE = """\
@@ -199,6 +202,9 @@ class UpdatesManager:
     REPO_URL = "https://github.com/peshk0v/Zapret-Zen"
     API_LATEST = "https://api.github.com/repos/peshk0v/Zapret-Zen/releases/latest"
     API_RELEASES = "https://api.github.com/repos/peshk0v/Zapret-Zen/releases"
+    ATOM_FEED = "https://github.com/peshk0v/Zapret-Zen/releases.atom"
+    _CACHE_FILE = "app_update_check.json"
+    _CACHE_TTL_SECONDS = 3600
 
     def __init__(self, storage: StorageManager, logging: LoggingManager, *, processes: object | None = None) -> None:
         self.storage = storage
@@ -232,13 +238,25 @@ class UpdatesManager:
         return updates
 
     def fetch_latest_application_release(self, update_branch: str = "release") -> dict[str, str]:
+        cached = self._cached_check_result()
+        if cached is not None:
+            return cached
         try:
             payload = self._request_json(self.API_RELEASES, timeout=10)
         except Exception as error:
+            if is_github_rate_limit_error(error):
+                atom_result = self._fetch_release_via_atom()
+                if atom_result is not None:
+                    return atom_result
+                stale = self._cached_check_result(ignore_ttl=True)
+                if stale is not None:
+                    return stale
             self.logging.log("warning", "Failed to fetch latest app release", error=str(error))
             friendly_error = str(error)
             if self._is_certificate_error(error):
                 friendly_error = "Unable to verify GitHub certificates on this system. Please try again later."
+            elif is_github_rate_limit_error(error):
+                friendly_error = "GitHub temporarily limited requests (rate limit exceeded). Try again in about an hour."
             return {
                 "status": "error",
                 "current_version": __version__,
@@ -257,6 +275,20 @@ class UpdatesManager:
                 "html_url": self.REPO_URL + "/releases",
                 "releases": [],
             }
+        return self._compose_release_result(releases)
+
+    def _fetch_release_via_atom(self) -> dict[str, str] | None:
+        try:
+            text = self._download_atom_text()
+        except Exception as error:
+            self.logging.log("warning", "Failed to fetch app releases via atom feed", error=str(error))
+            return None
+        releases = self._normalize_atom_entries(text)
+        if not releases:
+            return None
+        return self._compose_release_result(releases)
+
+    def _compose_release_result(self, releases: list[dict[str, object]]) -> dict[str, str]:
         latest = releases[0]
         release_payload = latest["payload"]
         latest_version = str(latest["version"]).strip() or __version__
@@ -284,7 +316,7 @@ class UpdatesManager:
             for idx, item in enumerate(releases)
             if self._version_key(str(item["version"])) > self._version_key(__version__) or (idx == 0 and is_same_version_hotfix)
         ]
-        return {
+        result = {
             "status": status,
             "current_version": __version__,
             "latest_version": latest_version,
@@ -297,12 +329,99 @@ class UpdatesManager:
             "installed_build_at": installed_stamp.isoformat() if installed_stamp else "",
             "releases": newer_releases,
         }
+        self._cache_check_result(result)
+        return result
 
     def _request_json(self, url: str, *, timeout: int) -> object:
         return self.github.github_json(url, timeout=timeout, purpose="app-release-metadata")
 
     def _download_bytes(self, url: str, *, timeout: int) -> bytes:
         return self.github.github_bytes(url, timeout=timeout, purpose="app-update-download")
+
+    def _download_atom_text(self) -> str:
+        data = self.github.github_bytes(self.ATOM_FEED, timeout=10, purpose="app-release-atom")
+        return data.decode("utf-8", errors="replace")
+
+    def _cache_path(self) -> Path:
+        return self.storage.paths.cache_dir / self._CACHE_FILE
+
+    def _cached_check_result(self, *, ignore_ttl: bool = False) -> dict[str, str] | None:
+        try:
+            raw = self.storage.read_json(self._cache_path(), default={}) or {}
+        except Exception:
+            return None
+        result = raw.get("result")
+        if not isinstance(result, dict):
+            return None
+        status = str(result.get("status", ""))
+        if status not in {"available", "up-to-date"}:
+            return None
+        if ignore_ttl:
+            return dict(result)
+        checked_at = raw.get("checked_at")
+        try:
+            stamp = datetime.fromisoformat(str(checked_at))
+            if stamp.tzinfo is None:
+                stamp = stamp.replace(tzinfo=timezone.utc)
+        except (TypeError, ValueError):
+            return None
+        age = (datetime.now(timezone.utc) - stamp).total_seconds()
+        if age <= self._CACHE_TTL_SECONDS:
+            return dict(result)
+        return None
+
+    def _cache_check_result(self, result: dict[str, str]) -> None:
+        if str(result.get("status", "")) not in {"available", "up-to-date"}:
+            return
+        try:
+            self.storage.write_json(
+                self._cache_path(),
+                {"checked_at": datetime.now(timezone.utc).isoformat(), "result": result},
+            )
+        except Exception:
+            pass
+
+    @staticmethod
+    def _atom_text(entry: ET.Element, tag: str, ns: dict[str, str]) -> str:
+        node = entry.find(f"a:{tag}", ns)
+        return str(node.text or "") if node is not None else ""
+
+    def _normalize_atom_entries(self, text: str) -> list[dict[str, object]]:
+        try:
+            root = ET.fromstring(text)
+        except ET.ParseError:
+            return []
+        ns = {"a": "http://www.w3.org/2005/Atom"}
+        entries: list[dict[str, object]] = []
+        for entry in root.findall("a:entry", ns):
+            title = html_unescape(self._atom_text(entry, "title", ns))
+            link = entry.find("a:link", ns)
+            href = str(link.get("href", "")) if link is not None else ""
+            updated_raw = self._atom_text(entry, "updated", ns)
+            content = html_unescape(self._atom_text(entry, "content", ns))
+            body = re.sub(r"<[^>]+>", "", content).strip()
+            tag_match = re.search(r"/releases/tag/([^/?#]+)", href)
+            version = ""
+            if tag_match:
+                version = urllib.parse.unquote(tag_match.group(1)).lstrip("v")
+            if not version:
+                title_match = re.match(r"\s*release\s+v?(.+?)\s*$", title, re.IGNORECASE)
+                if title_match:
+                    version = title_match.group(1).strip().lstrip("v")
+            if not version:
+                continue
+            entries.append(
+                {
+                    "version": version,
+                    "body": body[:4000],
+                    "html_url": href or self.REPO_URL + "/releases",
+                    "published_at": updated_raw,
+                    "updated_at": updated_raw,
+                    "payload": {"assets": []},
+                }
+            )
+        entries.sort(key=lambda item: self._version_key(str(item["version"])), reverse=True)
+        return entries
 
     def _is_certificate_error(self, error: Exception) -> bool:
         return "CERTIFICATE_VERIFY_FAILED" in str(error).upper()
