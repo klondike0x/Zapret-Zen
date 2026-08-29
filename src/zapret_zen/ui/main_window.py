@@ -249,7 +249,9 @@ class _UiSignals(QObject):
     general_test_progress = Signal(object)
     general_test_done = Signal(object)
     update_check_done = Signal(object, bool)
+    update_check_progress = Signal(object)
     update_prepare_done = Signal(object)
+    update_prepare_progress = Signal(object)
     page_payload_ready = Signal(str, object)
 
 
@@ -625,6 +627,7 @@ class SpinnerBadge(QWidget):
         super().__init__(parent)
         self._angle = 0.0
         self._color = QColor("#7380ff")
+        self._light = None
         self._timer = QTimer(self)
         self._timer.setInterval(30)
         self._timer.timeout.connect(self._advance)
@@ -635,6 +638,10 @@ class SpinnerBadge(QWidget):
             self._color = QColor(color)
         except Exception:
             self._color = QColor("#7380ff")
+        self.update()
+
+    def set_theme(self, light: bool) -> None:
+        self._light = bool(light)
         self.update()
 
     def start(self) -> None:
@@ -653,8 +660,11 @@ class SpinnerBadge(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         rect = QRectF(5.0, 5.0, self.width() - 10.0, self.height() - 10.0)
-        base = QColor(self._color)
-        arc_color = base if base.lightnessF() > 0.3 else QColor("#e5e7eb")
+        if self._light is not None:
+            arc_color = QColor("#262c3a") if self._light else QColor("#e6e9f2")
+        else:
+            base = QColor(self._color)
+            arc_color = base if base.lightnessF() > 0.3 else QColor("#e5e7eb")
         pen = QPen(arc_color)
         pen.setWidthF(3.0)
         pen.setCapStyle(Qt.PenCapStyle.RoundCap)
@@ -668,6 +678,7 @@ class LoadingActionButton(QPushButton):
         self._loading = False
         self._angle = 0.0
         self._color = QColor("#7380ff")
+        self._light = None
         self._restore_text = ""
         self._timer = QTimer(self)
         self._timer.setInterval(30)
@@ -678,6 +689,10 @@ class LoadingActionButton(QPushButton):
             self._color = QColor(color)
         except Exception:
             self._color = QColor("#7380ff")
+        self.update()
+
+    def set_theme(self, light: bool) -> None:
+        self._light = bool(light)
         self.update()
 
     def set_loading(self, loading: bool) -> None:
@@ -718,7 +733,10 @@ class LoadingActionButton(QPushButton):
             22.0,
         )
         base = QColor(self._color)
-        arc_color = QColor("#ffffff") if base.lightnessF() <= 0.5 else QColor("#1b1a21")
+        if self._light is not None:
+            arc_color = QColor("#262c3a") if self._light else QColor("#e6e9f2")
+        else:
+            arc_color = QColor("#ffffff") if base.lightnessF() <= 0.5 else QColor("#1b1a21")
         pen = QPen(arc_color)
         pen.setWidthF(3.0)
         pen.setCapStyle(Qt.PenCapStyle.RoundCap)
@@ -4505,7 +4523,9 @@ class MainWindow(QMainWindow):
         self._ui_signals.general_test_progress.connect(self._on_general_test_progress)
         self._ui_signals.general_test_done.connect(self._on_general_test_done)
         self._ui_signals.update_check_done.connect(self._on_update_check_done)
+        self._ui_signals.update_check_progress.connect(self._on_update_check_progress)
         self._ui_signals.update_prepare_done.connect(self._on_update_prepare_done)
+        self._ui_signals.update_prepare_progress.connect(self._on_update_prepare_progress)
         self._ui_signals.page_payload_ready.connect(self._on_page_payload_ready)
         self._updating_general_combo = False
         self._pending_info_message: tuple[str, str] | None = None
@@ -4667,6 +4687,9 @@ class MainWindow(QMainWindow):
         self._update_check_in_progress = False
         self._update_prepare_dialog: AppDialog | None = None
         self._update_prepare_cancelled = False
+        self._update_prepare_status_label: QLabel | None = None
+        self._update_prepare_detail_label: QLabel | None = None
+        self._update_prepare_bar: QProgressBar | None = None
         self._component_update_queue: list = []
         self._update_check_dialog: AppDialog | None = None
         self._update_check_label: QLabel | None = None
@@ -4820,8 +4843,8 @@ class MainWindow(QMainWindow):
         self._nav_items = [
             NavItem("home", "home.svg", self._t("Dashboard")),
             NavItem("services", "services.svg", self._t("Services")),
-            NavItem("components", "components.svg", self._t("Components")),
             NavItem("mods", "mods.svg", self._t("Mods")),
+            NavItem("components", "components.svg", self._t("Components")),
             NavItem("settings", "settings.svg", self._t("Settings")),
         ]
 
@@ -5378,9 +5401,9 @@ class MainWindow(QMainWindow):
             if hasattr(self, "pages") and self.pages.currentIndex() == 1:
                 self.refresh_services()
             elif hasattr(self, "pages") and self.pages.currentIndex() == 2:
-                self._sync_component_card_layout()
-            elif hasattr(self, "pages") and self.pages.currentIndex() == 3:
                 self._sync_mod_card_layout()
+            elif hasattr(self, "pages") and self.pages.currentIndex() == 3:
+                self._sync_component_card_layout()
 
         QTimer.singleShot(0, _sync)
         QTimer.singleShot(120, _sync)
@@ -5395,7 +5418,7 @@ class MainWindow(QMainWindow):
                 QTimer.singleShot(250, _refresh_current)
                 return
             current_index = self.pages.currentIndex() if hasattr(self, "pages") else 0
-            section_map = {0: "dashboard", 1: "services", 2: "components", 3: "mods", 4: "settings"}
+            section_map = {0: "dashboard", 1: "services", 2: "mods", 3: "components", 4: "settings"}
             current = section_map.get(current_index, "dashboard")
             self._mark_dirty(current, "tray")
 
@@ -5594,9 +5617,9 @@ class MainWindow(QMainWindow):
         if hasattr(self, "pages") and self.pages.currentIndex() == 1:
             QTimer.singleShot(0, self.refresh_services)
         elif hasattr(self, "pages") and self.pages.currentIndex() == 2:
-            QTimer.singleShot(0, lambda: self._sync_component_card_layout())
-        elif hasattr(self, "pages") and self.pages.currentIndex() == 3:
             QTimer.singleShot(0, self._sync_mod_card_layout)
+        elif hasattr(self, "pages") and self.pages.currentIndex() == 3:
+            QTimer.singleShot(0, lambda: self._sync_component_card_layout())
         if self._file_mode_stack is not None:
             if self._file_mode_stack.currentIndex() == 0:
                 QTimer.singleShot(0, self._sync_files_home_layout)
@@ -6000,8 +6023,8 @@ class MainWindow(QMainWindow):
         self.pages.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, False)
         self.pages.addWidget(self._build_dashboard_page())
         self.pages.addWidget(self._build_services_page())
-        self.pages.addWidget(self._build_components_page())
         self.pages.addWidget(self._build_mods_page())
+        self.pages.addWidget(self._build_components_page())
         self.pages.addWidget(self._build_settings_page())
         self._page_blur_effect = None
         pages_host_layout.addWidget(self.pages)
@@ -8728,6 +8751,17 @@ class MainWindow(QMainWindow):
                     QTimer.singleShot(0, self._fit_category_cards)
                     QTimer.singleShot(0, lambda: self._services_scroll.verticalScrollBar().setValue(0))
             elif index == 2:
+                cached = self._page_payload_cache.get("mods")
+                if cached is not None:
+                    self.refresh_mods(cached)
+                    self._sync_mod_card_layout()
+                else:
+                    self._request_page_refresh("mods")
+                self._sync_mod_card_layout()
+            elif index == 0:
+                self.refresh_dashboard()
+                self._sync_power_aura_geometry()
+            elif index == 3:
                 try:
                     cached = self._page_payload_cache.get("components")
                     if isinstance(cached, dict):
@@ -8746,17 +8780,6 @@ class MainWindow(QMainWindow):
                     self._request_page_refresh("components")
                 except Exception as error:
                     self.context.logging.log("error", "components_refresh_request_failed", error=str(error))
-            elif index == 0:
-                self.refresh_dashboard()
-                self._sync_power_aura_geometry()
-            elif index == 3:
-                cached = self._page_payload_cache.get("mods")
-                if cached is not None:
-                    self.refresh_mods(cached)
-                    self._sync_mod_card_layout()
-                else:
-                    self._request_page_refresh("mods")
-                self._sync_mod_card_layout()
             elif index == 4:
                 self._reload_settings_page()
                 self.refresh_dashboard()
@@ -8775,8 +8798,8 @@ class MainWindow(QMainWindow):
             section_map = {
                 0: "dashboard",
                 1: "services",
-                2: "components",
-                3: "mods",
+                2: "mods",
+                3: "components",
             }
             section = section_map.get(index)
             if section:
@@ -8871,9 +8894,9 @@ class MainWindow(QMainWindow):
             elif self.pages.currentIndex() == 1:
                 self.refresh_services()
             elif self.pages.currentIndex() == 2:
-                self._sync_component_card_layout()
-            elif self.pages.currentIndex() == 3:
                 self._sync_mod_card_layout()
+            elif self.pages.currentIndex() == 3:
+                self._sync_component_card_layout()
             self._page_transition_running = False
             self._page_transition_started_at = 0.0
             self._page_transition_target = self.pages.currentIndex()
@@ -9342,7 +9365,7 @@ class MainWindow(QMainWindow):
         if action == "load_components_payload":
             if isinstance(payload, dict):
                 self._page_payload_cache["components"] = payload
-                if self.pages.currentIndex() == 2:
+                if self.pages.currentIndex() == 3:
                     self.refresh_components(payload)
             return
         if action == "write_file_text":
@@ -11480,9 +11503,14 @@ class MainWindow(QMainWindow):
         thread.start()
 
     def _run_update_check_worker(self, manual: bool) -> None:
+        def emit_progress(fraction: float | None, received: int, total: int, status: str, detail: str = "") -> None:
+            self._ui_signals.update_check_progress.emit(
+                {"fraction": fraction, "received": received, "total": total, "status": status, "detail": detail}
+            )
+
         try:
             branch = self.context.settings.get().update_branch
-            release = self.context.updates.fetch_latest_application_release(update_branch=branch)
+            release = self.context.updates.fetch_latest_application_release(update_branch=branch, progress=emit_progress)
         except Exception as error:
             release = {
                 "status": "error",
@@ -11491,6 +11519,15 @@ class MainWindow(QMainWindow):
                 "error": str(error),
             }
         self._ui_signals.update_check_done.emit(release, manual)
+
+    def _on_update_check_progress(self, payload: object) -> None:
+        if not isinstance(payload, dict):
+            return
+        if self._update_check_label is None or not isinstance(self._update_check_label, QLabel):
+            return
+        status = str(payload.get("status", ""))
+        detail = str(payload.get("detail", "") or "")
+        self._update_check_label.setText(self._update_status_text(status, detail))
 
     def _on_update_check_done(self, release: object, manual: bool) -> None:
         self._update_check_in_progress = False
@@ -11546,6 +11583,9 @@ class MainWindow(QMainWindow):
         label = QLabel(self._t("Checking for updates..."))
         label.setWordWrap(True)
         dialog.body_layout.addWidget(label)
+        bar = QProgressBar()
+        bar.setRange(0, 0)
+        dialog.body_layout.addWidget(bar)
         dialog.prepare_and_center()
         dialog.show()
         dialog.raise_()
@@ -12009,12 +12049,17 @@ class MainWindow(QMainWindow):
             return
         self._update_prepare_cancelled = False
         dialog = AppDialog(self, self.context, self._t("Preparing update"))
-        label = QLabel(self._t("Downloading and preparing the new version. The app will restart automatically."))
-        label.setWordWrap(True)
-        dialog.body_layout.addWidget(label)
+        status_label = QLabel(self._update_status_text("download-github", ""))
+        status_label.setWordWrap(True)
+        dialog.body_layout.addWidget(status_label)
         bar = QProgressBar()
-        bar.setRange(0, 0)
+        bar.setRange(0, 100)
+        bar.setValue(0)
         dialog.body_layout.addWidget(bar)
+        detail_label = QLabel(self._t("Начинаем загрузку обновления...", "Starting update download..."))
+        detail_label.setProperty("class", "subtitle")
+        detail_label.setWordWrap(True)
+        dialog.body_layout.addWidget(detail_label)
         cancel_btn = QPushButton(self._t("Cancel"))
         cancel_btn.setObjectName("DialogSecondaryButton")
         cancel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -12024,6 +12069,9 @@ class MainWindow(QMainWindow):
         dialog.prepare_and_center()
         dialog.show()
         self._update_prepare_dialog = dialog
+        self._update_prepare_status_label = status_label
+        self._update_prepare_detail_label = detail_label
+        self._update_prepare_bar = bar
         thread = threading.Thread(target=self._run_update_prepare_worker, args=(release,), daemon=True)
         thread.start()
 
@@ -12031,13 +12079,98 @@ class MainWindow(QMainWindow):
         self._update_prepare_cancelled = True
         dialog.reject()
         self._update_prepare_dialog = None
+        self._update_prepare_status_label = None
+        self._update_prepare_detail_label = None
+        self._update_prepare_bar = None
 
     def _run_update_prepare_worker(self, release: dict[str, str]) -> None:
+        def emit_progress(fraction: float | None, received: int, total: int, status: str, detail: str = "") -> None:
+            self._ui_signals.update_prepare_progress.emit(
+                {"fraction": fraction, "received": received, "total": total, "status": status, "detail": detail}
+            )
+
         try:
-            prepared = self.context.updates.prepare_update(release)
+            prepared = self.context.updates.prepare_update(release, progress=emit_progress)
             self._ui_signals.update_prepare_done.emit({"ok": True, "prepared": prepared})
         except Exception as error:
             self._ui_signals.update_prepare_done.emit({"ok": False, "error": str(error)})
+
+    def _on_update_prepare_progress(self, payload: object) -> None:
+        if not isinstance(payload, dict):
+            return
+        if self._update_prepare_dialog is None:
+            return
+        status = str(payload.get("status", ""))
+        detail = str(payload.get("detail", "") or "")
+        received = int(payload.get("received", 0) or 0)
+        total = int(payload.get("total", 0) or 0)
+        fraction = payload.get("fraction")
+        if self._update_prepare_status_label is not None:
+            self._update_prepare_status_label.setText(self._update_status_text(status, detail))
+        if self._update_prepare_bar is not None:
+            if isinstance(fraction, (int, float)) and fraction is not None:
+                self._update_prepare_bar.setRange(0, 100)
+                self._update_prepare_bar.setValue(int(round(max(0.0, min(1.0, float(fraction))) * 100)))
+            else:
+                self._update_prepare_bar.setRange(0, 0)
+        if self._update_prepare_detail_label is not None:
+            if status in ("download-github", "download-sourceforge", "download-zapret"):
+                if total > 0:
+                    percent = int(round(received / total * 100)) if total else 0
+                    self._update_prepare_detail_label.setText(
+                        self._t(
+                            f"Скачано {received} из {total} байт ({percent}%)",
+                            f"Downloaded {received} of {total} bytes ({percent}%)",
+                        )
+                    )
+                else:
+                    self._update_prepare_detail_label.setText(
+                        self._t(f"Скачано {received} байт", f"Downloaded {received} bytes")
+                    )
+            elif status == "extract":
+                self._update_prepare_detail_label.setText(
+                    self._t("Распаковка и установка компонентов...", "Extracting and installing components...")
+                )
+            else:
+                self._update_prepare_detail_label.setText("")
+
+    def _update_status_text(self, status: str, detail: str) -> str:
+        if status == "check-github":
+            return self._t(
+                "Проверка доступности GitHub...",
+                "Checking GitHub availability...",
+            )
+        if status == "check-github-fallback":
+            return self._t(
+                "GitHub недоступен. Проверка SourceForge...",
+                "GitHub is unreachable. Checking SourceForge...",
+            )
+        if status == "download-github":
+            return self._t(
+                "Скачивание обновления с GitHub...",
+                "Downloading the update from GitHub...",
+            )
+        if status == "download-sourceforge":
+            return self._t(
+                "Скачивание обновления с SourceForge...",
+                "Downloading the update from SourceForge...",
+            )
+        if status == "download-zapret":
+            if "sourceforge" in detail.lower():
+                return self._t(
+                    "Включение Zapret для обхода блокировки SourceForge...",
+                    "Enabling Zapret to bypass SourceForge blocking...",
+                )
+            return self._t(
+                "Включение Zapret для обхода блокировки GitHub...",
+                "Enabling Zapret to bypass GitHub blocking...",
+            )
+        if status == "extract":
+            return self._t(
+                "Распаковка и установка компонентов...",
+                "Extracting and installing components...",
+            )
+        return self._t("Подготовка обновления...", "Preparing the update...")
 
     def _run_local_update_prepare_worker(self, zip_path: str) -> None:
         try:
@@ -12053,6 +12186,9 @@ class MainWindow(QMainWindow):
         if self._update_prepare_dialog is not None:
             self._update_prepare_dialog.accept()
             self._update_prepare_dialog = None
+        self._update_prepare_status_label = None
+        self._update_prepare_detail_label = None
+        self._update_prepare_bar = None
         if not isinstance(payload, dict) or not payload.get("ok"):
             message = str((payload or {}).get("error", self._t("Failed to prepare the update."))) if isinstance(payload, dict) else self._t("Failed to prepare the update.")
             self._toast_notification("error", self._t("Updates"), message)
@@ -15961,6 +16097,7 @@ class MainWindow(QMainWindow):
                 load_row.setContentsMargins(0, 0, 0, 0)
                 load_row.setSpacing(12)
                 spinner = SpinnerBadge()
+                spinner.set_theme(self._light_theme)
                 spinner.set_accent_color(accent)
                 spinner.start()
                 load_row.addWidget(spinner)
@@ -16172,6 +16309,7 @@ class MainWindow(QMainWindow):
                 add_btn.setMinimumHeight(34)
                 add_btn.setMinimumWidth(120)
                 add_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+                add_btn.set_theme(self._light_theme)
                 add_btn.set_accent_color(accent)
                 add_btn.set_text_for_loading(self._t("Установить", "Install"))
                 add_btn.setEnabled(str(mod_id) not in self._pending_mod_add_ids)

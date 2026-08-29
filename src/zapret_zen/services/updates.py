@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import platform
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -13,6 +14,7 @@ import zipfile
 from datetime import datetime, timezone
 from html import unescape as html_unescape
 from pathlib import Path
+from typing import Callable
 
 from zapret_zen import __version__
 from zapret_zen.domain import UpdateInfo
@@ -203,14 +205,20 @@ class UpdatesManager:
     API_LATEST = "https://api.github.com/repos/peshk0v/Zapret-Zen/releases/latest"
     API_RELEASES = "https://api.github.com/repos/peshk0v/Zapret-Zen/releases"
     ATOM_FEED = "https://github.com/peshk0v/Zapret-Zen/releases.atom"
+    SOURCEFORGE_PROJECT_URL = "https://sourceforge.net/projects/zapret-zen"
     _CACHE_FILE = "app_update_check.json"
     _CACHE_TTL_SECONDS = 3600
+    _METADATA_TIMEOUT = 8
+    _DOWNLOAD_CONNECT_TIMEOUT = 10
+    _DOWNLOAD_READ_TIMEOUT = 12
+    _DOWNLOAD_BUDGET = 120
 
     def __init__(self, storage: StorageManager, logging: LoggingManager, *, processes: object | None = None) -> None:
         self.storage = storage
         self.logging = logging
         recovery = getattr(processes, "with_github_connectivity_recovery", None)
         self.github = GitHubNetworkClient(logging, recovery_runner=recovery if callable(recovery) else None)
+        self._domain_bypass = getattr(processes, "with_domain_connectivity_recovery", None) if processes is not None else None
 
     def check_updates(self) -> list[UpdateInfo]:
         app_release = self.fetch_latest_application_release()
@@ -237,12 +245,18 @@ class UpdatesManager:
         self.logging.log("info", "Update check completed", items=len(updates), app_status=app_status.status)
         return updates
 
-    def fetch_latest_application_release(self, update_branch: str = "release") -> dict[str, str]:
+    def fetch_latest_application_release(
+        self,
+        update_branch: str = "release",
+        progress: Callable[[float | None, int, int, str, str], None] | None = None,
+    ) -> dict[str, str]:
         cached = self._cached_check_result()
         if cached is not None:
             return cached
         try:
-            payload = self._request_json(self.API_RELEASES, timeout=10)
+            if progress is not None:
+                progress(None, 0, 0, "check-github", "")
+            payload = self.github.github_json(self.API_RELEASES, timeout=self._METADATA_TIMEOUT, purpose="app-release-metadata", retry=False)
         except Exception as error:
             if is_github_rate_limit_error(error):
                 atom_result = self._fetch_release_via_atom()
@@ -252,11 +266,12 @@ class UpdatesManager:
                 if stale is not None:
                     return stale
             self.logging.log("warning", "Failed to fetch latest app release", error=str(error))
-            friendly_error = str(error)
-            if self._is_certificate_error(error):
-                friendly_error = "Unable to verify GitHub certificates on this system. Please try again later."
-            elif is_github_rate_limit_error(error):
-                friendly_error = "GitHub temporarily limited requests (rate limit exceeded). Try again in about an hour."
+            if progress is not None:
+                progress(None, 0, 0, "check-github-fallback", "")
+            sourceforge_result = self._fetch_latest_via_sourceforge(progress)
+            if sourceforge_result is not None:
+                return sourceforge_result
+            friendly_error = self._friendly_network_error(error)
             return {
                 "status": "error",
                 "current_version": __version__,
@@ -287,6 +302,103 @@ class UpdatesManager:
         if not releases:
             return None
         return self._compose_release_result(releases)
+
+    def _fetch_latest_via_sourceforge(
+        self,
+        progress: Callable[[float | None, int, int, str, str], None] | None = None,
+    ) -> dict[str, str] | None:
+        page_url = self.SOURCEFORGE_PROJECT_URL + "/files/"
+        try:
+            html = self._download_text(page_url)
+        except Exception as error:
+            self.logging.log("warning", "SourceForge files page unavailable", error=str(error))
+            return None
+        if not html:
+            return None
+        versions = self._extract_sourceforge_versions(html)
+        if not versions:
+            self.logging.log("warning", "No versions found on SourceForge files page")
+            return None
+        latest_version = versions[0]
+        asset_name = self._detect_sourceforge_asset_name(html) or self._default_asset_name()
+        result: dict[str, str] = {
+            "status": "available",
+            "current_version": __version__,
+            "latest_version": latest_version,
+            "html_url": self.SOURCEFORGE_PROJECT_URL + "/files/",
+            "body": "SourceForge",
+            "asset_name": asset_name,
+            "asset_url": self._build_sourceforge_asset_url(asset_name),
+            "is_hotfix": "",
+            "source": "sourceforge",
+        }
+        if self._version_key(latest_version) <= self._version_key(__version__):
+            result["status"] = "up-to-date"
+        self._cache_check_result(result)
+        return result
+
+    def _build_sourceforge_asset_url(self, asset_name: str) -> str:
+        name = str(asset_name or "").strip()
+        if not name:
+            return ""
+        return f"{self.SOURCEFORGE_PROJECT_URL}/files/{urllib.parse.quote(name)}/download"
+
+    def _default_asset_name(self) -> str:
+        machine = platform.machine().lower()
+        arch = "arm64" if ("arm" in machine or "aarch64" in machine) else "x64"
+        return f"Zapret-Zen-portable-win-{arch}.zip"
+
+    def _download_text(self, url: str) -> str:
+        data = self.github.github_bytes(url, timeout=self._METADATA_TIMEOUT, purpose="sourceforge-page", retry=False)
+        return data.decode("utf-8", errors="replace")
+
+    def _extract_sourceforge_versions(self, html: str) -> list[str]:
+        candidates: set[str] = set()
+        for match in re.finditer(r"(?i)zapret[\s_-]*zen[^0-9A-Za-z<]{0,24}(?:v)?(\d+\.\d+\.\d+)", html):
+            candidates.add(match.group(1))
+        for match in re.finditer(r"(?i)/files/(?:v)?(\d+\.\d+\.\d+)/", html):
+            candidates.add(match.group(1))
+        valid = [item for item in candidates if self._version_key(item) > self._version_key("0.0.0")]
+        return sorted(valid, key=self._version_key, reverse=True)
+
+    def _detect_sourceforge_asset_name(self, html: str) -> str:
+        arch = "arm64" if ("arm" in platform.machine().lower() or "aarch64" in platform.machine().lower()) else "x64"
+        pattern = re.compile(r"[^\"'<>\s]*zapret[^\"'<>\s]*win_(?:" + arch + r")\.zip", re.IGNORECASE)
+        for match in pattern.finditer(html):
+            name = re.sub(r"^.*?/(?=[^/]*$)", "", match.group(0))
+            name = re.sub(r"[?&].*$", "", name)
+            if name.lower().startswith(("zapret-", "zapret_")) and name.lower().endswith(".zip"):
+                return name
+        return ""
+
+    @staticmethod
+    def _friendly_network_error(error: BaseException) -> str:
+        text = str(error)
+        reason = getattr(error, "reason", None)
+        winerror = getattr(reason, "winerror", None)
+        if winerror == 10060:
+            return "Connection timed out (WinError 10060). Please check your network connection and try again."
+        if isinstance(error, TimeoutError) or "timed out" in text.lower() or "timeout" in text.lower():
+            return "Connection timed out. Please check your network connection and try again."
+        if "CERTIFICATE_VERIFY_FAILED" in text.upper():
+            return "Unable to verify the server certificate on this system. Please try again later."
+        if "HTTP Error 404" in text:
+            return "The requested update was not found on the update server."
+        return "Unable to reach the update server. Please check your network connection and try again."
+
+    @staticmethod
+    def _friendly_download_error(errors: list[str]) -> str:
+        combined = "\n".join(errors)
+        lower = combined.lower()
+        if "10060" in combined or "winerror 10060" in lower:
+            return "Connection timed out (WinError 10060) while downloading the update. Please check your network connection and try again."
+        if "timed out" in lower or "timeout" in lower:
+            return "Connection timed out while downloading the update. Please check your network connection and try again."
+        if "certificate_verify_failed" in lower:
+            return "Unable to verify the update server certificate. Please try again later."
+        if "404" in combined:
+            return "The requested update was not found on any mirror. Please try again later."
+        return "The update could not be downloaded from any mirror. Please try again later."
 
     def _compose_release_result(self, releases: list[dict[str, object]]) -> dict[str, str]:
         latest = releases[0]
@@ -339,7 +451,7 @@ class UpdatesManager:
         return self.github.github_bytes(url, timeout=timeout, purpose="app-update-download")
 
     def _download_atom_text(self) -> str:
-        data = self.github.github_bytes(self.ATOM_FEED, timeout=10, purpose="app-release-atom")
+        data = self.github.github_bytes(self.ATOM_FEED, timeout=10, purpose="app-release-atom", retry=False)
         return data.decode("utf-8", errors="replace")
 
     def _cache_path(self) -> Path:
@@ -501,17 +613,107 @@ class UpdatesManager:
             return parsed.replace(tzinfo=timezone.utc)
         return parsed.astimezone(timezone.utc)
 
-    def prepare_update(self, release_info: dict[str, str]) -> dict[str, str]:
+    def prepare_update(
+        self,
+        release_info: dict[str, str],
+        progress: Callable[[float | None, int, int, str, str], None] | None = None,
+    ) -> dict[str, str]:
         asset_url = str(release_info.get("asset_url") or "").strip()
-        asset_name = str(release_info.get("asset_name") or "").strip() or "update.zip"
-        if not asset_url:
+        asset_name = str(release_info.get("asset_name") or "").strip() or self._default_asset_name()
+        if not asset_url and not self._build_sourceforge_asset_url(asset_name):
             raise ValueError("No downloadable asset was found for this platform.")
 
         temp_root = Path(tempfile.mkdtemp(prefix="zapret_zen_update_"))
-        zip_path = temp_root / asset_name
-        zip_path.write_bytes(self._download_bytes(asset_url, timeout=60))
+        try:
+            zip_path = temp_root / asset_name
+            self._download_update_asset(release_info, zip_path, progress)
+            return self._extract_update_package(zip_path, temp_root, release_info, progress=progress)
+        except Exception:
+            shutil.rmtree(temp_root, ignore_errors=True)
+            raise
 
-        return self._extract_update_package(zip_path, temp_root, release_info)
+    def _download_update_asset(
+        self,
+        release_info: dict[str, str],
+        destination: Path,
+        progress: Callable[[float | None, int, int, str, str], None] | None,
+    ) -> None:
+        asset_url = str(release_info.get("asset_url") or "").strip()
+        asset_name = str(release_info.get("asset_name") or "").strip() or self._default_asset_name()
+        sf_url = self._build_sourceforge_asset_url(asset_name)
+        github_domains = ("github.com", "api.github.com", "codeload.github.com")
+        errors: list[str] = []
+        prefer_sourceforge = str(release_info.get("source", "")) == "sourceforge"
+
+        if asset_url and not prefer_sourceforge:
+            try:
+                if progress is not None:
+                    progress(None, 0, 0, "download-github", "")
+                self._download_with_progress(asset_url, destination, progress, "download-github")
+                return
+            except Exception as error:
+                errors.append(f"github: {error}")
+                self.logging.log("warning", "App update GitHub download failed", error=str(error))
+            if self._domain_bypass is not None:
+                try:
+                    if progress is not None:
+                        progress(None, 0, 0, "download-zapret", ",".join(github_domains))
+                    self._domain_bypass(
+                        github_domains,
+                        lambda: self._download_with_progress(asset_url, destination, progress, "download-github"),
+                        "app-update-download",
+                    )
+                    return
+                except Exception as error:
+                    errors.append(f"github-zapret: {error}")
+                    self.logging.log("warning", "App update download via Zapret+GitHub failed", error=str(error))
+
+        if sf_url:
+            try:
+                if progress is not None:
+                    progress(None, 0, 0, "download-sourceforge", "")
+                self._download_with_progress(sf_url, destination, progress, "download-sourceforge")
+                return
+            except Exception as error:
+                errors.append(f"sourceforge: {error}")
+                self.logging.log("warning", "App update SourceForge download failed", error=str(error))
+            if self._domain_bypass is not None:
+                try:
+                    if progress is not None:
+                        progress(None, 0, 0, "download-zapret", "sourceforge.net")
+                    self._domain_bypass(
+                        ("sourceforge.net",),
+                        lambda: self._download_with_progress(sf_url, destination, progress, "download-sourceforge"),
+                        "app-update-download",
+                    )
+                    return
+                except Exception as error:
+                    errors.append(f"sourceforge-zapret: {error}")
+                    self.logging.log("warning", "App update download via Zapret+SourceForge failed", error=str(error))
+
+        raise RuntimeError(self._friendly_download_error(errors))
+
+    def _download_with_progress(
+        self,
+        url: str,
+        destination: Path,
+        progress: Callable[[float | None, int, int, str, str], None] | None,
+        status_token: str,
+    ) -> None:
+        def on_bytes(received: int, total: int, fraction: float | None) -> None:
+            if progress is not None:
+                progress(fraction, received, total, status_token, "")
+
+        self.github.download_stream(
+            url,
+            destination,
+            connect_timeout=self._DOWNLOAD_CONNECT_TIMEOUT,
+            read_timeout=self._DOWNLOAD_READ_TIMEOUT,
+            total_timeout=self._DOWNLOAD_BUDGET,
+            purpose="app-update-download",
+            min_bytes=1,
+            progress_cb=on_bytes if progress is not None else None,
+        )
 
     def prepare_local_update(self, zip_path: str) -> dict[str, str]:
         src = Path(zip_path).resolve()
@@ -519,9 +721,21 @@ class UpdatesManager:
             raise FileNotFoundError(f"Update file not found: {zip_path}")
 
         temp_root = Path(tempfile.mkdtemp(prefix="zapret_zen_local_update_"))
-        return self._extract_update_package(src, temp_root, {"latest_version": ""})
+        try:
+            return self._extract_update_package(src, temp_root, {"latest_version": ""})
+        except Exception:
+            shutil.rmtree(temp_root, ignore_errors=True)
+            raise
 
-    def _extract_update_package(self, zip_path: Path, temp_root: Path, release_info: dict[str, str]) -> dict[str, str]:
+    def _extract_update_package(
+        self,
+        zip_path: Path,
+        temp_root: Path,
+        release_info: dict[str, str],
+        progress: Callable[[float | None, int, int, str, str], None] | None = None,
+    ) -> dict[str, str]:
+        if progress is not None:
+            progress(0.0, 0, 0, "extract", "")
         extract_root = temp_root / "payload"
         extract_root.mkdir(parents=True, exist_ok=True)
         with zipfile.ZipFile(zip_path, "r") as archive:
@@ -532,6 +746,8 @@ class UpdatesManager:
         if not launch_exe.exists():
             raise FileNotFoundError("The update package does not contain zapret_zen.exe.")
 
+        if progress is not None:
+            progress(1.0, 0, 0, "extract", "")
         return {
             "temp_root": str(temp_root),
             "extract_root": str(payload_root),

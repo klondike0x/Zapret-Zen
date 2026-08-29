@@ -88,6 +88,50 @@ class GitHubNetworkClient:
                 continue
         return False
 
+    def download_stream(
+        self,
+        url: str,
+        destination: Path,
+        *,
+        connect_timeout: int = 10,
+        read_timeout: int = 10,
+        total_timeout: int = 60,
+        purpose: str = "download",
+        min_bytes: int = 1,
+        progress_cb: Callable[[int, int, float | None], None] | None = None,
+    ) -> None:
+        request = Request(encode_url_path(url), headers={"User-Agent": f"ZapretZen/{__version__}"})
+        deadline = time.monotonic() + max(1, total_timeout)
+        errors: list[str] = []
+        for label, context in self._ssl_context_chain():
+            try:
+                with urlopen(request, timeout=connect_timeout, context=context) as response:
+                    self.logging.log("info", "Download started", url=url, ssl_path=label)
+                    total = self._content_length(response)
+                    received = 0
+                    with destination.open("wb") as out:
+                        while True:
+                            if time.monotonic() > deadline:
+                                raise TimeoutError(f"Download timed out after {total_timeout} seconds")
+                            chunk = response.read(65536)
+                            if not chunk:
+                                break
+                            out.write(chunk)
+                            received += len(chunk)
+                            if progress_cb is not None:
+                                progress_cb(received, total, None if total <= 0 else received / total)
+                    if progress_cb is not None:
+                        progress_cb(received, total, 1.0)
+                if destination.stat().st_size < max(1, min_bytes):
+                    raise OSError("Downloaded archive is unexpectedly small")
+                return
+            except Exception as error:
+                errors.append(f"{label}: {error}")
+                if not self._is_certificate_error(error):
+                    raise
+                self.logging.log("warning", "Download certificate fallback", url=url, ssl_path=label, error=str(error))
+        raise RuntimeError("; ".join(errors) or "Download failed")
+
     def github_download(
         self,
         url: str,
@@ -96,11 +140,28 @@ class GitHubNetworkClient:
         timeout: int = 60,
         purpose: str = "github-download",
         min_bytes: int = 1,
+        progress_cb: Callable[[int, int, float | None], None] | None = None,
     ) -> None:
-        data = self.github_bytes(url, timeout=timeout, purpose=purpose)
-        if len(data) < max(1, min_bytes):
-            raise OSError("Downloaded archive is unexpectedly small")
-        destination.write_bytes(data)
+        self.download_stream(
+            url,
+            destination,
+            connect_timeout=timeout,
+            read_timeout=timeout,
+            total_timeout=timeout,
+            purpose=purpose,
+            min_bytes=min_bytes,
+            progress_cb=progress_cb,
+        )
+
+    @staticmethod
+    def _content_length(response: Any) -> int:
+        try:
+            value = response.headers.get("Content-Length")
+            if value is None:
+                return 0
+            return int(value)
+        except Exception:
+            return 0
 
     def _run(self, operation: Callable[[], T], purpose: str) -> T:
         errors: list[str] = []

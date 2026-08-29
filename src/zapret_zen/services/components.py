@@ -2053,6 +2053,77 @@ Get-NetAdapter -ErrorAction SilentlyContinue | ForEach-Object {
             self._restore_github_recovery_snapshot(snapshot, restart=bool(snapshot["was_running"]))
         raise RuntimeError("; ".join(errors) or "GitHub request failed after Zapret recovery")
 
+    def with_domain_connectivity_recovery(
+        self,
+        domains: list[str] | tuple[str, ...] | str,
+        operation: Callable[[], Any],
+        purpose: str,
+    ) -> Any:
+        raw_domains: list[str]
+        if isinstance(domains, str):
+            raw_domains = [domains]
+        else:
+            raw_domains = list(domains)
+        domain_list: list[str] = []
+        for item in raw_domains:
+            value = str(item or "").strip().lower()
+            if value and value not in domain_list:
+                domain_list.append(value)
+        if not domain_list:
+            return self.with_github_connectivity_recovery(operation, purpose)
+        snapshot = self._capture_github_recovery_snapshot()
+        errors: list[str] = []
+        try:
+            result = self._try_github_operation(operation, errors, f"{purpose}: direct")
+            if result[0]:
+                return result[1]
+            state = self.start_component("zapret")
+            if getattr(state, "status", None) != "running":
+                raise RuntimeError(f"{purpose}: Zapret could not be enabled for domain bypass")
+            time.sleep(1.0)
+            self._inject_runtime_domains(domain_list)
+            try:
+                self.stop_component("zapret")
+                state = self.start_component("zapret")
+                if getattr(state, "status", None) != "running":
+                    raise RuntimeError(f"{purpose}: Zapret restart with domains failed")
+                time.sleep(1.0)
+                result = self._try_github_operation(operation, errors, f"{purpose}: zapret+{','.join(domain_list)}")
+                if result[0]:
+                    return result[1]
+            finally:
+                self._remove_runtime_domains(domain_list)
+        finally:
+            self._restore_github_recovery_snapshot(snapshot, restart=bool(snapshot["was_running"]))
+        raise RuntimeError("; ".join(errors) or "Download failed after domain bypass")
+
+    def _inject_runtime_domains(self, domains: list[str]) -> None:
+        overrides_path = self.storage.paths.data_dir / "file_overrides.json"
+        raw = self.storage.read_json(overrides_path, default={}) or {}
+        entry = raw.get("domains")
+        entry = entry if isinstance(entry, dict) else {}
+        added = {str(item).strip() for item in list(entry.get("added", []) or []) if str(item).strip()}
+        for domain in domains:
+            added.add(domain)
+        entry["added"] = sorted(added)
+        raw["domains"] = entry
+        self.storage.write_json(overrides_path, raw)
+        self.logging.log("info", "Temporary domains injected for download bypass", domains=list(domains))
+
+    def _remove_runtime_domains(self, domains: list[str]) -> None:
+        try:
+            overrides_path = self.storage.paths.data_dir / "file_overrides.json"
+            raw = self.storage.read_json(overrides_path, default={}) or {}
+            entry = raw.get("domains")
+            entry = entry if isinstance(entry, dict) else {}
+            added = [str(item).strip() for item in list(entry.get("added", []) or []) if str(item).strip()]
+            keep = [item for item in added if item not in set(domains)]
+            entry["added"] = keep
+            raw["domains"] = entry
+            self.storage.write_json(overrides_path, raw)
+        except Exception as error:
+            self.logging.log("warning", "Failed to roll back temporary bypass domains", error=str(error))
+
     def _try_github_operation(self, operation: Callable[[], Any], errors: list[str], label: str) -> tuple[bool, Any]:
         try:
             return True, operation()
