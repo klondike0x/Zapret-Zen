@@ -22,6 +22,7 @@ from zapret_zen.services.service_catalog import (
     ALWAYS_APPLY_SERVICE_IDS,
     SERVICE_CATEGORIES,
     SERVICE_PRESETS,
+    SERVICE_PRESET_IDS,
     ServiceCategory,
     ServicePreset,
     service_ids_in_categories,
@@ -619,6 +620,115 @@ class ModCardFrame(QFrame):
             self.clicked.emit(self._mod_id)
 
 
+class SpinnerBadge(QWidget):
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._angle = 0.0
+        self._color = QColor("#7380ff")
+        self._timer = QTimer(self)
+        self._timer.setInterval(30)
+        self._timer.timeout.connect(self._advance)
+        self.setFixedSize(44, 44)
+
+    def set_accent_color(self, color: object) -> None:
+        try:
+            self._color = QColor(color)
+        except Exception:
+            self._color = QColor("#7380ff")
+        self.update()
+
+    def start(self) -> None:
+        if not self._timer.isActive():
+            self._timer.start()
+
+    def stop(self) -> None:
+        self._timer.stop()
+
+    def _advance(self) -> None:
+        self._angle = (self._angle + 14.0) % 360.0
+        self.update()
+
+    def paintEvent(self, event: QPaintEvent) -> None:
+        super().paintEvent(event)
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        rect = QRectF(5.0, 5.0, self.width() - 10.0, self.height() - 10.0)
+        base = QColor(self._color)
+        arc_color = base if base.lightnessF() > 0.3 else QColor("#e5e7eb")
+        pen = QPen(arc_color)
+        pen.setWidthF(3.0)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        painter.setPen(pen)
+        painter.drawArc(rect, int(-self._angle * 16.0), 110 * 16)
+
+
+class LoadingActionButton(QPushButton):
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._loading = False
+        self._angle = 0.0
+        self._color = QColor("#7380ff")
+        self._restore_text = ""
+        self._timer = QTimer(self)
+        self._timer.setInterval(30)
+        self._timer.timeout.connect(self._advance)
+
+    def set_accent_color(self, color: object) -> None:
+        try:
+            self._color = QColor(color)
+        except Exception:
+            self._color = QColor("#7380ff")
+        self.update()
+
+    def set_loading(self, loading: bool) -> None:
+        loading = bool(loading)
+        if loading == self._loading:
+            return
+        self._loading = loading
+        if loading:
+            self._angle = 0.0
+            self.setText("")
+            if not self._timer.isActive():
+                self._timer.start()
+        else:
+            self._timer.stop()
+            self._angle = 0.0
+            if not self.text():
+                self.setText(self._restore_text)
+            self.update()
+        self.update()
+
+    def is_loading(self) -> bool:
+        return self._loading
+
+    def _advance(self) -> None:
+        self._angle = (self._angle + 16.0) % 360.0
+        self.update()
+
+    def paintEvent(self, event: QPaintEvent) -> None:
+        super().paintEvent(event)
+        if not self._loading:
+            return
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        rect = QRectF(
+            (self.width() - 22.0) / 2.0,
+            (self.height() - 22.0) / 2.0,
+            22.0,
+            22.0,
+        )
+        base = QColor(self._color)
+        arc_color = QColor("#ffffff") if base.lightnessF() <= 0.5 else QColor("#1b1a21")
+        pen = QPen(arc_color)
+        pen.setWidthF(3.0)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        painter.setPen(pen)
+        painter.drawArc(rect, int(-self._angle * 16.0), 110 * 16)
+
+    def set_text_for_loading(self, text: str) -> None:
+        self._restore_text = text
+
+
 class ServiceCardFrame(BaseServiceCard):
     toggled = Signal(str, bool)
 
@@ -1023,11 +1133,11 @@ class ServiceToggleCard(QFrame):
             on_bg = off_bg
             on_fg = off_fg
 
+        self._toggle_switch.setText("ON" if self._selected else "OFF")
         self._toggle_switch.setStyleSheet(
             f"background: {on_bg}; border-radius: 10px; border: none;"
             f"color: {on_fg}; font-size: 12px; font-weight: bold;"
         )
-        self._toggle_switch.setText("ON" if self._selected else "OFF")
 
     def paintEvent(self, event: QPaintEvent) -> None:
         painter = QPainter(self)
@@ -1446,7 +1556,21 @@ class ServiceCategoryCard(BaseServiceCard):
             toggle.set_theme(self._theme)
             toggle.toggled.connect(self._on_service_toggle_clicked)
             self._services_grid.addWidget(toggle)
+        self._apply_toggle_count_limits()
         # Card height is set later to fill viewport (see _fit_category_cards)
+
+    def _apply_toggle_count_limits(self) -> None:
+        count = self._services_grid.count()
+        target = max(1, count * 44 + 6)
+        toggle = self._services_toggle_widget
+        anim = self._expand_anim
+        if anim is not None and anim.state() == QAbstractAnimation.State.Running and self._expanded:
+            anim.setEndValue(target)
+            return
+        if self._expanded:
+            toggle.setMaximumHeight(target)
+            toggle.show()
+            self._separator.show()
 
     def refresh_service_toggles(self, pixmaps: dict[str, QPixmap], selected_ids: set[str]) -> None:
         for i in range(self._services_grid.count()):
@@ -1456,9 +1580,9 @@ class ServiceCategoryCard(BaseServiceCard):
                 pix = pixmaps.get(w._preset.id)
                 if pix is not None:
                     w.set_pixmap(pix)
-                w.set_selected(w._preset.id in selected_ids)
-                w.set_accent_color(self._current_accent)
-                w.set_theme(self._theme)
+                    w.set_selected(w._preset.id in selected_ids)
+                    w.set_accent_color(self._current_accent)
+                    w.set_theme(self._theme)
 
     def _on_service_toggle_clicked(self, service_id: str, selected: bool) -> None:
         self.service_toggled.emit(service_id, selected)
@@ -3281,10 +3405,10 @@ class OnboardingFrame(QFrame):
     glowX = Property(float, _get_glow_x, _set_glow_x)
     glowY = Property(float, _get_glow_y, _set_glow_y)
 
-    def paintEvent(self, event: QEvent) -> None:
+def paintEvent(self, event: QEvent) -> None:
         if not self._onboarding_active:
             super().paintEvent(event)
-            return
+
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         rect = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
@@ -4423,6 +4547,7 @@ class MainWindow(QMainWindow):
         self._general_test_waiting_runtime_prepare = False
         self._general_test_runtime_restore_payload: dict[str, object] | None = None
         self._isolated_profile_pending_benchmark_mods: set[str] = set()
+        self._isolated_profile_benchmark_queue: list[str] = []
         self._mod_welcome_shown = False
         self._isolated_profile_benchmark: dict[str, object] | None = None
         self._isolated_profile_benchmark_task_id: str | None = None
@@ -4612,6 +4737,8 @@ class MainWindow(QMainWindow):
         self._component_states_cache: dict[str, ComponentState] = {}
         self._mods_index_cache: list[object] = []
         self._mods_installed_cache: dict[str, object] = {}
+        self._mods_catalog_loading = True
+        self._pending_mod_add_ids: set[str] = set()
         self._startup_snapshot_ready = False
         self._page_blur_effect: QGraphicsBlurEffect | None = None
         self._page_opacity_effect: QGraphicsOpacityEffect | None = None
@@ -5198,6 +5325,8 @@ class MainWindow(QMainWindow):
             return
         raw_index = payload.get("index")
         raw_installed = payload.get("installed")
+        if "index" in payload:
+            self._mods_catalog_loading = False
         if isinstance(raw_index, list):
             self._mods_index_cache = list(raw_index)
         if isinstance(raw_installed, dict):
@@ -6484,6 +6613,26 @@ class MainWindow(QMainWindow):
             cards_layout.addWidget(card, 1)
         layout.addLayout(cards_layout, 1)
         return panel
+
+    @staticmethod
+    def _obj_field(obj: object, name: str, default: object = "") -> object:
+        if isinstance(obj, dict):
+            return obj.get(name, default)
+        return getattr(obj, name, default)
+
+    def _read_mod_metadata_category(self, mod_path: str) -> str:
+        if not mod_path:
+            return ""
+        meta_path = Path(mod_path) / "mod.json"
+        if not meta_path.is_file():
+            return ""
+        try:
+            meta = json.loads(meta_path.read_text(encoding="utf-8-sig"))
+        except Exception:
+            return ""
+        if isinstance(meta, dict):
+            return str(meta.get("category", "") or "").strip()
+        return ""
 
     def _create_category_cards(self, *, scope: str) -> list[ServiceCategoryCard]:
         cards: list[ServiceCategoryCard] = []
@@ -9141,22 +9290,33 @@ class MainWindow(QMainWindow):
         if action == "toggle_mod":
             if isinstance(payload, dict):
                 mod_id = str(payload.get("mod_id", "") or "")
-                if mod_id in self._isolated_profile_pending_benchmark_mods:
-                    self._isolated_profile_pending_benchmark_mods.discard(mod_id)
-                    QTimer.singleShot(0, lambda mid=mod_id: self._maybe_run_isolated_profile_strategy_benchmark(mid))
+                self._update_mods_cache_from_payload(payload)
+                entry = self._mods_installed_cache.get(mod_id)
+                enabled = bool(self._obj_field(entry, "enabled", False))
+                if enabled:
+                    self._enqueue_isolated_profile_benchmark(mod_id)
+                else:
+                    self._drop_isolated_profile_benchmark(mod_id)
+                self._show_mod_welcome_once()
                 self._page_payload_cache["mods"] = {
                     "index": payload.get("index", []),
                     "installed": payload.get("installed", []),
                 }
+            self.refresh_services()
             self._mark_dirty("dashboard", "mods", "files", "logs", "tray")
             return
         if action in {"install_mod", "remove_mod", "import_mod_from_github", "import_mod_from_paths", "import_mod_from_path"}:
             if isinstance(payload, dict) and action in {"install_mod", "import_mod_from_github", "import_mod_from_paths", "import_mod_from_path"}:
                 self._show_mod_welcome_once()
+                mod_finished_id = str(payload.get("mod_id", "") or "")
+                if mod_finished_id:
+                    self._pending_mod_add_ids.discard(mod_finished_id)
+                if action == "install_mod" and mod_finished_id:
+                    QTimer.singleShot(0, lambda mid=mod_finished_id: self._enqueue_isolated_profile_benchmark(mid))
                 if action in {"import_mod_from_github", "import_mod_from_paths", "import_mod_from_path"}:
-                    imported_id = str(payload.get("mod_id", "") or "")
-                    if imported_id:
-                        QTimer.singleShot(0, lambda mid=imported_id: self._maybe_run_isolated_profile_strategy_benchmark(mid))
+                    if mod_finished_id:
+                        QTimer.singleShot(0, lambda mid=mod_finished_id: self._enqueue_isolated_profile_benchmark(mid))
+            self.refresh_services()
             self._mark_dirty("dashboard", "mods", "components", "files", "logs", "tray")
             return
         if action in {"move_mod", "set_mod_emoji"}:
@@ -9314,6 +9474,7 @@ class MainWindow(QMainWindow):
                 self._isolated_profile_benchmark = None
                 self._isolated_profile_benchmark_task_id = None
                 self._set_strategy_selection_active(False)
+                self._pump_isolated_profile_benchmark()
                 self._mark_dirty("dashboard", "tray")
                 return
             if self._general_test_cancelled:
@@ -9343,6 +9504,10 @@ class MainWindow(QMainWindow):
             self._settings_diag_dialog = None
             self._settings_diag_status_label = None
             self._settings_diag_progress_bar = None
+        if action == "install_mod":
+            if str(action_id).startswith("mod:"):
+                self._pending_mod_add_ids.discard(str(action_id)[4:])
+                self._mark_dirty("mods")
         if action in {"update_zapret_runtime", "update_tg_ws_proxy_runtime"}:
             self._close_component_update_dialog()
         title = self._backend_error_title(source)
@@ -13423,6 +13588,7 @@ class MainWindow(QMainWindow):
         self.context.settings.update(general_autotest_done=True)
         self._submit_backend_task("set_general_autotest_done", {"done": True}, action_id="__autotest_declined__")
         self._set_onboarding_visible(False)
+        self._pump_isolated_profile_benchmark()
         self.refresh_all()
         QTimer.singleShot(0, self._restore_sidebar_after_onboarding)
         QTimer.singleShot(80, self._restore_sidebar_after_onboarding)
@@ -13556,6 +13722,7 @@ class MainWindow(QMainWindow):
     def _fade_out_onboarding_to_app(self) -> None:
         if self._onboarding_widget is None:
             self._set_onboarding_visible(False)
+            self._pump_isolated_profile_benchmark()
             self.refresh_all()
             QTimer.singleShot(0, self._restore_sidebar_after_onboarding)
             return
@@ -13570,6 +13737,7 @@ class MainWindow(QMainWindow):
         overlay.raise_()
         self._startup_snapshot_ready = True
         self._set_onboarding_visible(False)
+        self._pump_isolated_profile_benchmark()
         self._sync_power_aura_geometry()
         self.refresh_all()
         QTimer.singleShot(0, self._restore_sidebar_after_onboarding)
@@ -14248,6 +14416,8 @@ class MainWindow(QMainWindow):
         self._general_test_counter_label = None
         self._general_test_progress_bar = None
         self._clear_windows_taskbar_progress()
+        self._pump_isolated_profile_benchmark()
+        self._show_mod_welcome_once()
         if self.isMinimized() or not self.isActiveWindow():
             hwnd = self._window_hwnd()
             if hwnd:
@@ -15142,17 +15312,31 @@ class MainWindow(QMainWindow):
                     self.mods_list.setCurrentItem(it)
                     break
 
+    def _install_mod_from_catalog(self, mod_id: str) -> None:
+        if str(mod_id) in self._pending_mod_add_ids:
+            return
+        self._pending_mod_add_ids.add(str(mod_id))
+        self._mark_dirty("mods")
+        try:
+            self._submit_backend_task("install_mod", {"mod_id": mod_id}, action_id=f"mod:{mod_id}")
+        except Exception as e:
+            self._pending_mod_add_ids.discard(str(mod_id))
+            self._mark_dirty("mods")
+            self.context.logging.log("error", "Mod install submit failed", mod_id=mod_id, error=str(e))
+            self._show_error(self._t("Can't install modification"), str(e))
+
     def _toggle_mod_by_id(self, mod_id: str) -> None:
         try:
             installed = dict(self._mods_installed_cache)
             target = installed.get(mod_id)
             if target is not None:
-                was_enabled = bool(target.enabled)
-                target.enabled = not was_enabled
+                was_enabled = bool(self._obj_field(target, "enabled", False))
+                if isinstance(target, dict):
+                    target["enabled"] = not was_enabled
+                else:
+                    target.enabled = not was_enabled
                 if not was_enabled:
-                    profile_id = self._maybe_create_mod_isolated_profile(mod_id)
-                    if profile_id and not self._isolated_profile_has_mod_strategy(mod_id, profile_id):
-                        self._isolated_profile_pending_benchmark_mods.add(mod_id)
+                    self._maybe_create_mod_isolated_profile(mod_id)
                 self.refresh_mods({"index": list(self._mods_index_cache), "installed": installed})
         except Exception:
             pass
@@ -15163,7 +15347,7 @@ class MainWindow(QMainWindow):
             installed = self._mods_installed_cache.get(mod_id)
             if installed is None:
                 return None
-            mod_path = Path(installed.path)
+            mod_path = Path(str(self._obj_field(installed, "path", "") or ""))
             meta_path = mod_path / "mod.json"
             if not meta_path.is_file():
                 return None
@@ -15247,7 +15431,11 @@ class MainWindow(QMainWindow):
                 return None
             mod_root = Path(installed.path)
             targets_file = next(
-                (candidate for candidate in (mod_root / "utils" / "targets.txt", mod_root / "targets.txt") if candidate.is_file()),
+                (
+                    candidate
+                    for candidate in (mod_root / "lists" / "targets.txt", mod_root / "utils" / "targets.txt", mod_root / "targets.txt")
+                    if candidate.is_file()
+                ),
                 None,
             )
             if targets_file is None:
@@ -15265,9 +15453,18 @@ class MainWindow(QMainWindow):
                 else:
                     parts = line.split()
                     if len(parts) < 2:
-                        continue
-                    name = parts[0].strip()
-                    value = parts[1].strip()
+                        host = parts[0].strip() if parts else ""
+                        if not host:
+                            continue
+                        if host.startswith("http://") or host.startswith("https://"):
+                            name = host
+                            value = host
+                        else:
+                            name = host
+                            value = f"https://{host}"
+                    else:
+                        name = parts[0].strip()
+                        value = parts[1].strip()
                 converted = self.context.processes._convert_test_target(name, value)
                 if converted:
                     targets.append(converted)
@@ -15275,12 +15472,42 @@ class MainWindow(QMainWindow):
         except Exception:
             return None
 
-    def _maybe_run_isolated_profile_strategy_benchmark(self, mod_id: str) -> None:
+    def _enqueue_isolated_profile_benchmark(self, mod_id: str) -> None:
+        mod_id = str(mod_id or "").strip()
+        if not mod_id:
+            return
+        if mod_id not in self._isolated_profile_pending_benchmark_mods:
+            if self._isolated_profile_benchmark and str(self._isolated_profile_benchmark.get("mod_id", "") or "") == mod_id:
+                return
+            self._isolated_profile_pending_benchmark_mods.add(mod_id)
+            self._isolated_profile_benchmark_queue.append(mod_id)
+            self.context.logging.log("info", "Mod strategy benchmark queued", mod_id=mod_id)
+        self._pump_isolated_profile_benchmark()
+
+    def _drop_isolated_profile_benchmark(self, mod_id: str) -> None:
+        mod_id = str(mod_id or "")
+        if mod_id in self._isolated_profile_pending_benchmark_mods:
+            self._isolated_profile_pending_benchmark_mods.discard(mod_id)
+            self._isolated_profile_benchmark_queue[:] = [mid for mid in self._isolated_profile_benchmark_queue if mid != mod_id]
+
+    def _pump_isolated_profile_benchmark(self) -> None:
+        if self._onboarding_active or self._general_test_running or self._strategy_selection_active:
+            return
         if self._isolated_profile_benchmark is not None:
             return
+        while self._isolated_profile_benchmark_queue:
+            mod_id = self._isolated_profile_benchmark_queue.pop(0)
+            self._isolated_profile_pending_benchmark_mods.discard(mod_id)
+            self._start_isolated_profile_benchmark(mod_id)
+            if self._isolated_profile_benchmark is not None:
+                return
+
+    def _start_isolated_profile_benchmark(self, mod_id: str) -> None:
         try:
             profile_id = self._find_isolated_profile_id(mod_id) or self._maybe_create_mod_isolated_profile(mod_id)
             if not profile_id:
+                return
+            if self._isolated_profile_has_mod_strategy(mod_id, profile_id):
                 return
             options = self._isolated_profile_candidate_options(mod_id)
             if not options:
@@ -15352,6 +15579,7 @@ class MainWindow(QMainWindow):
         self._isolated_profile_benchmark = None
         self._isolated_profile_benchmark_task_id = None
         self._set_strategy_selection_active(False)
+        self._pump_isolated_profile_benchmark()
         if benchmark is None:
             return
         profile_id = str(benchmark.get("profile_id", "") or "")
@@ -15557,6 +15785,8 @@ class MainWindow(QMainWindow):
             self._show_error(self._t("Mods"), str(error))
 
     def _show_mod_welcome_once(self) -> None:
+        if self._onboarding_active or self._general_test_running:
+            return
         welcome = self.context.settings.get().pending_mod_welcome
         if not isinstance(welcome, dict) or not welcome.get("text"):
             return
@@ -15700,6 +15930,7 @@ class MainWindow(QMainWindow):
             scroll_bar.setValue(min(previous_scroll_value, scroll_bar.maximum()))
 
         enabled_count = sum(1 for mod in combined if bool(mod["enabled"]))
+        accent = str(self.context.settings.get().accent_color or "#7380ff")
         if hasattr(self, "mods_summary_chip"):
             self.mods_summary_chip.setText(
                 self._t(
@@ -15722,6 +15953,38 @@ class MainWindow(QMainWindow):
                 widget.deleteLater()
 
         if not combined:
+            if self._mods_catalog_loading:
+                load_card, load_layout = self._card()
+                load_card.setProperty("class", "modCard")
+                load_layout.setContentsMargins(14, 14, 14, 14)
+                load_row = QHBoxLayout()
+                load_row.setContentsMargins(0, 0, 0, 0)
+                load_row.setSpacing(12)
+                spinner = SpinnerBadge()
+                spinner.set_accent_color(accent)
+                spinner.start()
+                load_row.addWidget(spinner)
+                load_col = QVBoxLayout()
+                load_col.setContentsMargins(0, 0, 0, 0)
+                load_col.setSpacing(5)
+                load_title = QLabel(self._t("Загружаем каталог модификаций...", "Loading the mod catalog..."))
+                load_title.setProperty("class", "title")
+                load_text = QLabel(
+                    self._t(
+                        "Каталог модификаций подгружается из источника, пожалуйста, подождите.",
+                        "The mod catalog is being fetched, please wait.",
+                    )
+                )
+                load_text.setProperty("class", "muted")
+                load_text.setWordWrap(True)
+                load_col.addWidget(load_title)
+                load_col.addWidget(load_text)
+                load_row.addLayout(load_col, 1)
+                load_layout.addLayout(load_row)
+                self.mods_cards_layout.addWidget(load_card)
+                self.mods_cards_layout.addStretch(1)
+                QTimer.singleShot(0, restore_scroll_position)
+                return
             empty, empty_layout = self._card()
             empty.setProperty("class", "modCard")
             empty_layout.setContentsMargins(14, 14, 14, 14)
@@ -15749,7 +16012,8 @@ class MainWindow(QMainWindow):
 
             card = ModCardFrame(mod_id, bool(mod.get("installed")))
             card.setProperty("class", "modCard")
-            card.clicked.connect(self._open_mod_editor)
+            if bool(mod.get("installed")):
+                card.clicked.connect(self._open_mod_editor)
             card_layout = QHBoxLayout(card)
             card_layout.setContentsMargins(16, 16, 16, 16)
             card_layout.setSpacing(16)
@@ -15802,6 +16066,7 @@ class MainWindow(QMainWindow):
                 badge_dx, badge_dy = self._mod_badge_offset(str(mod["emoji"]))
                 emoji_btn.setEmojiOffset(badge_dx, badge_dy)
                 emoji_btn.clicked.connect(lambda _=False, mid=mod_id, btn=emoji_btn: self._open_mod_emoji_menu(mid, btn))
+                emoji_btn.setEnabled(bool(mod.get("installed")))
                 icon_row.addWidget(emoji_btn, 1, Qt.AlignmentFlag.AlignCenter)
             left_col.addWidget(icon_wrap, 0, Qt.AlignmentFlag.AlignHCenter)
 
@@ -15836,68 +16101,86 @@ class MainWindow(QMainWindow):
             actions.setContentsMargins(0, 0, 0, 0)
             actions.setSpacing(8)
 
-            move_controls = QVBoxLayout()
-            move_controls.setContentsMargins(0, 6, 0, 0)
-            move_controls.setSpacing(2)
-            move_up = QToolButton()
-            move_up.setProperty("class", "action")
-            move_up.setArrowType(Qt.ArrowType.UpArrow)
-            move_up.setToolTip(self._t("Move up"))
-            move_up.clicked.connect(lambda _=False, mid=mod_id: self._move_mod(mid, -1))
-            move_down = QToolButton()
-            move_down.setProperty("class", "action")
-            move_down.setArrowType(Qt.ArrowType.DownArrow)
-            move_down.setToolTip(self._t("Move down"))
-            move_down.clicked.connect(lambda _=False, mid=mod_id: self._move_mod(mid, 1))
-            installed_total = sum(1 for item in combined if bool(item.get("installed")))
-            if bool(mod.get("installed")) and installed_total > 1:
-                if int(mod.get("order", 9999)) > 0:
-                    move_controls.addWidget(move_up, 0, Qt.AlignmentFlag.AlignHCenter)
-                if int(mod.get("order", 9999)) < installed_total - 1:
-                    move_controls.addWidget(move_down, 0, Qt.AlignmentFlag.AlignHCenter)
-            if move_controls.count() > 0:
-                left_col.addLayout(move_controls)
+            if bool(mod.get("installed")):
+                move_controls = QVBoxLayout()
+                move_controls.setContentsMargins(0, 6, 0, 0)
+                move_controls.setSpacing(2)
+                move_up = QToolButton()
+                move_up.setProperty("class", "action")
+                move_up.setArrowType(Qt.ArrowType.UpArrow)
+                move_up.setToolTip(self._t("Move up"))
+                move_up.clicked.connect(lambda _=False, mid=mod_id: self._move_mod(mid, -1))
+                move_down = QToolButton()
+                move_down.setProperty("class", "action")
+                move_down.setArrowType(Qt.ArrowType.DownArrow)
+                move_down.setToolTip(self._t("Move down"))
+                move_down.clicked.connect(lambda _=False, mid=mod_id: self._move_mod(mid, 1))
+                installed_total = sum(1 for item in combined if bool(item.get("installed")))
+                if installed_total > 1:
+                    if int(mod.get("order", 9999)) > 0:
+                        move_controls.addWidget(move_up, 0, Qt.AlignmentFlag.AlignHCenter)
+                    if int(mod.get("order", 9999)) < installed_total - 1:
+                        move_controls.addWidget(move_down, 0, Qt.AlignmentFlag.AlignHCenter)
+                if move_controls.count() > 0:
+                    left_col.addLayout(move_controls)
+                else:
+                    left_col.addSpacing(30)
+
+                card_layout.addLayout(left_col, 0)
+
+                toggle_btn = QToolButton()
+                toggle_btn.setToolTip(self._t("Disable modification") if enabled else self._t("Enable modification"))
+                toggle_btn.setIcon(self._icon("power.svg"))
+                toggle_btn.setIconSize(QSize(16, 16))
+                toggle_btn.setFixedSize(36, 36)
+                toggle_btn.setProperty("hoverRadius", 18)
+                toggle_btn.setStyleSheet(self._mod_circle_action_style("power", active=enabled))
+                toggle_btn.setAttribute(Qt.WidgetAttribute.WA_NoMousePropagation, True)
+                toggle_btn.clicked.connect(lambda _=False, mid=mod_id: self._toggle_mod_by_id(mid))
+                self._attach_button_animations(toggle_btn)
+                actions.addWidget(toggle_btn)
+
+                share_btn = QToolButton()
+                share_btn.setToolTip(self._t("Export modification"))
+                share_btn.setIcon(self._icon("share.svg"))
+                share_btn.setIconSize(QSize(16, 16))
+                share_btn.setFixedSize(36, 36)
+                share_btn.setProperty("hoverRadius", 18)
+                share_btn.setStyleSheet(self._mod_circle_action_style("share", active=enabled))
+                share_btn.setAttribute(Qt.WidgetAttribute.WA_NoMousePropagation, True)
+                share_btn.clicked.connect(lambda _=False, mid=mod_id: self._request_mod_export(mid))
+                self._attach_button_animations(share_btn)
+                actions.addWidget(share_btn)
+
+                remove_btn = QToolButton()
+                remove_btn.setToolTip(self._t("Delete modification"))
+                remove_btn.setIcon(self._icon("trash.svg"))
+                remove_btn.setIconSize(QSize(16, 16))
+                remove_btn.setFixedSize(36, 36)
+                remove_btn.setProperty("hoverRadius", 18)
+                remove_btn.setStyleSheet(self._mod_circle_action_style("delete", active=False))
+                remove_btn.setAttribute(Qt.WidgetAttribute.WA_NoMousePropagation, True)
+                remove_btn.clicked.connect(lambda _=False, mid=mod_id: self._remove_mod_with_confirmation(mid))
+                self._attach_button_animations(remove_btn)
+                actions.addWidget(remove_btn)
             else:
                 left_col.addSpacing(30)
-
-            card_layout.addLayout(left_col, 0)
-
-            toggle_btn = QToolButton()
-            toggle_btn.setToolTip(self._t("Disable modification") if enabled else self._t("Enable modification"))
-            toggle_btn.setIcon(self._icon("power.svg"))
-            toggle_btn.setIconSize(QSize(16, 16))
-            toggle_btn.setFixedSize(36, 36)
-            toggle_btn.setProperty("hoverRadius", 18)
-            toggle_btn.setStyleSheet(self._mod_circle_action_style("power", active=enabled))
-            toggle_btn.setAttribute(Qt.WidgetAttribute.WA_NoMousePropagation, True)
-            toggle_btn.clicked.connect(lambda _=False, mid=mod_id: self._toggle_mod_by_id(mid))
-            self._attach_button_animations(toggle_btn)
-            actions.addWidget(toggle_btn)
-
-            share_btn = QToolButton()
-            share_btn.setToolTip(self._t("Export modification"))
-            share_btn.setIcon(self._icon("share.svg"))
-            share_btn.setIconSize(QSize(16, 16))
-            share_btn.setFixedSize(36, 36)
-            share_btn.setProperty("hoverRadius", 18)
-            share_btn.setStyleSheet(self._mod_circle_action_style("share", active=enabled))
-            share_btn.setEnabled(bool(mod.get("installed")))
-            share_btn.setAttribute(Qt.WidgetAttribute.WA_NoMousePropagation, True)
-            share_btn.clicked.connect(lambda _=False, mid=mod_id: self._request_mod_export(mid))
-            self._attach_button_animations(share_btn)
-            actions.addWidget(share_btn)
-
-            remove_btn = QToolButton()
-            remove_btn.setToolTip(self._t("Delete modification"))
-            remove_btn.setIcon(self._icon("trash.svg"))
-            remove_btn.setIconSize(QSize(16, 16))
-            remove_btn.setFixedSize(36, 36)
-            remove_btn.setProperty("hoverRadius", 18)
-            remove_btn.setStyleSheet(self._mod_circle_action_style("delete", active=False))
-            remove_btn.setAttribute(Qt.WidgetAttribute.WA_NoMousePropagation, True)
-            remove_btn.clicked.connect(lambda _=False, mid=mod_id: self._remove_mod_with_confirmation(mid))
-            self._attach_button_animations(remove_btn)
-            actions.addWidget(remove_btn)
+                card_layout.addLayout(left_col, 0)
+                add_btn = LoadingActionButton()
+                add_btn.setProperty("class", "primary")
+                add_btn.setText(self._t("Установить", "Install"))
+                add_btn.setMinimumHeight(34)
+                add_btn.setMinimumWidth(120)
+                add_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+                add_btn.set_accent_color(accent)
+                add_btn.set_text_for_loading(self._t("Установить", "Install"))
+                add_btn.setEnabled(str(mod_id) not in self._pending_mod_add_ids)
+                add_btn.setAttribute(Qt.WidgetAttribute.WA_NoMousePropagation, True)
+                if str(mod_id) in self._pending_mod_add_ids:
+                    add_btn.set_loading(True)
+                add_btn.clicked.connect(lambda _=False, mid=mod_id: self._install_mod_from_catalog(mid))
+                self._attach_button_animations(add_btn)
+                actions.addWidget(add_btn)
             head.addLayout(actions)
             body.addLayout(head)
 

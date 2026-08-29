@@ -22,6 +22,19 @@ from zapret_zen.services.merge import MergeEngine
 from zapret_zen.services.settings import SettingsManager
 from zapret_zen.services.storage import StorageManager
 
+_MODS_REPO_OWNER = "peshk0v"
+_MODS_REPO = "Zapret-Mods"
+_MODS_REPO_BRANCH = "master"
+_MODS_REPO_URL = f"https://github.com/{_MODS_REPO_OWNER}/{_MODS_REPO}"
+_MODS_RAW_BASE = f"https://raw.githubusercontent.com/{_MODS_REPO_OWNER}/{_MODS_REPO}/{_MODS_REPO_BRANCH}"
+_MODS_MIRROR_BASE = f"https://cdn.jsdelivr.net/gh/{_MODS_REPO_OWNER}/{_MODS_REPO}@{_MODS_REPO_BRANCH}"
+_MODS_CONTENTS_API = f"https://api.github.com/repos/{_MODS_REPO_OWNER}/{_MODS_REPO}/contents"
+_MODS_TREE_API = f"https://data.jsdelivr.com/v1/packages/gh/{_MODS_REPO_OWNER}/{_MODS_REPO}@{_MODS_REPO_BRANCH}"
+_MODS_CATALOG_FILE = "mods_catalog.json"
+_MODS_SKIP_DIRS = {".github", ".git"}
+_MODS_REPO_FILE_SUFFIXES = {".bat", ".txt", ".ps1", ".json", ".enabled"}
+_REPO_CATALOG_TTL_SECONDS = 6 * 3600
+
 _MOD_SETTING_ENUMS = {
     "zapret_ipset_mode": {"loaded", "none", "any"},
     "zapret_game_filter_mode": {"disabled", "tcp", "udp", "tcpudp"},
@@ -90,6 +103,10 @@ class ModsManager:
         self.settings = settings
         recovery = getattr(processes, "with_github_connectivity_recovery", None)
         self.github = GitHubNetworkClient(logging, recovery_runner=recovery if callable(recovery) else None)
+        self._repo_file_base: str | None = None
+        self._repo_tree: list[object] | None = None
+        self._repo_catalog: dict[str, dict[str, str]] = {}
+        self._repo_discovered = False
         self._installed_path = self.storage.paths.data_dir / "installed_mods.json"
         if not self._installed_path.exists():
             self.storage.write_json(self._installed_path, [])
@@ -100,19 +117,204 @@ class ModsManager:
 
     def fetch_index(self, *, refresh_remote: bool = False) -> list[ModIndexItem]:
         settings = self.settings.get()
-        if refresh_remote and settings.mods_index_url:
+        cache_path = self.storage.paths.cache_dir / "mods_index.json"
+        if settings.mods_index_url:
+            if refresh_remote:
+                try:
+                    payload = self.github.github_json(settings.mods_index_url, timeout=10, purpose="mods-index", retry=False)
+                    if isinstance(payload, list):
+                        payload = [item for item in payload if isinstance(item, dict) and item.get("id") not in self._STALE_INDEX_IDS]
+                    self.storage.write_json(cache_path, payload)
+                    self.logging.log("info", "Mods index refreshed from URL", url=settings.mods_index_url)
+                except Exception as error:
+                    self.logging.log("warning", "Failed to refresh mods index from URL", url=settings.mods_index_url, error=str(error))
+        elif not self._repo_discovered and (refresh_remote or not self._repo_catalog_present_and_fresh()):
+            self._repo_discovered = True
             try:
-                payload = self.github.github_json(settings.mods_index_url, timeout=10, purpose="mods-index")
-                if isinstance(payload, list):
-                    payload = [item for item in payload if isinstance(item, dict) and item.get("id") not in self._STALE_INDEX_IDS]
-                self.storage.write_json(self.storage.paths.cache_dir / "mods_index.json", payload)
-                self.logging.log("info", "Mods index refreshed from URL", url=settings.mods_index_url)
+                self.discover_repo_catalog()
             except Exception as error:
-                self.logging.log("warning", "Failed to refresh mods index from URL", url=settings.mods_index_url, error=str(error))
-        raw = self.storage.read_json(self.storage.paths.cache_dir / "mods_index.json", default=[]) or []
+                self.logging.log("warning", "Failed to discover Zapret-Mods catalog", error=str(error))
+        raw = self.storage.read_json(cache_path, default=[]) or []
         if isinstance(raw, list):
             raw = [item for item in raw if isinstance(item, dict) and item.get("id") not in self._STALE_INDEX_IDS]
         return [ModIndexItem(**item) for item in raw]
+
+    def discover_repo_catalog(self) -> bool:
+        file_base = self._select_repo_file_base()
+        if not file_base:
+            self.logging.log("info", "Zapret-Mods sources unavailable, catalog skipped")
+            return False
+        folders = self._repo_mod_folders()
+        if not folders:
+            self.logging.log("warning", "Zapret-Mods folders listing unavailable")
+            return False
+        catalog: list[dict[str, object]] = []
+        catalog_data: dict[str, dict[str, str]] = {}
+        seen_ids: set[str] = set()
+        for folder in folders:
+            try:
+                meta = self._repo_mod_metadata(file_base, folder)
+            except Exception as error:
+                self.logging.log("warning", "Zapret-Mods catalog metadata read failed", folder=folder, error=str(error))
+                continue
+            if not isinstance(meta, dict):
+                continue
+            mod_id = str(meta.get("id", "") or "").strip()
+            if not mod_id or mod_id in seen_ids:
+                continue
+            seen_ids.add(mod_id)
+            category = str(meta.get("category", "") or "").strip().lower() or "general"
+            catalog.append(
+                {
+                    "id": mod_id,
+                    "name": str(meta.get("name", "") or "") or mod_id,
+                    "description": str(meta.get("description", "") or ""),
+                    "author": str(meta.get("author", "") or "") or self.UNKNOWN_AUTHOR,
+                    "version": str(meta.get("version", "") or ""),
+                    "source_url": str(meta.get("source_url", "") or "") or _MODS_REPO_URL,
+                    "category": category,
+                    "changelog": str(meta.get("changelog", "") or ""),
+                }
+            )
+            catalog_data[mod_id] = {"dir": folder, "emoji": str(meta.get("emoji", "") or "").strip()}
+        if not catalog:
+            self.logging.log("warning", "Zapret-Mods catalog is empty")
+            return False
+        self.storage.write_json(self.storage.paths.cache_dir / "mods_index.json", catalog)
+        self.storage.write_json(self.storage.paths.cache_dir / _MODS_CATALOG_FILE, catalog_data)
+        self._repo_catalog = catalog_data
+        self.logging.log("info", "Zapret-Mods catalog discovered", mods=len(catalog), source=file_base)
+        return True
+
+    def _repo_catalog_present_and_fresh(self) -> bool:
+        cache_path = self.storage.paths.cache_dir / "mods_index.json"
+        try:
+            if not cache_path.exists():
+                return False
+            if not (self.storage.read_json(cache_path, default=[]) or []):
+                return False
+            return (datetime.now() - datetime.fromtimestamp(cache_path.stat().st_mtime)).total_seconds() < _REPO_CATALOG_TTL_SECONDS
+        except Exception:
+            return False
+
+    def _repo_catalog_entry(self, mod_id: str) -> dict[str, str]:
+        if not self._repo_catalog:
+            try:
+                data = self.storage.read_json(self.storage.paths.cache_dir / _MODS_CATALOG_FILE, default={}) or {}
+                self._repo_catalog = data if isinstance(data, dict) else {}
+            except Exception:
+                self._repo_catalog = {}
+        return dict(self._repo_catalog.get(mod_id, {}) or {})
+
+    def _select_repo_file_base(self) -> str | None:
+        if self._repo_file_base is not None:
+            return self._repo_file_base or None
+        for base in (_MODS_RAW_BASE, _MODS_MIRROR_BASE):
+            if self.github.probe_url(f"{base}/README.md", timeout=6):
+                self._repo_file_base = base
+                return base
+        self._repo_file_base = ""
+        return None
+
+    def _repo_mod_folders(self) -> list[str]:
+        folders: list[str] = []
+        try:
+            entries = self.github.github_json(_MODS_CONTENTS_API, timeout=10, purpose="zapret-mods-listing", retry=False)
+            if isinstance(entries, list):
+                for entry in entries:
+                    if not isinstance(entry, dict):
+                        continue
+                    if str(entry.get("type", "") or "").lower() not in {"dir", "directory"}:
+                        continue
+                    name = str(entry.get("name", "") or "").strip()
+                    if name and name not in _MODS_SKIP_DIRS:
+                        folders.append(name)
+        except Exception:
+            folders = []
+        if folders:
+            return sorted(folders)
+        for node in self._repo_tree_files():
+            if not isinstance(node, dict):
+                continue
+            if str(node.get("type", "") or "").lower() not in {"dir", "directory"}:
+                continue
+            name = str(node.get("name", "") or "").strip()
+            if name and name not in _MODS_SKIP_DIRS:
+                folders.append(name)
+        return sorted(folders)
+
+    def _repo_tree_files(self) -> list[object]:
+        if self._repo_tree is None:
+            try:
+                payload = self.github.github_json(_MODS_TREE_API, timeout=12, purpose="zapret-mods-tree", retry=False)
+                files = payload.get("files") if isinstance(payload, dict) else None
+                self._repo_tree = files if isinstance(files, list) else []
+            except Exception:
+                self._repo_tree = []
+        return list(self._repo_tree)
+
+    def _repo_mod_metadata(self, file_base: str, folder: str) -> dict[str, object]:
+        payload = self.github.github_json(f"{file_base}/{folder}/mod.json", timeout=10, purpose="zapret-mods-metadata", retry=False)
+        return payload if isinstance(payload, dict) else {}
+
+    def _repo_folder_files(self, folder: str) -> list[str]:
+        try:
+            entries = self.github.github_json(f"{_MODS_CONTENTS_API}/{folder}", timeout=12, purpose="zapret-mods-files", retry=False)
+            if isinstance(entries, list):
+                rel: list[str] = []
+                for entry in entries:
+                    if not isinstance(entry, dict):
+                        continue
+                    name = str(entry.get("name", "") or "").strip()
+                    if not name:
+                        continue
+                    if str(entry.get("type", "") or "").lower() in {"dir", "directory"}:
+                        rel.extend(f"{name}/{sub}" for sub in self._repo_folder_files(f"{folder}/{name}"))
+                    else:
+                        rel.append(name)
+                if rel:
+                    return self._filter_repo_mod_files(rel)
+        except Exception:
+            pass
+        prefix = f"{folder}/"
+        tree_rel = self._flatten_repo_tree(self._repo_tree_files())
+        return self._filter_repo_mod_files([path[len(prefix):] for path in tree_rel if path.startswith(prefix)])
+
+    @staticmethod
+    def _flatten_repo_tree(nodes: list[object]) -> list[str]:
+        result: list[str] = []
+        for node in nodes:
+            if not isinstance(node, dict):
+                continue
+            name = str(node.get("name", "") or "").strip()
+            if not name:
+                continue
+            if str(node.get("type", "") or "").lower() in {"dir", "directory"}:
+                result.extend(f"{name}/{sub}" for sub in ModsManager._flatten_repo_tree(node.get("files") or []))
+            else:
+                result.append(name)
+        return result
+
+    @staticmethod
+    def _filter_repo_mod_files(rels: list[str]) -> list[str]:
+        result: list[str] = []
+        for rel in rels:
+            rel = str(rel or "").replace("\\", "/")
+            if not rel or Path(rel).suffix.lower() not in _MODS_REPO_FILE_SUFFIXES:
+                continue
+            parts = Path(rel).parts
+            if ".github" in parts or ".git" in parts:
+                continue
+            if rel.startswith(".") or "/." in rel:
+                continue
+            if rel == "mod.json":
+                result.append(rel)
+                continue
+            name = rel.rsplit("/", 1)[-1].lower()
+            if name.startswith(("readme", "license", "changelog")):
+                continue
+            result.append(rel)
+        return sorted(set(result))
 
     def list_installed(self) -> list[InstalledMod]:
         self._auto_register_mods()
@@ -266,6 +468,8 @@ class ModsManager:
 
     def install(self, mod_id: str) -> InstalledMod:
         item = next(entry for entry in self.fetch_index() if entry.id == mod_id)
+        if self._is_repo_mod_item(item):
+            return self._install_repo_mod(item)
         target_dir = self.storage.paths.mods_dir / mod_id
         target_dir.mkdir(parents=True, exist_ok=True)
         payload_path = target_dir / "payload.json"
@@ -290,6 +494,81 @@ class ModsManager:
 
         self.storage.write_json(self._installed_path, [asdict(entry) for entry in installed])
         self.logging.log("info", "Mod installed", mod_id=mod_id, version=item.version)
+        return result
+
+    def _is_repo_mod_item(self, item: ModIndexItem) -> bool:
+        source = str(item.source_url or "").strip().rstrip("/")
+        return bool(source) and (source == _MODS_REPO_URL.rstrip("/") or source.startswith(_MODS_REPO_URL.rstrip("/") + "/"))
+
+    def _install_repo_mod(self, item: ModIndexItem) -> InstalledMod:
+        data = self._repo_catalog_entry(item.id)
+        folder = str(data.get("dir", "") or "").strip() or item.id
+        file_base = self._select_repo_file_base()
+        if not file_base:
+            raise RuntimeError(f"Zapret-Mods sources are unreachable ({item.id})")
+        files = [rel for rel in self._repo_folder_files(folder) if rel != "mod.json"]
+        target_dir = self.storage.paths.mods_dir / item.id
+        if target_dir.exists():
+            shutil.rmtree(target_dir, ignore_errors=True)
+        target_dir.mkdir(parents=True, exist_ok=True)
+        downloaded = 0
+        for rel in files:
+            destination = target_dir / rel
+            try:
+                payload = self.github.github_bytes(f"{file_base}/{folder}/{rel}", timeout=40, purpose="zapret-mod-download")
+            except Exception as error:
+                self.logging.log("warning", "Zapret-Mods file download failed", mod_id=item.id, path=rel, error=str(error))
+                continue
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_bytes(payload)
+            self._strip_zone_identifier(destination)
+            downloaded += 1
+        meta_path = target_dir / "mod.json"
+        if not meta_path.is_file():
+            try:
+                mod_meta = self._repo_mod_metadata(file_base, folder)
+            except Exception:
+                mod_meta = {}
+            if isinstance(mod_meta, dict) and mod_meta:
+                (target_dir / "mod.json").write_text(json.dumps(mod_meta, ensure_ascii=False, indent=2), encoding="utf-8")
+        if downloaded == 0:
+            raise RuntimeError("No mod files could be downloaded")
+        general_scripts = sorted(
+            script.name for script in target_dir.glob("*.bat") if script.is_file() and not script.name.lower().startswith("service")
+        )
+        lists_present = (target_dir / "lists").is_dir() and any((target_dir / "lists").iterdir())
+        if not general_scripts and not lists_present:
+            raise RuntimeError("Downloaded mod bundle has no compatible files")
+        emoji = str(data.get("emoji", "") or "").strip()
+        installed = self.list_installed()
+        existing = next((entry for entry in installed if entry.id == item.id), None)
+        if existing is not None:
+            existing.version = item.version or existing.version
+            existing.path = str(target_dir)
+            existing.name = item.name or existing.name
+            existing.author = item.author or existing.author
+            existing.description = item.description or existing.description
+            existing.source_url = item.source_url or existing.source_url or _MODS_REPO_URL
+            existing.general_scripts = general_scripts
+            existing.emoji = emoji or existing.emoji
+            result = existing
+        else:
+            result = InstalledMod(
+                id=item.id,
+                version=item.version or datetime.utcnow().strftime("%Y.%m.%d"),
+                path=str(target_dir),
+                name=item.name or item.id,
+                author=item.author or self.UNKNOWN_AUTHOR,
+                description=item.description or "",
+                source_url=item.source_url or _MODS_REPO_URL,
+                enabled=False,
+                source_type="zapret_bundle",
+                general_scripts=general_scripts,
+                emoji=emoji,
+            )
+            installed.append(result)
+        self.storage.write_json(self._installed_path, [asdict(entry) for entry in installed])
+        self.logging.log("info", "Zapret-Mods bundle installed", mod_id=item.id, folder=folder, files=downloaded)
         return result
 
     def set_enabled(self, mod_id: str, enabled: bool) -> InstalledMod:

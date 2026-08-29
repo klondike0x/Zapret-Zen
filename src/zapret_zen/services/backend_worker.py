@@ -690,13 +690,19 @@ def _handle_toggle_mod(context, payload, emit_progress):
         return {}
     tg_sig_before = _tg_settings_signature(context)
     tg_was_running = _is_component_running(context, "tg-ws-proxy")
-    with _reconfigure_zapret(context):
-        installed = {item.id: item for item in context.mods.list_installed()}
-        if mod_id not in installed:
-            context.mods.install(mod_id)
+    try:
+        with _reconfigure_zapret(context):
             installed = {item.id: item for item in context.mods.list_installed()}
-        if mod_id in installed:
-            context.mods.set_enabled(mod_id, not installed[mod_id].enabled)
+            was_enabled = bool(installed.get(mod_id) and installed[mod_id].enabled)
+            if mod_id not in installed:
+                context.mods.install(mod_id)
+                installed = {item.id: item for item in context.mods.list_installed()}
+            if mod_id in installed:
+                context.mods.set_enabled(mod_id, not was_enabled)
+            if not was_enabled:
+                _check_mod_welcome(context, mod_id)
+    except Exception as error:
+        context.logging.log("warning", "Mod toggle failed", mod_id=mod_id, error=str(error))
     _restart_tg_ws_proxy_if_settings_changed(context, tg_sig_before, tg_was_running)
     result = {"mod_id": mod_id}
     result.update(_snapshot(context))
@@ -707,9 +713,25 @@ def _handle_toggle_mod(context, payload, emit_progress):
 @_register_action("install_mod")
 def _handle_install_mod(context, payload, emit_progress):
     mod_id = str(payload.get("mod_id", "")).strip()
-    if mod_id:
-        context.mods.install(mod_id)
-        _check_mod_welcome(context, mod_id)
+    if not mod_id:
+        result = {"mod_id": mod_id}
+        result.update(_snapshot(context))
+        result.update(_mods_payload(context))
+        return result
+    installed_before = {item.id: item for item in context.mods.list_installed()}
+    was_enabled = bool(installed_before.get(mod_id) and bool(installed_before[mod_id].enabled))
+    tg_sig_before = _tg_settings_signature(context)
+    tg_was_running = _is_component_running(context, "tg-ws-proxy")
+    try:
+        with _reconfigure_zapret(context):
+            context.mods.install(mod_id)
+            context.mods.set_enabled(mod_id, True)
+        if not was_enabled:
+            _check_mod_welcome(context, mod_id)
+    except Exception as error:
+        context.logging.log("warning", "Mod install failed", mod_id=mod_id, error=str(error))
+        raise
+    _restart_tg_ws_proxy_if_settings_changed(context, tg_sig_before, tg_was_running)
     result = {"mod_id": mod_id}
     result.update(_snapshot(context))
     result.update(_mods_payload(context))

@@ -13,7 +13,17 @@ import certifi
 from zapret_zen import __version__
 from zapret_zen.services.logging_service import LoggingManager
 
+from urllib.parse import quote, urlsplit, urlunsplit
+
 T = TypeVar("T")
+
+
+def encode_url_path(url: str) -> str:
+    parts = urlsplit(str(url or ""))
+    if not parts.scheme or not parts.netloc:
+        return str(url or "")
+    encoded = "/".join(seg if "%" in seg else quote(seg, safe="@:") for seg in parts.path.split("/"))
+    return urlunsplit((parts.scheme, parts.netloc, encoded, parts.query, parts.fragment))
 
 
 def _read_error_body(error: HTTPError) -> str:
@@ -58,11 +68,25 @@ class GitHubNetworkClient:
         self.logging = logging
         self.recovery_runner = recovery_runner
 
-    def github_json(self, url: str, *, timeout: int = 20, purpose: str = "github-json") -> object:
-        return self._run(lambda: self._request_json(url, timeout=timeout), purpose)
+    def github_json(self, url: str, *, timeout: int = 20, purpose: str = "github-json", retry: bool = True) -> object:
+        if retry:
+            return self._run(lambda: self._request_json(url, timeout=timeout), purpose)
+        return self._request_json(url, timeout=timeout)
 
-    def github_bytes(self, url: str, *, timeout: int = 60, purpose: str = "github-download") -> bytes:
-        return self._run(lambda: self._download_bytes_once(url, timeout=timeout), purpose)
+    def github_bytes(self, url: str, *, timeout: int = 60, purpose: str = "github-download", retry: bool = True) -> bytes:
+        if retry:
+            return self._run(lambda: self._download_bytes_once(url, timeout=timeout), purpose)
+        return self._download_bytes_once(url, timeout=timeout)
+
+    def probe_url(self, url: str, *, timeout: int = 5) -> bool:
+        request = Request(encode_url_path(url), headers={"User-Agent": f"ZapretZen/{__version__}"})
+        for _label, context in self._ssl_context_chain():
+            try:
+                with urlopen(request, timeout=timeout, context=context) as response:
+                    return bool(response.status == 200)
+            except Exception:
+                continue
+        return False
 
     def github_download(
         self,
@@ -109,7 +133,7 @@ class GitHubNetworkClient:
             raise RuntimeError(f"GitHub returned invalid JSON: {preview}") from error
 
     def _download_bytes_once(self, url: str, *, timeout: int) -> bytes:
-        request = Request(url, headers={"User-Agent": f"ZapretZen/{__version__}"})
+        request = Request(encode_url_path(url), headers={"User-Agent": f"ZapretZen/{__version__}"})
         errors: list[str] = []
         for label, context in self._ssl_context_chain():
             try:
