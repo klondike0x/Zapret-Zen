@@ -6,6 +6,10 @@
   #define AppVersion "0.0.0"
 #endif
 
+#ifndef VersionInfoVer
+  #define VersionInfoVer AppVersion
+#endif
+
 #ifndef MyAppName
   #define MyAppName "Zapret-Zen"
 #endif
@@ -38,11 +42,11 @@ SolidCompression=yes
 WizardStyle=modern
 UninstallDisplayIcon={app}\{#MyAppExeName}
 UninstallDisplayName={#MyAppName}
-VersionInfoVersion={#AppVersion}
+VersionInfoVersion={#VersionInfoVer}
 VersionInfoCompany={#MyAppPublisher}
 VersionInfoDescription={#MyAppName} Installer
 VersionInfoProductName={#MyAppName}
-VersionInfoProductVersion={#AppVersion}
+VersionInfoProductVersion={#VersionInfoVer}
 #ifndef SignToolCmd
 #else
 SignedUninstaller=yes

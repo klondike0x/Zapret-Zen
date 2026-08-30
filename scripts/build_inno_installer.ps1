@@ -17,7 +17,11 @@ Set-Location $root
 if (-not $Version) {
     $Version = & $Python -c "import sys; sys.path.insert(0,'src'); from zapret_zen import __version__; print(__version__)"
 }
-$nuitkaVersion = & $Python -c "import re; m=re.search(r'^(\d+(?:\.\d+)*)','$Version'.strip()); parts=tuple(int(x) for x in (m.group(1) if m else '0').split('.')[:4]); print('.'.join(str(p) for p in parts))"
+$verMatch = [regex]::Match($Version, '^(\d+\.)*\d+')
+$numericVersion = if ($verMatch.Success) { $verMatch.Value } else { '0' }
+$parts = @($numericVersion -split '\.')
+while ($parts.Count -lt 4) { $parts += '0' }
+$numericVersion = $parts[0..3] -join '.'
 
 if (-not $Iscc) {
     $candidates = @(
@@ -79,6 +83,7 @@ try {
         "/DX64Src=$x64Abs",
         "/DArm64Src=$arm64Abs",
         "/DSetupIcon=$iconAbs",
+        "/DVersionInfoVer=$numericVersion",
         "/O$outAbs",
         (Join-Path $root "installer\zapret_zen.iss")
     )
