@@ -3992,333 +3992,6 @@ class AppDialog(QDialog):
         return int(self._exec_result)
 
 
-class SettingsDialog(AppDialog):
-    def __init__(self, parent: QWidget, context: ApplicationContext) -> None:
-        self.context = context
-        self._smooth_scroll_helpers: list[SmoothScrollController] = []
-        self._scroll_fade_overlays: list[ScrollFadeOverlay] = []
-        self._settings_scroll: QScrollArea | None = None
-        self._settings_section_frames: dict[str, QFrame] = {}
-        self._pending_scroll_section = ""
-        super().__init__(parent, context, self._t("Settings"))
-        self.setMinimumWidth(520)
-        self.resize(600, 980)
-        layout = self.body_layout
-
-        self.theme_combo = ClickSelectComboBox()
-        ui_language = self.context.settings.get().language
-        for theme_id, theme_name in list_available_themes(self.context.paths.themes_dir, ui_language):
-            self.theme_combo.addItem(theme_name, theme_id)
-        self.language_combo = ClickSelectComboBox()
-        for language_id in ("ru", "en"):
-            self.language_combo.addItem(_language_display_name(language_id, ui_language), language_id)
-        self.tg_host_input = QLineEdit()
-        self.tg_port_input = QLineEdit()
-        self.tg_secret_input = QLineEdit()
-        self.tg_media_mode_combo = ClickSelectComboBox()
-        self.tg_media_mode_combo.addItem(self._t("Default"), "default")
-        self.tg_media_mode_combo.addItem("Media fix", "media_fix")
-        self.tg_media_mode_combo.addItem(self._t("No DC override"), "empty")
-        self.tg_dc_ip_input = QTextEdit()
-        self.tg_dc_ip_input.setFixedHeight(72)
-        self.tg_cfproxy_checkbox = QCheckBox(self._t("Cloudflare fallback"))
-        self.tg_cfproxy_priority_checkbox = QCheckBox(self._t("Try Cloudflare first"))
-        self.tg_cfproxy_domain_input = QLineEdit()
-        self.tg_fake_tls_input = QLineEdit()
-        self.tg_buf_input = QLineEdit()
-        self.tg_pool_input = QLineEdit()
-        self.zapret_udp_exclude_input = QLineEdit()
-        self.ipset_mode_combo = ClickSelectComboBox()
-        self.ipset_mode_combo.addItem("loaded", "loaded")
-        self.ipset_mode_combo.addItem("none", "none")
-        self.ipset_mode_combo.addItem("any", "any")
-        self.game_mode_combo = ClickSelectComboBox()
-        self.game_mode_combo.addItem(self._t("disabled"), "disabled")
-        self.game_mode_combo.addItem(self._t("tcp + udp"), "tcpudp")
-        self.game_mode_combo.addItem(self._t("tcp only"), "tcp")
-        self.game_mode_combo.addItem(self._t("udp only"), "udp")
-        self.autostart_checkbox = QCheckBox(self._t("Run with Windows"))
-        self.tray_checkbox = QCheckBox(self._t("Start in tray"))
-        self.auto_components_checkbox = QCheckBox(self._t("Auto-run components"))
-        self.check_updates_checkbox = QCheckBox(self._t("Check for updates"))
-
-        scroll = QScrollArea()
-        scroll.setObjectName("SettingsScroll")
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.Shape.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        scroll.setMinimumHeight(560)
-        scroll.setMaximumHeight(760)
-        self._settings_scroll = scroll
-        canvas = QWidget()
-        canvas.setObjectName("SettingsCanvas")
-        canvas_layout = QVBoxLayout(canvas)
-        canvas_layout.setContentsMargins(0, 0, 0, 0)
-        canvas_layout.setSpacing(10)
-        scroll.setWidget(canvas)
-        self._smooth_scroll_helpers.append(SmoothScrollController(scroll))
-        fade = ScrollFadeOverlay(scroll)
-        fade.set_theme(self.context.settings.get().theme)
-        fade.set_surface_color(_dialog_surface_color(self.context.settings.get().theme))
-        self._scroll_fade_overlays.append(fade)
-        layout.addWidget(scroll, 1)
-
-        app_form = self._settings_section(canvas_layout, self._t("Application"), "app")
-        app_form.addRow(self._t("Theme"), self.theme_combo)
-        app_form.addRow(self._t("Language"), self.language_combo)
-        app_form.addRow("", self.autostart_checkbox)
-        app_form.addRow("", self.tray_checkbox)
-        app_form.addRow("", self.auto_components_checkbox)
-        app_form.addRow("", self.check_updates_checkbox)
-
-        zapret_form = self._settings_section(canvas_layout, "Zapret", "zapret")
-        zapret_form.addRow("IPSet mode", self.ipset_mode_combo)
-        zapret_form.addRow(self._t("Gaming mode"), self.game_mode_combo)
-        zapret_form.addRow(self._t("Exclude UDP ports"), self.zapret_udp_exclude_input)
-
-        tg_form = self._settings_section(canvas_layout, "TG WS Proxy", "tg-ws-proxy")
-        tg_form.addRow(self._t("Host"), self.tg_host_input)
-        tg_form.addRow(self._t("Port"), self.tg_port_input)
-        tg_form.addRow(self._t("Secret"), self.tg_secret_input)
-        tg_form.addRow(self._t("Media mode"), self.tg_media_mode_combo)
-        tg_form.addRow("DC -> IP", self.tg_dc_ip_input)
-        tg_form.addRow("", self.tg_cfproxy_checkbox)
-        tg_form.addRow("", self.tg_cfproxy_priority_checkbox)
-        tg_form.addRow(self._t("CF domain"), self.tg_cfproxy_domain_input)
-        tg_form.addRow(self._t("Fake TLS domain"), self.tg_fake_tls_input)
-        tg_form.addRow(self._t("Buffer, KB"), self.tg_buf_input)
-        tg_form.addRow(self._t("Pool size"), self.tg_pool_input)
-
-        self.tg_media_mode_combo.currentIndexChanged.connect(self._apply_tg_media_preset)
-
-        restart_onboarding_btn = QPushButton(self._t("Configure again"))
-        restart_onboarding_btn.setObjectName("RestartOnboardingButton")
-        restart_onboarding_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        restart_onboarding_btn.setMinimumHeight(38)
-        restart_onboarding_btn.setStyleSheet(
-            "QPushButton#RestartOnboardingButton {"
-            "background: transparent;"
-            "border: 1px solid rgba(239, 68, 68, 95);"
-            "border-radius: 12px;"
-            "padding: 8px 14px;"
-            "color: rgba(248, 113, 113, 210);"
-            "font-weight: 650;"
-            "}"
-            "QPushButton#RestartOnboardingButton:hover {"
-            "background: rgba(239, 68, 68, 22);"
-            "border: 1px solid rgba(248, 113, 113, 145);"
-            "color: rgba(252, 165, 165, 235);"
-            "}"
-        )
-        restart_onboarding_btn.clicked.connect(self._restart_onboarding)
-        canvas_layout.addWidget(restart_onboarding_btn)
-
-        credits = QLabel(
-            self._t(
-                "Благодарности: оригинальный набор zapret и tg-ws-proxy от Flowseal.\n"
-                "Оригинальная экосистема zapret от bol-van.\n"
-                f"Это приложение является отдельным интерфейсом управления.\nВерсия: {__version__} | Автор: peshk0v",
-                "Credits: original zapret bundle and tg-ws-proxy by Flowseal.\n"
-                "Original zapret ecosystem by bol-van.\n"
-                f"This app is a separate management UI.\nVersion: {__version__} | Author: peshk0v",
-            )
-        )
-        credits.setProperty("class", "muted")
-        canvas_layout.addWidget(credits)
-
-        repo_btn = QPushButton("GitHub")
-        repo_btn.setFixedHeight(30)
-        repo_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        repo_btn.clicked.connect(lambda: __import__("webbrowser").open("https://github.com/peshk0v/Zapret-Zen"))
-        canvas_layout.addWidget(repo_btn)
-
-        canvas_layout.addStretch(1)
-
-        buttons = QHBoxLayout()
-        buttons.addStretch(1)
-        cancel_btn = QPushButton(self._t("Cancel"))
-        save_btn = QPushButton(self._t("Save"))
-        save_btn.setProperty("class", "primary")
-        cancel_btn.clicked.connect(self.reject)
-        save_btn.clicked.connect(self.accept)
-        buttons.addWidget(cancel_btn)
-        buttons.addWidget(save_btn)
-        layout.addLayout(buttons)
-        self._load()
-
-    def _settings_section(self, parent_layout: QVBoxLayout, title: str, section_id: str = "") -> QFormLayout:
-        frame = QFrame()
-        frame.setProperty("class", "settingsSection")
-        if section_id:
-            frame.setObjectName(f"SettingsSection_{section_id.replace('-', '_')}")
-            self._settings_section_frames[section_id] = frame
-        section_layout = QVBoxLayout(frame)
-        section_layout.setContentsMargins(14, 12, 14, 14)
-        section_layout.setSpacing(10)
-        label = QLabel(title)
-        label.setProperty("class", "title")
-        section_layout.addWidget(label)
-        form = QFormLayout()
-        form.setLabelAlignment(Qt.AlignmentFlag.AlignLeft)
-        form.setFormAlignment(Qt.AlignmentFlag.AlignTop)
-        form.setHorizontalSpacing(12)
-        form.setVerticalSpacing(9)
-        section_layout.addLayout(form)
-        parent_layout.addWidget(frame)
-        return form
-
-    def scroll_to_component_settings(self, component_id: str) -> None:
-        target = str(component_id or "").strip()
-        if target == "tg":
-            target = "tg-ws-proxy"
-        self._pending_scroll_section = target
-        QTimer.singleShot(0, self._scroll_to_pending_section)
-        QTimer.singleShot(140, self._scroll_to_pending_section)
-
-    def _scroll_to_pending_section(self) -> None:
-        target = self._pending_scroll_section
-        if not target or self._settings_scroll is None:
-            return
-        frame = self._settings_section_frames.get(target)
-        if frame is None or not frame.isVisible():
-            return
-        try:
-            self._settings_scroll.ensureWidgetVisible(frame, 18, 18)
-        except Exception:
-            pass
-
-    def _t(self, first: str, second: str | None = None) -> str:
-        if second is not None:
-            return first if self.context.settings.get().language == "ru" else second
-        return _tr.t(first)
-
-    def _restart_onboarding(self) -> None:
-        parent = self.parent()
-        self.reject()
-        if parent is not None and hasattr(parent, "_restart_onboarding_from_settings"):
-            QTimer.singleShot(0, getattr(parent, "_restart_onboarding_from_settings"))
-
-    def _load(self) -> None:
-        settings = self.context.settings.get()
-        theme_index = self.theme_combo.findData(settings.theme)
-        self.theme_combo.setCurrentIndex(theme_index if theme_index >= 0 else 0)
-        self._select_combo_value(self.language_combo, settings.language)
-        self.tg_host_input.setText(settings.tg_proxy_host)
-        self.tg_port_input.setText(str(settings.tg_proxy_port))
-        self.tg_secret_input.setText(settings.tg_proxy_secret)
-        self.tg_dc_ip_input.setPlainText(settings.tg_proxy_dc_ip)
-        self.tg_cfproxy_checkbox.setChecked(settings.tg_proxy_cfproxy_enabled)
-        self.tg_cfproxy_priority_checkbox.setChecked(settings.tg_proxy_cfproxy_priority)
-        self.tg_cfproxy_domain_input.setText(settings.tg_proxy_cfproxy_domain)
-        self.tg_fake_tls_input.setText(settings.tg_proxy_fake_tls_domain)
-        self.tg_buf_input.setText(str(settings.tg_proxy_buf_kb))
-        self.tg_pool_input.setText(str(settings.tg_proxy_pool_size))
-        self._sync_tg_media_mode_from_dc_ip(settings.tg_proxy_dc_ip)
-        ipset_idx = self.ipset_mode_combo.findData(settings.zapret_ipset_mode)
-        self.ipset_mode_combo.setCurrentIndex(ipset_idx if ipset_idx >= 0 else 0)
-        game_idx = self.game_mode_combo.findData(settings.zapret_game_filter_mode)
-        self.game_mode_combo.setCurrentIndex(game_idx if game_idx >= 0 else 0)
-        self.zapret_udp_exclude_input.setText(settings.zapret_udp_exclude_ports)
-        self.autostart_checkbox.setChecked(self.context.autostart.is_enabled())
-        self.tray_checkbox.setChecked(settings.start_in_tray)
-        self.auto_components_checkbox.setChecked(settings.auto_run_components)
-        self.check_updates_checkbox.setChecked(settings.check_updates_on_start)
-
-    def load_from_payload(self, payload: dict[str, object]) -> None:
-        self._load()
-        theme_index = self.theme_combo.findData(str(payload.get("theme", self.context.settings.get().theme)))
-        self.theme_combo.setCurrentIndex(theme_index if theme_index >= 0 else self.theme_combo.currentIndex())
-        language = str(payload.get("language", self.context.settings.get().language))
-        if language:
-            self._select_combo_value(self.language_combo, language)
-        self.tg_host_input.setText(str(payload.get("tg_proxy_host", self.context.settings.get().tg_proxy_host)))
-        self.tg_port_input.setText(str(payload.get("tg_proxy_port", self.context.settings.get().tg_proxy_port)))
-        self.tg_secret_input.setText(str(payload.get("tg_proxy_secret", self.context.settings.get().tg_proxy_secret)))
-        tg_dc_ip = str(payload.get("tg_proxy_dc_ip", self.context.settings.get().tg_proxy_dc_ip))
-        self.tg_dc_ip_input.setPlainText(tg_dc_ip)
-        self.tg_cfproxy_checkbox.setChecked(bool(payload.get("tg_proxy_cfproxy_enabled", self.context.settings.get().tg_proxy_cfproxy_enabled)))
-        self.tg_cfproxy_priority_checkbox.setChecked(bool(payload.get("tg_proxy_cfproxy_priority", self.context.settings.get().tg_proxy_cfproxy_priority)))
-        self.tg_cfproxy_domain_input.setText(str(payload.get("tg_proxy_cfproxy_domain", self.context.settings.get().tg_proxy_cfproxy_domain)))
-        self.tg_fake_tls_input.setText(str(payload.get("tg_proxy_fake_tls_domain", self.context.settings.get().tg_proxy_fake_tls_domain)))
-        self.tg_buf_input.setText(str(payload.get("tg_proxy_buf_kb", self.context.settings.get().tg_proxy_buf_kb)))
-        self.tg_pool_input.setText(str(payload.get("tg_proxy_pool_size", self.context.settings.get().tg_proxy_pool_size)))
-        self._sync_tg_media_mode_from_dc_ip(tg_dc_ip)
-        ipset_idx = self.ipset_mode_combo.findData(str(payload.get("zapret_ipset_mode", self.context.settings.get().zapret_ipset_mode)))
-        self.ipset_mode_combo.setCurrentIndex(ipset_idx if ipset_idx >= 0 else self.ipset_mode_combo.currentIndex())
-        game_idx = self.game_mode_combo.findData(str(payload.get("zapret_game_filter_mode", self.context.settings.get().zapret_game_filter_mode)))
-        self.game_mode_combo.setCurrentIndex(game_idx if game_idx >= 0 else self.game_mode_combo.currentIndex())
-        self.zapret_udp_exclude_input.setText(str(payload.get("zapret_udp_exclude_ports", self.context.settings.get().zapret_udp_exclude_ports)))
-        self.autostart_checkbox.setChecked(bool(payload.get("autostart_windows", self.context.settings.get().autostart_windows)))
-        self.tray_checkbox.setChecked(bool(payload.get("start_in_tray", self.context.settings.get().start_in_tray)))
-        self.auto_components_checkbox.setChecked(bool(payload.get("auto_run_components", self.context.settings.get().auto_run_components)))
-        self.check_updates_checkbox.setChecked(bool(payload.get("check_updates_on_start", self.context.settings.get().check_updates_on_start)))
-
-    def payload(self) -> dict[str, object]:
-        try:
-            tg_port = int(self.tg_port_input.text().strip() or "1443")
-        except ValueError:
-            tg_port = 1443
-        try:
-            tg_buf_kb = int(self.tg_buf_input.text().strip() or "256")
-        except ValueError:
-            tg_buf_kb = 256
-        try:
-            tg_pool_size = int(self.tg_pool_input.text().strip() or "4")
-        except ValueError:
-            tg_pool_size = 4
-        return {
-            "theme": self.theme_combo.currentData() or "night",
-            "active_profile_id": self.context.settings.get().active_profile_id,
-            "language": self.language_combo.currentData() or self.context.settings.get().language,
-            "mods_index_url": self.context.settings.get().mods_index_url,
-            "tg_proxy_host": self.tg_host_input.text().strip() or "127.0.0.1",
-            "tg_proxy_port": tg_port,
-            "tg_proxy_secret": self.tg_secret_input.text().strip(),
-            "tg_proxy_dc_ip": self.tg_dc_ip_input.toPlainText().strip(),
-            "tg_proxy_cfproxy_enabled": self.tg_cfproxy_checkbox.isChecked(),
-            "tg_proxy_cfproxy_priority": self.tg_cfproxy_priority_checkbox.isChecked(),
-            "tg_proxy_cfproxy_domain": self.tg_cfproxy_domain_input.text().strip(),
-            "tg_proxy_fake_tls_domain": self.tg_fake_tls_input.text().strip(),
-            "tg_proxy_buf_kb": max(4, tg_buf_kb),
-            "tg_proxy_pool_size": max(0, tg_pool_size),
-            "zapret_ipset_mode": self.ipset_mode_combo.currentData() or "loaded",
-            "zapret_game_filter_mode": self.game_mode_combo.currentData() or "disabled",
-            "zapret_udp_exclude_ports": self.zapret_udp_exclude_input.text().strip(),
-            "autostart_windows": self.autostart_checkbox.isChecked(),
-            "start_in_tray": self.tray_checkbox.isChecked(),
-            "auto_run_components": self.auto_components_checkbox.isChecked(),
-            "check_updates_on_start": self.check_updates_checkbox.isChecked(),
-        }
-
-    def _select_combo_value(self, combo: QComboBox, value: str) -> None:
-        index = combo.findData(value)
-        if index >= 0:
-            combo.setCurrentIndex(index)
-
-    def _sync_tg_media_mode_from_dc_ip(self, value: str) -> None:
-        normalized = "\n".join(line.strip() for line in str(value or "").splitlines() if line.strip())
-        mapping = {
-            "2:149.154.167.51\n4:149.154.167.91": "default",
-            "4:149.154.167.91": "media_fix",
-            "": "empty",
-        }
-        mode = mapping.get(normalized, "default")
-        index = self.tg_media_mode_combo.findData(mode)
-        if index >= 0:
-            self.tg_media_mode_combo.blockSignals(True)
-            self.tg_media_mode_combo.setCurrentIndex(index)
-            self.tg_media_mode_combo.blockSignals(False)
-
-    def _apply_tg_media_preset(self) -> None:
-        mode = str(self.tg_media_mode_combo.currentData() or "default")
-        if mode == "media_fix":
-            self.tg_dc_ip_input.setPlainText("4:149.154.167.91")
-        elif mode == "empty":
-            self.tg_dc_ip_input.setPlainText("")
-        else:
-            self.tg_dc_ip_input.setPlainText("2:149.154.167.51\n4:149.154.167.91")
-
-
 # ── SettingsTabBar ──────────────────────────────────────────────────────────
 
 class _SettingsTabButton(QWidget):
@@ -4650,6 +4323,10 @@ class MainWindow(QMainWindow):
         self._settings_diag_progress_bar: QProgressBar | None = None
         self._settings_diag_task_id: str | None = None
         self._settings_diag_cancelled = False
+        self._tg_tuning_dialog: AppDialog | None = None
+        self._tg_tuning_status_label: QLabel | None = None
+        self._tg_tuning_progress_bar: QProgressBar | None = None
+        self._tg_tuning_task_id: str | None = None
         self._loading_action = "connect"
         self._windows_taskbar = WindowsTaskbarIntegration()
         self._taskbar_progress_active = False
@@ -4730,8 +4407,6 @@ class MainWindow(QMainWindow):
         self._page_payload_cache: dict[str, object] = {}
         self._state_generation = 0
         self._task_generation: dict[str, int] = {}
-        self._settings_dialog: SettingsDialog | None = None
-        self._settings_dialog_signature: tuple[str, str] | None = None
         self._pending_settings_payload: dict[str, object] | None = None
         self._settings_save_revision = 0
         self._settings_save_acked_revision = 0
@@ -5430,11 +5105,11 @@ class MainWindow(QMainWindow):
 
         QTimer.singleShot(900, _refresh_current)
         QTimer.singleShot(1800, _refresh_rest)
-        QTimer.singleShot(2600, self._prime_cached_dialogs)
         if not self._onboarding_active:
             QTimer.singleShot(3600, self._maybe_run_first_general_autotest)
         QTimer.singleShot(4800, self._check_updates_on_start)
         QTimer.singleShot(5600, self._check_component_updates_background)
+        QTimer.singleShot(9000, self._maybe_run_first_tg_proxy_tuning)
 
     def _check_component_updates_background(self) -> None:
         if self._launch_hidden:
@@ -7826,6 +7501,7 @@ class MainWindow(QMainWindow):
         def _section(title):
             frame = QFrame()
             frame.setProperty("class", "settingsSection")
+            frame.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
             fl = QVBoxLayout(frame)
             fl.setContentsMargins(16, 14, 16, 14)
             fl.setSpacing(10)
@@ -7910,7 +7586,26 @@ class MainWindow(QMainWindow):
         tg_section.addWidget(QLabel("Pool size"))
         tg_section.addWidget(tg_pool)
 
-        layout.addStretch(1)
+        tune_row = QWidget()
+        tune_row.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, False)
+        tune_layout = QHBoxLayout(tune_row)
+        tune_layout.setContentsMargins(0, 8, 0, 0)
+        tune_layout.setSpacing(8)
+        tune_fast_btn = QPushButton(self._t("Быстрый подбор моста", "Pick bridge fast"))
+        tune_fast_btn.setProperty("class", "primary")
+        tune_fast_btn.setMinimumHeight(36)
+        tune_fast_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        tune_fast_btn.clicked.connect(lambda: self._start_tg_proxy_tuning_from_settings("fast"))
+        tune_layout.addWidget(tune_fast_btn, 1)
+        tune_full_btn = QPushButton(self._t("Полный подбор", "Pick best settings"))
+        tune_full_btn.setProperty("class", "primary")
+        tune_full_btn.setMinimumHeight(36)
+        tune_full_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        tune_full_btn.clicked.connect(lambda: self._start_tg_proxy_tuning_from_settings("full"))
+        tune_layout.addWidget(tune_full_btn, 1)
+        tg_section.addWidget(tune_row)
+        tg_section.addStretch(1)
+
         return page, ctrl
 
     def _build_files_settings_page(self) -> tuple[QWidget, dict]:
@@ -8991,38 +8686,6 @@ class MainWindow(QMainWindow):
         animation.start()
 
 
-    def _open_settings_dialog(self, target_component_id: str = "") -> None:
-        signature = (self.context.settings.get().theme, self.context.settings.get().language)
-        if self._settings_dialog is None or self._settings_dialog_signature != signature:
-            if self._settings_dialog is not None:
-                self._settings_dialog.deleteLater()
-            self._settings_dialog = SettingsDialog(self, self.context)
-        self._settings_dialog_signature = signature
-        dialog = self._settings_dialog
-        if self._pending_settings_payload is not None:
-            dialog.load_from_payload(self._pending_settings_payload)
-        else:
-            dialog._load()
-        dialog.prepare_and_center()
-        if target_component_id:
-            dialog.scroll_to_component_settings(target_component_id)
-        if dialog.exec():
-            before = self.context.settings.get()
-            payload = dialog.payload()
-            if signature != (str(payload["theme"]), str(payload["language"])):
-                self._settings_dialog = None
-                self._settings_dialog_signature = None
-            QTimer.singleShot(0, lambda p=payload, b=before: self._apply_settings_payload(b, p))
-
-    def _open_component_settings(self, component_id: str) -> None:
-        target = str(component_id or "").strip()
-        if target == "zapret":
-            QTimer.singleShot(0, self._show_logs_files_dialog)
-            return
-        if target != "tg-ws-proxy":
-            return
-        QTimer.singleShot(0, lambda t=target: self._open_settings_dialog(t))
-
     def _apply_settings_payload(self, before, payload: dict[str, object]) -> None:
         effective_payload = dict(payload)
         before_theme = str(getattr(before, "theme", self.context.settings.get().theme))
@@ -9071,11 +8734,6 @@ class MainWindow(QMainWindow):
         previous_updates = self.updatesEnabled()
         self.setUpdatesEnabled(False)
         try:
-            if self._settings_dialog is not None:
-                if not self._settings_dialog.isVisible():
-                    self._settings_dialog.deleteLater()
-                    self._settings_dialog = None
-            self._settings_dialog_signature = None
             self._icon_cache.clear()
             self._service_icon_cache.clear()
             self._service_check_cache.clear()
@@ -9178,13 +8836,96 @@ class MainWindow(QMainWindow):
         if self.context.backend is not None and self._settings_diag_task_id:
             self.context.backend.cancel(self._settings_diag_task_id)
 
-    def _prime_cached_dialogs(self) -> None:
-        if self._launch_hidden:
+    def _maybe_run_first_tg_proxy_tuning(self) -> None:
+        if self._launch_hidden or self._onboarding_active:
             return
-        signature = (self.context.settings.get().theme, self.context.settings.get().language)
-        if self._settings_dialog is None or self._settings_dialog_signature != signature:
-            self._settings_dialog = SettingsDialog(self, self.context)
-            self._settings_dialog_signature = signature
+        if self._tg_tuning_task_id or self._tg_tuning_dialog is not None:
+            return
+        settings = self.context.settings.get()
+        if settings.tg_proxy_tuning_done:
+            return
+        if "telegram-desktop" not in (settings.selected_service_ids or []):
+            return
+        if "tg-ws-proxy" not in settings.enabled_component_ids:
+            return
+        if self._skip_autosettings:
+            self._submit_backend_task("set_tg_proxy_tuning_done", {"done": True})
+            return
+        message = self._t(
+            "Подобрать настройки для TG WS Proxy? Проверим мосты и прямое соединение и применим лучший вариант.",
+            "Pick the fastest TG WS Proxy settings? Bridges and the direct connection will be tested and the best option applied.",
+        )
+        dialog = AppDialog(self, self.context, self._t("Подобрать настройки", "Pick best settings"))
+        label = QLabel(message)
+        label.setWordWrap(True)
+        dialog.body_layout.addWidget(label)
+        btn_row = QHBoxLayout()
+        btn_row.setSpacing(8)
+        btn_row.addStretch()
+        tune_btn = QPushButton(self._t("Подобрать"))
+        tune_btn.setObjectName("DialogPrimaryButton")
+        tune_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        tune_btn.setMinimumHeight(36)
+        tune_btn.clicked.connect(lambda: dialog.done(1))
+        btn_row.addWidget(tune_btn)
+        skip_btn = QPushButton(self._t("Больше не предлагать"))
+        skip_btn.setObjectName("DialogSecondaryButton")
+        skip_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        skip_btn.setMinimumHeight(36)
+        skip_btn.clicked.connect(lambda: dialog.done(2))
+        btn_row.addWidget(skip_btn)
+        dialog.body_layout.addLayout(btn_row)
+        result = dialog.exec()
+        if result == 1:
+            self._run_tg_proxy_tuning_popup("fast")
+        else:
+            self._submit_backend_task("set_tg_proxy_tuning_done", {"done": True})
+
+    def _start_tg_proxy_tuning_from_settings(self, mode: str = "full") -> None:
+        self._run_tg_proxy_tuning_popup(mode)
+
+    def _run_tg_proxy_tuning_popup(self, mode: str = "full") -> None:
+        if self._tg_tuning_task_id or self._tg_tuning_dialog is not None:
+            return
+        dialog = AppDialog(self, self.context, self._t("Подобрать настройки", "Pick best settings"))
+        label = QLabel(
+            self._t(
+                "Сейчас приложение проверит мосты Cloudflare и прямое соединение, чтобы подобрать самые быстрые настройки.",
+                "The app will now test Cloudflare bridges and the direct connection to pick the fastest settings.",
+            )
+        )
+        label.setWordWrap(True)
+        dialog.body_layout.addWidget(label)
+        status = QLabel(self._t("Preparing..."))
+        status.setProperty("class", "muted")
+        dialog.body_layout.addWidget(status)
+        bar = QProgressBar()
+        bar.setRange(0, 100)
+        bar.setValue(0)
+        dialog.body_layout.addWidget(bar)
+        dialog.prepare_and_center()
+        dialog.show()
+        self._tg_tuning_dialog = dialog
+        self._tg_tuning_status_label = status
+        self._tg_tuning_progress_bar = bar
+        dialog.rejected.connect(self._cancel_tg_proxy_tuning)
+        self._tg_tuning_task_id = self._submit_backend_task(
+            "run_tg_proxy_tuning",
+            {"mode": mode},
+            action_id="__tg_tuning__",
+        )
+
+    def _cancel_tg_proxy_tuning(self) -> None:
+        if self.context.backend is not None and self._tg_tuning_task_id:
+            self.context.backend.cancel(self._tg_tuning_task_id)
+
+    def _close_tg_proxy_tuning_dialog(self) -> None:
+        if self._tg_tuning_dialog is not None:
+            self._tg_tuning_dialog.accept()
+        self._tg_tuning_dialog = None
+        self._tg_tuning_status_label = None
+        self._tg_tuning_progress_bar = None
+        self._tg_tuning_task_id = None
 
     def _submit_backend_task(self, action: str, payload: dict[str, object] | None = None, *, action_id: str | None = None) -> str:
         if self.context.backend is None:
@@ -9492,6 +9233,28 @@ class MainWindow(QMainWindow):
                 self._component_update_queue_index = 0
                 QTimer.singleShot(0, self._show_next_component_update)
             return
+        if action == "run_tg_proxy_tuning":
+            self._close_tg_proxy_tuning_dialog()
+            if not isinstance(payload, dict):
+                return
+            status = str(payload.get("status", "") or "")
+            title = self._t("Подобрать настройки", "Pick best settings")
+            if status == "ok":
+                summary = str(payload.get("summary", "") or "")
+                self._show_info(title, summary)
+            else:
+                error = str(
+                    payload.get(
+                        "error",
+                        self._t(
+                            "Не удалось подобрать настройки. Проверьте подключение к интернету.",
+                            "Could not pick settings. Check your internet connection.",
+                        ),
+                    )
+                )
+                self._show_error(title, error)
+            self._mark_dirty("dashboard", "services", "components", "mods", "files", "logs", "tray")
+            return
 
     def _on_backend_task_failed(self, message: dict) -> None:
         task_id = str(message.get("id", ""))
@@ -9555,6 +9318,10 @@ class MainWindow(QMainWindow):
             self._settings_diag_dialog = None
             self._settings_diag_status_label = None
             self._settings_diag_progress_bar = None
+        if action == "run_tg_proxy_tuning":
+            self._close_tg_proxy_tuning_dialog()
+            self._show_error(self._backend_error_title(source), error)
+            return
         if action == "install_mod":
             if str(action_id).startswith("mod:"):
                 self._pending_mod_add_ids.discard(str(action_id)[4:])
@@ -9570,7 +9337,7 @@ class MainWindow(QMainWindow):
         if source:
             return source
         normalized = (action or "").strip().lower()
-        if "tg_ws_proxy" in normalized or "tg-ws-proxy" in normalized or "telegram" in normalized:
+        if "tg_ws_proxy" in normalized or "tg-ws-proxy" in normalized or "tg_proxy" in normalized or "telegram" in normalized:
             return "tg-ws-proxy"
         if "zapret" in normalized or "general" in normalized or "merge" in normalized:
             return "zapret"
@@ -9753,6 +9520,15 @@ class MainWindow(QMainWindow):
                         f"Checking: {str(payload.get('name', '') or '')}",
                     )
                 )
+        if action == "run_tg_proxy_tuning" and isinstance(payload, dict):
+            if self._tg_tuning_progress_bar is not None:
+                total = max(1, int(payload.get("total", 1) or 1))
+                current = max(0, min(total, int(payload.get("current", 0) or 0)))
+                self._tg_tuning_progress_bar.setMaximum(total)
+                self._tg_tuning_progress_bar.setValue(current)
+            if self._tg_tuning_status_label is not None:
+                name = str(payload.get("name", "") or str(payload.get("stage", "") or ""))
+                self._tg_tuning_status_label.setText(self._t(f"Проверка: {name}", f"Working: {name}"))
 
     def _apply_theme(self) -> None:
         load_theme_registry(self.context.paths.themes_dir)
@@ -13891,6 +13667,7 @@ class MainWindow(QMainWindow):
             self._pump_isolated_profile_benchmark()
             self.refresh_all()
             QTimer.singleShot(0, self._restore_sidebar_after_onboarding)
+            QTimer.singleShot(2500, self._maybe_run_first_tg_proxy_tuning)
             return
         self._stop_onboarding_glow_orbit()
         pixmap = self._onboarding_widget.grab()
@@ -13922,6 +13699,7 @@ class MainWindow(QMainWindow):
             overlay.hide()
             overlay.deleteLater()
             QTimer.singleShot(80, self._restore_sidebar_after_onboarding)
+            QTimer.singleShot(2500, self._maybe_run_first_tg_proxy_tuning)
 
         anim.finished.connect(_finish)
         overlay._finish_fade_animation = anim  # type: ignore[attr-defined]

@@ -20,6 +20,14 @@ from zapret_zen.services.service_catalog import (
     SERVICE_PRESETS,
     SERVICE_PRESET_IDS,
 )
+from zapret_zen.services.tg_proxy_tuner import (
+    collect_bridge_domains,
+    decide_tuning,
+    parse_dc_ids,
+    parse_dc_ips,
+    probe_bridges,
+    probe_direct,
+)
 
 def _snapshot(context) -> dict[str, Any]:
     settings = context.settings.get()
@@ -264,7 +272,7 @@ def _worker_main(task_queue, result_queue) -> None:
 
 def _action_error_source(action: str) -> str:
     normalized = (action or "").strip().lower()
-    if "tg_ws_proxy" in normalized or "tg-ws-proxy" in normalized or "telegram" in normalized:
+    if "tg_ws_proxy" in normalized or "tg-ws-proxy" in normalized or "tg_proxy" in normalized or "telegram" in normalized:
         return "tg-ws-proxy"
     if "zapret" in normalized or "general" in normalized or "merge" in normalized:
         return "zapret"
@@ -1151,6 +1159,87 @@ def _handle_update_tg_ws_proxy_runtime(context, payload, emit_progress):
     result = context.processes.update_tg_ws_proxy_runtime()
     result.update(_snapshot(context))
     return result
+
+
+@_register_action("run_tg_proxy_tuning")
+def _handle_run_tg_proxy_tuning(context, payload, emit_progress):
+    mode = str((payload or {}).get("mode", "full") or "full").strip().lower()
+    current = context.settings.get()
+    bridge_domains = collect_bridge_domains(
+        context.storage.paths.runtime_dir,
+        current.tg_proxy_cfproxy_domain,
+    )
+    total = len(bridge_domains) + (2 if mode != "fast" else 1)
+    steps = 0
+
+    def emit(stage: str, name: str) -> None:
+        nonlocal steps
+        steps += 1
+        if emit_progress is not None:
+            emit_progress(
+                {
+                    "stage": stage,
+                    "current": steps,
+                    "total": total,
+                    "name": name,
+                }
+            )
+
+    emit("bridges", "Проверка мостов")
+    dc_ids = parse_dc_ids(current.tg_proxy_dc_ip)
+    bridge_results = probe_bridges(bridge_domains, dc_ids)
+    report = [
+        {"kind": "bridge", "name": item["domain"], "latency": item["latency"]}
+        for item in bridge_results
+    ]
+    direct_results = []
+    if mode != "fast":
+        emit("direct", "Проверка прямого соединения")
+        dc_ips = parse_dc_ips(current.tg_proxy_dc_ip)
+        direct_results = probe_direct(dc_ips)
+        report.extend(
+            {"kind": "direct", "name": item["ip"], "latency": item["latency"]}
+            for item in direct_results
+        )
+    emit("decide", "Выбор настроек")
+    decision = decide_tuning(bridge_results, direct_results)
+    changes = dict(decision["changes"])
+    changes["tg_proxy_tuning_done"] = True
+    emit("apply", "Применение настроек")
+    context.settings.update(**changes)
+    states = {item.component_id: item for item in context.processes.list_states()}
+    if states.get("tg-ws-proxy") and states["tg-ws-proxy"].status == "running":
+        try:
+            context.processes.stop_component("tg-ws-proxy")
+        except Exception:
+            pass
+        try:
+            context.processes.start_component("tg-ws-proxy")
+        except Exception:
+            pass
+    result = {
+        "status": "ok",
+        "mode": decision["mode"],
+        "summary": decision["summary"],
+        "applied": changes,
+        "report": report,
+        "counts": {
+            "bridges_tested": len(bridge_domains),
+            "bridges_ok": len(bridge_results),
+            "direct_ok": len(direct_results),
+        },
+    }
+    result.update(_snapshot(context))
+    return result
+
+
+@_register_action("set_tg_proxy_tuning_done")
+def _handle_set_tg_proxy_tuning_done(context, payload, emit_progress):
+    done = bool(payload.get("done", True))
+    current = context.settings.get()
+    current.tg_proxy_tuning_done = done
+    context.settings.save()
+    return _snapshot(context)
 
 
 @_register_action("check_component_updates")
