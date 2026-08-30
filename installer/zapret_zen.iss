@@ -60,15 +60,48 @@ SetupIconFile={#SetupIcon}
 Name: "english"; MessagesFile: "compiler:Default.isl"
 Name: "russian"; MessagesFile: "compiler:Languages\Russian.isl"
 
+[CustomMessages]
+; English
+english.UpdatePageTitle=Update Zapret-Zen
+english.UpdatePageDescription=An existing installation was found. The installer will update the program in place.
+english.UpdateBody=Installed version: %1%nInstall path: %2%n%nInstalling version: %3%nYour settings, domain/IP lists, installed mods and custom themes will be preserved.
+; Русский
+russian.UpdatePageTitle=Обновление Zapret-Zen
+russian.UpdatePageDescription=Обнаружена существующая установка. Установщик обновит программу.
+russian.UpdateBody=Установленная версия: %1%nПуть установки: %2%n%nБудет установлена версия: %3%nВаши настройки, списки доменов/IP, установленные моды и пользовательские темы будут сохранены.
+
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
 [Files]
+; Preserve existing user domain/IP lists when updating (do not overwrite)
 #ifdef X64Src
-Source: "{#X64Src}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Check: IsX64
+  #if DirExists(X64Src + "\configs")
+Source: "{#X64Src}\configs\*"; DestDir: "{app}\configs"; Flags: ignoreversion recursesubdirs createallsubdirs onlyifdoesntexist; Check: IsX64
+  #endif
 #endif
 #ifdef Arm64Src
-Source: "{#Arm64Src}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Check: IsArm64
+  #if DirExists(Arm64Src + "\configs")
+Source: "{#Arm64Src}\configs\*"; DestDir: "{app}\configs"; Flags: ignoreversion recursesubdirs createallsubdirs onlyifdoesntexist; Check: IsArm64
+  #endif
+#endif
+; Preserve installed mods when updating (do not overwrite)
+#ifdef X64Src
+  #if DirExists(X64Src + "\mods")
+Source: "{#X64Src}\mods\*"; DestDir: "{app}\mods"; Flags: ignoreversion recursesubdirs createallsubdirs onlyifdoesntexist; Check: IsX64
+  #endif
+#endif
+#ifdef Arm64Src
+  #if DirExists(Arm64Src + "\mods")
+Source: "{#Arm64Src}\mods\*"; DestDir: "{app}\mods"; Flags: ignoreversion recursesubdirs createallsubdirs onlyifdoesntexist; Check: IsArm64
+  #endif
+#endif
+; Everything else is refreshed on update
+#ifdef X64Src
+Source: "{#X64Src}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "configs\*,mods\*"; Check: IsX64
+#endif
+#ifdef Arm64Src
+Source: "{#Arm64Src}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs; Excludes: "configs\*,mods\*"; Check: IsArm64
 #endif
 
 [Icons]
@@ -80,8 +113,63 @@ Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#MyAppName}}
 
 [Code]
 const
+  UNINST_KEY = 'Software\Microsoft\Windows\CurrentVersion\Uninstall\{F5A2C73E-9B11-4E6B-8C2D-1A7E5D0B3F91}_is1';
   LEGACY_UNINSTALL_KEY = 'Software\Microsoft\Windows\CurrentVersion\Uninstall\ZapretZen';
   RUN_KEY = 'Software\Microsoft\Windows\CurrentVersion\Run';
+
+var
+  UpdatePage: TWizardPage;
+  UpdateTextLabel: TNewStaticText;
+
+function GetRegString(Key: Integer; SubKeyName, ValueName: String): String;
+var
+  Value: String;
+begin
+  Result := '';
+  if RegQueryStringValue(Key, SubKeyName, ValueName, Value) then
+    Result := Value;
+end;
+
+function GetRegStringAny(SubKeyName, ValueName: String): String;
+begin
+  Result := GetRegString(HKLM64, SubKeyName, ValueName);
+  if Result <> '' then Exit;
+  Result := GetRegString(HKLM32, SubKeyName, ValueName);
+  if Result <> '' then Exit;
+  Result := GetRegString(HKCU64, SubKeyName, ValueName);
+  if Result <> '' then Exit;
+  Result := GetRegString(HKCU32, SubKeyName, ValueName);
+end;
+
+function GetExistingInstallDir(): String;
+begin
+  Result := GetRegStringAny(UNINST_KEY, 'Inno Setup: App Path');
+  if Result <> '' then Exit;
+  Result := GetRegStringAny(UNINST_KEY, 'InstallLocation');
+  if Result <> '' then Exit;
+  Result := GetRegStringAny(LEGACY_UNINSTALL_KEY, 'InstallLocation');
+end;
+
+function GetExistingVersion(): String;
+begin
+  Result := GetRegStringAny(UNINST_KEY, 'DisplayVersion');
+  if Result <> '' then Exit;
+  Result := GetRegStringAny(LEGACY_UNINSTALL_KEY, 'DisplayVersion');
+  if Result <> '' then Exit;
+  Result := GetRegStringAny(LEGACY_UNINSTALL_KEY, 'Version');
+end;
+
+function IsAppInstalled(): Boolean;
+begin
+  Result := GetExistingInstallDir() <> '';
+end;
+
+function GetInstallPath(Param: String): String;
+begin
+  Result := GetExistingInstallDir();
+  if Result = '' then
+    Result := ExpandConstant('{autopf}\Zapret-Zen');
+end;
 
 procedure KillAppImages();
 var
@@ -108,26 +196,25 @@ begin
   Exec('sc.exe', 'delete zapret', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 end;
 
-function GetInstallPath(Param: String): String;
-var
-  InstallDir: String;
-begin
-  if RegQueryStringValue(HKLM64, LEGACY_UNINSTALL_KEY, 'InstallLocation', InstallDir) then
-  begin
-    Result := InstallDir;
-    Exit;
-  end;
-  if RegQueryStringValue(HKCU64, LEGACY_UNINSTALL_KEY, 'InstallLocation', InstallDir) then
-  begin
-    Result := InstallDir;
-    Exit;
-  end;
-  Result := ExpandConstant('{autopf}\Zapret-Zen');
-end;
-
 function IsX64(): Boolean;
 begin
   Result := not IsARM64();
+end;
+
+procedure InitializeWizard();
+begin
+  if IsAppInstalled() then
+  begin
+    UpdatePage := CreateCustomPage(wpWelcome, ExpandConstant('{cm:UpdatePageTitle}'), ExpandConstant('{cm:UpdatePageDescription}'));
+    UpdateTextLabel := TNewStaticText.Create(UpdatePage);
+    UpdateTextLabel.Parent := UpdatePage.Surface;
+    UpdateTextLabel.WordWrap := True;
+    UpdateTextLabel.Left := ScaleX(12);
+    UpdateTextLabel.Top := ScaleY(12);
+    UpdateTextLabel.Width := WizardForm.InnerPage.ClientWidth - ScaleX(24);
+    UpdateTextLabel.Caption := FmtMessage(ExpandConstant('{cm:UpdateBody}'), [
+      GetExistingVersion(), GetExistingInstallDir(), '{#AppVersion}']);
+  end;
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
