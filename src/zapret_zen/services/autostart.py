@@ -60,6 +60,17 @@ class AutostartManager:
             return False
         return False
 
+    def ensure_runs_elevated(self) -> None:
+        if not self._task_exists():
+            if not self._run_entry_exists():
+                return
+            command = self._build_command()
+            if self._create_task(command):
+                self._remove_legacy_run_entries()
+                self.logging.log("info", "Windows autostart migrated from Run entry to scheduled task")
+            return
+        self._create_task(self._build_command())
+
     def _create_task(self, command: str) -> bool:
         proc = self._run_schtasks(
             [
@@ -71,6 +82,9 @@ class AutostartManager:
                 self.TASK_NAME,
                 "/TR",
                 command,
+                "/RL",
+                "HIGHEST",
+                "/IT",
             ]
         )
         if proc.returncode != 0:

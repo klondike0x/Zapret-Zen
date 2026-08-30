@@ -45,14 +45,17 @@ def _set_windows_app_id() -> None:
         return
 
 
-def _ensure_admin_windows(argv: list[str]) -> int:
+def _is_admin_windows() -> bool:
     if not sys.platform.startswith("win"):
-        return 0
+        return True
     try:
-        is_admin = bool(ctypes.windll.shell32.IsUserAnAdmin())
+        return bool(ctypes.windll.shell32.IsUserAnAdmin())
     except Exception:
-        return 0
-    if is_admin:
+        return True
+
+
+def _ensure_admin_windows(argv: list[str]) -> int:
+    if _is_admin_windows():
         return 0
 
     if is_packaged_runtime():
@@ -173,11 +176,7 @@ def _preload_startup_onboarding(context, *, launch_hidden: bool, startup_snapsho
 def _run_uninstall(install_dir_arg: str, silent: bool = False) -> int:
     if not sys.platform.startswith("win"):
         return 0
-    try:
-        is_admin = bool(ctypes.windll.shell32.IsUserAnAdmin())
-    except Exception:
-        is_admin = False
-    if not is_admin:
+    if not _is_admin_windows():
         args = ["--uninstall"]
         if install_dir_arg:
             args.extend(["--install-dir", install_dir_arg])
@@ -242,6 +241,12 @@ def run(argv: list[str] | None = None) -> int:
         _startup_trace(f"run: ensure_admin result={elevate_result}")
         if elevate_result in (2, 3):
             return elevate_result
+    elif not _is_admin_windows():
+        _startup_trace("run: autostart-launch without admin, requesting elevation")
+        elevate_result = _ensure_admin_windows(runtime_argv)
+        _startup_trace(f"run: autostart-launch elevate result={elevate_result}")
+        if elevate_result in (2, 3):
+            return elevate_result
 
     _set_windows_app_id()
     _startup_trace("run: before QApplication")
@@ -276,6 +281,11 @@ def run(argv: list[str] | None = None) -> int:
                 raise RuntimeError("Application context is missing")
             settings = context.settings.get()
             actual_autostart = bool(context.autostart.is_enabled())
+            if actual_autostart:
+                try:
+                    context.autostart.ensure_runs_elevated()
+                except Exception:
+                    pass
             if bool(settings.autostart_windows) != actual_autostart:
                 context.settings.update(autostart_windows=actual_autostart)
                 settings = context.settings.get()
