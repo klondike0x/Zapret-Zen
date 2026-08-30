@@ -249,8 +249,10 @@ class UpdatesManager:
         self,
         update_branch: str = "release",
         progress: Callable[[float | None, int, int, str, str], None] | None = None,
+        *,
+        force: bool = False,
     ) -> dict[str, str]:
-        cached = self._cached_check_result()
+        cached = self._cached_check_result(update_branch=update_branch) if not force else None
         if cached is not None:
             return cached
         try:
@@ -259,16 +261,16 @@ class UpdatesManager:
             payload = self.github.github_json(self.API_RELEASES, timeout=self._METADATA_TIMEOUT, purpose="app-release-metadata", retry=False)
         except Exception as error:
             if is_github_rate_limit_error(error):
-                atom_result = self._fetch_release_via_atom()
+                atom_result = self._fetch_release_via_atom(update_branch)
                 if atom_result is not None:
                     return atom_result
-                stale = self._cached_check_result(ignore_ttl=True)
+                stale = self._cached_check_result(ignore_ttl=True, update_branch=update_branch)
                 if stale is not None:
                     return stale
             self.logging.log("warning", "Failed to fetch latest app release", error=str(error))
             if progress is not None:
                 progress(None, 0, 0, "check-github-fallback", "")
-            sourceforge_result = self._fetch_latest_via_sourceforge(progress)
+            sourceforge_result = self._fetch_latest_via_sourceforge(progress, update_branch)
             if sourceforge_result is not None:
                 return sourceforge_result
             friendly_error = self._friendly_network_error(error)
@@ -290,9 +292,9 @@ class UpdatesManager:
                 "html_url": self.REPO_URL + "/releases",
                 "releases": [],
             }
-        return self._compose_release_result(releases)
+        return self._compose_release_result(releases, update_branch=update_branch)
 
-    def _fetch_release_via_atom(self) -> dict[str, str] | None:
+    def _fetch_release_via_atom(self, update_branch: str = "release") -> dict[str, str] | None:
         try:
             text = self._download_atom_text()
         except Exception as error:
@@ -301,11 +303,12 @@ class UpdatesManager:
         releases = self._normalize_atom_entries(text)
         if not releases:
             return None
-        return self._compose_release_result(releases)
+        return self._compose_release_result(releases, update_branch=update_branch)
 
     def _fetch_latest_via_sourceforge(
         self,
         progress: Callable[[float | None, int, int, str, str], None] | None = None,
+        update_branch: str = "",
     ) -> dict[str, str] | None:
         page_url = self.SOURCEFORGE_PROJECT_URL + "/files/"
         try:
@@ -334,7 +337,7 @@ class UpdatesManager:
         }
         if self._version_key(latest_version) <= self._version_key(__version__):
             result["status"] = "up-to-date"
-        self._cache_check_result(result)
+        self._cache_check_result(result, update_branch=update_branch)
         return result
 
     def _build_sourceforge_asset_url(self, asset_name: str) -> str:
@@ -400,7 +403,7 @@ class UpdatesManager:
             return "The requested update was not found on any mirror. Please try again later."
         return "The update could not be downloaded from any mirror. Please try again later."
 
-    def _compose_release_result(self, releases: list[dict[str, object]]) -> dict[str, str]:
+    def _compose_release_result(self, releases: list[dict[str, object]], *, update_branch: str = "") -> dict[str, str]:
         latest = releases[0]
         release_payload = latest["payload"]
         latest_version = str(latest["version"]).strip() or __version__
@@ -441,7 +444,7 @@ class UpdatesManager:
             "installed_build_at": installed_stamp.isoformat() if installed_stamp else "",
             "releases": newer_releases,
         }
-        self._cache_check_result(result)
+        self._cache_check_result(result, update_branch=update_branch)
         return result
 
     def _request_json(self, url: str, *, timeout: int) -> object:
@@ -457,7 +460,7 @@ class UpdatesManager:
     def _cache_path(self) -> Path:
         return self.storage.paths.cache_dir / self._CACHE_FILE
 
-    def _cached_check_result(self, *, ignore_ttl: bool = False) -> dict[str, str] | None:
+    def _cached_check_result(self, *, ignore_ttl: bool = False, update_branch: str = "") -> dict[str, str] | None:
         try:
             raw = self.storage.read_json(self._cache_path(), default={}) or {}
         except Exception:
@@ -467,6 +470,9 @@ class UpdatesManager:
             return None
         status = str(result.get("status", ""))
         if status not in {"available", "up-to-date"}:
+            return None
+        cached_branch = str(raw.get("branch", "") or "")
+        if update_branch and cached_branch != update_branch:
             return None
         if ignore_ttl:
             return dict(result)
@@ -482,13 +488,13 @@ class UpdatesManager:
             return dict(result)
         return None
 
-    def _cache_check_result(self, result: dict[str, str]) -> None:
+    def _cache_check_result(self, result: dict[str, str], *, update_branch: str = "") -> None:
         if str(result.get("status", "")) not in {"available", "up-to-date"}:
             return
         try:
             self.storage.write_json(
                 self._cache_path(),
-                {"checked_at": datetime.now(timezone.utc).isoformat(), "result": result},
+                {"checked_at": datetime.now(timezone.utc).isoformat(), "branch": update_branch, "result": result},
             )
         except Exception:
             pass

@@ -11538,7 +11538,7 @@ class MainWindow(QMainWindow):
 
         try:
             branch = self.context.settings.get().update_branch
-            release = self.context.updates.fetch_latest_application_release(update_branch=branch, progress=emit_progress)
+            release = self.context.updates.fetch_latest_application_release(update_branch=branch, progress=emit_progress, force=manual)
         except Exception as error:
             release = {
                 "status": "error",
