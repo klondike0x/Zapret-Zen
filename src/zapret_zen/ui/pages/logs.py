@@ -1,9 +1,8 @@
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QEvent, QObject, Qt
 from PySide6.QtWidgets import (
     QComboBox,
-    QHBoxLayout,
     QLabel,
     QListView,
     QStackedWidget,
@@ -13,6 +12,28 @@ from PySide6.QtWidgets import (
 )
 
 from zapret_zen.ui.pages.base import BasePage, PageHost
+from zapret_zen.ui.theme import is_light_theme
+
+
+class _FloatingComboOverlay(QObject):
+    def __init__(self, combo: QComboBox, host: QWidget) -> None:
+        super().__init__(host)
+        self._combo = combo
+        self._host = host
+        host.installEventFilter(self)
+        self.snap()
+
+    def eventFilter(self, obj: QObject, event: QEvent) -> bool:
+        if obj is self._host and event.type() == QEvent.Type.Resize:
+            self.snap()
+        return False
+
+    def snap(self) -> None:
+        self._combo.adjustSize()
+        width = self._host.width()
+        x = max(0, width - self._combo.width() - 12)
+        self._combo.move(x, 10)
+        self._combo.raise_()
 
 
 class LogsPage(BasePage):
@@ -23,27 +44,13 @@ class LogsPage(BasePage):
         self.setProperty("class", "pageRoot")
         self._current_log_source = "all"
         self._pending_logs_payload: dict[str, object] | None = None
-        self._logs_force_scroll_bottom = True
+        self._logs_force_scroll_top = True
+        self._title_label: QLabel | None = None
+        self._float_overlay: _FloatingComboOverlay | None = None
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(1, 0, 1, 12)
+        root.setContentsMargins(16, 18, 16, 18)
         root.setSpacing(10)
-
-        top = QHBoxLayout()
-        top.setContentsMargins(0, 0, 0, 0)
-        label = QLabel(self._t("Логи", "Logs"))
-        label.setProperty("class", "title")
-        self._title_label = label
-        top.addWidget(label)
-
-        self._source_combo = QComboBox()
-        self._source_combo.setObjectName("LogsSourceCombo")
-        self._source_combo.setView(QListView())
-        self._source_combo.currentIndexChanged.connect(self._on_source_changed)
-        self._rebuild_source_combo()
-        top.addWidget(self._source_combo)
-        top.addStretch(1)
-        root.addLayout(top)
 
         self._logs_text = QTextEdit()
         self._logs_text.setReadOnly(True)
@@ -59,6 +66,16 @@ class LogsPage(BasePage):
         self._logs_stack.addWidget(logs_loading)
         self._logs_stack.addWidget(self._logs_text)
         root.addWidget(self._logs_stack)
+
+        self._source_combo = QComboBox()
+        self._source_combo.setObjectName("LogsSourceCombo")
+        self._source_combo.setView(QListView())
+        self._source_combo.currentIndexChanged.connect(self._on_source_changed)
+        self._apply_combo_plate_style()
+        self._rebuild_source_combo()
+        self._source_combo.setParent(self._logs_stack)
+        self._source_combo.show()
+        self._float_overlay = _FloatingComboOverlay(self._source_combo, self._logs_stack)
 
     @property
     def logs_text(self) -> QTextEdit:
@@ -90,6 +107,31 @@ class LogsPage(BasePage):
         if data:
             self._current_log_source = str(data)
 
+    def _apply_combo_plate_style(self) -> None:
+        theme = ""
+        try:
+            theme = str(self.context.settings.get().theme)
+        except Exception:
+            theme = ""
+        dark = not is_light_theme(theme)
+        if theme == "oled":
+            background = "#101215"
+        elif theme == "dark":
+            background = "#15171a"
+        elif dark:
+            background = "#0d1320"
+        else:
+            background = "#f4f7fc"
+        border = "rgba(90, 122, 186, 0.95)" if dark else "rgba(131, 159, 212, 0.95)"
+        self._source_combo.setStyleSheet(
+            "QComboBox {"
+            f"background: {background};"
+            f"border: 1px solid {border};"
+            "border-radius: 10px;"
+            "padding: 4px 10px;"
+            "}"
+        )
+
     def _on_selection_changed(self) -> None:
         cursor = self._logs_text.textCursor()
         if not cursor.hasSelection() and self._pending_logs_payload is not None:
@@ -104,10 +146,10 @@ class LogsPage(BasePage):
         else:
             text = str(lines) if lines else ""
         self._logs_text.setPlainText(text)
-        if self._logs_force_scroll_bottom:
+        if self._logs_force_scroll_top:
             sb = self._logs_text.verticalScrollBar()
             if sb is not None:
-                sb.setValue(sb.maximum())
+                sb.setValue(0)
 
     def refresh(self, payload: object | None = None) -> None:
         if payload is None:

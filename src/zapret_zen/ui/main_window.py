@@ -4499,7 +4499,6 @@ class MainWindow(QMainWindow):
         self._skip_autosettings = skip_autosettings
         self._skip_next_show_focus = launch_hidden
         self._drag_pos: QPoint | None = None
-        self._tray_notifications_shown = False
         self._taskbar_created_message = 0
         self._force_exit = False
         self._shutdown_started = False
@@ -4676,7 +4675,7 @@ class MainWindow(QMainWindow):
         self._logs_loading_label: QLabel | None = None
         self._current_log_source = "all"
         self._pending_logs_payload: dict[str, object] | None = None
-        self._logs_force_scroll_bottom = True
+        self._logs_force_scroll_top = True
         self._logs_live_timer = QTimer(self)
         self._logs_live_timer.setInterval(1000)
         self._logs_live_timer.timeout.connect(self._refresh_logs_live)
@@ -7422,6 +7421,9 @@ class MainWindow(QMainWindow):
         self._logs_loading_label = self._logs_page._loading_label
         self._logs_refresh_btn = None
         self._current_log_source = self._logs_page.current_log_source
+        self._rebuild_logs_source_combo()
+        self._logs_source_combo.currentIndexChanged.connect(self._on_logs_source_changed)
+        self.logs_text.selectionChanged.connect(self._on_logs_selection_changed)
         return self._logs_page
 
     # ── Settings sub-tab builders ───────────────────────────────────────────────
@@ -8974,9 +8976,6 @@ class MainWindow(QMainWindow):
                 if pending == "tray":
                     self.setWindowOpacity(1.0)
                     self.hide()
-                    if not self._tray_notifications_shown:
-                        self.tray_icon.showMessage("Zapret-Zen", self._t("Minimized to tray."), QSystemTrayIcon.MessageIcon.Information, 2200)
-                        self._tray_notifications_shown = True
                 elif pending == "minimize":
                     self.showMinimized()
                     QTimer.singleShot(0, lambda: self.setWindowOpacity(1.0))
@@ -12845,9 +12844,11 @@ class MainWindow(QMainWindow):
                 }
             elif section == "logs":
                 source_id = self._current_log_source
+                lines = list(self.context.logging.read_source_lines(source_id))
+                lines.reverse()
                 payload = {
                     "source": source_id,
-                    "lines": self.context.logging.read_source_lines(source_id),
+                    "lines": lines,
                 }
             else:
                 payload = None
@@ -16534,7 +16535,7 @@ class MainWindow(QMainWindow):
         if self._logs_source_combo is None:
             return
         self._current_log_source = str(self._logs_source_combo.currentData() or "app")
-        self._logs_force_scroll_bottom = True
+        self._logs_force_scroll_top = True
         self.refresh_logs()
 
     def _set_logs_live_enabled(self, enabled: bool) -> None:
@@ -16553,7 +16554,7 @@ class MainWindow(QMainWindow):
 
     def refresh_logs(self, payload: object | None = None) -> None:
         if payload is None:
-            self._logs_force_scroll_bottom = True
+            self._logs_force_scroll_top = True
             if self._logs_stack is not None:
                 self._logs_stack.setCurrentIndex(0)
             self._request_page_refresh("logs")
@@ -16578,22 +16579,22 @@ class MainWindow(QMainWindow):
         scrollbar = self.logs_text.verticalScrollBar()
         old_maximum = scrollbar.maximum()
         old_value = scrollbar.value()
-        distance_from_bottom = max(0, old_maximum - old_value)
-        at_bottom = bool(self._logs_force_scroll_bottom) or distance_from_bottom <= 4
-        self._logs_force_scroll_bottom = False
+        distance_from_top = max(0, old_value - scrollbar.minimum())
+        at_top = bool(self._logs_force_scroll_top) or distance_from_top <= 4
+        self._logs_force_scroll_top = False
         if self._logs_stack is not None:
             self._logs_stack.setCurrentIndex(1)
         self.logs_text.setPlainText("\n".join(lines) if lines else self._t("No logs yet."))
 
         def _restore_scroll_position() -> None:
-            if at_bottom:
-                scrollbar.setValue(scrollbar.maximum())
+            if at_top:
+                scrollbar.setValue(scrollbar.minimum())
             else:
                 target = old_value
                 scrollbar.setValue(min(target, scrollbar.maximum()))
 
         QTimer.singleShot(0, _restore_scroll_position)
-        if at_bottom:
+        if at_top:
             QTimer.singleShot(40, _restore_scroll_position)
 
     def _logs_view_update_locked(self) -> bool:
