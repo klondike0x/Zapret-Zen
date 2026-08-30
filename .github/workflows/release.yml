@@ -219,17 +219,22 @@ jobs:
             --release-dir ".\release_$version" `
             --version $version
 
-      - name: Build universal installer
+      - name: Install Inno Setup
+        shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress
+
+      - name: Build Inno Setup installer
         shell: pwsh
         run: |
           $version = "${{ steps.meta.outputs.version }}"
-          .\scripts\build_nuitka_installer.ps1 -Python python -PayloadDir installer_payload -OutputDir dist_installer -SkipPrepareRelease -Version $version
+          .\scripts\build_inno_installer.ps1 -Python python -ReleaseDir ".\release_$version" -OutputDir dist_installer -Version $version
 
       - name: Place installer into release folder
         shell: pwsh
         run: |
           $version = "${{ steps.meta.outputs.version }}"
-          $installer = Get-ChildItem ".\dist_installer\install_zapretzen_*.exe" | Select-Object -First 1
+          $installer = Get-ChildItem ".\dist_installer\install_zapretzen_*_universal.exe" | Select-Object -First 1
           if ($installer) {
             Copy-Item $installer.FullName ".\release_$version\" -Force
           }

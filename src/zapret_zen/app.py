@@ -10,6 +10,9 @@ import tempfile
 from datetime import datetime
 from pathlib import Path
 
+if sys.platform.startswith("win"):
+    import winreg
+
 from PySide6.QtCore import QObject, QTimer, Qt, Slot
 from PySide6.QtGui import QCloseEvent, QIcon, QImage, QPixmap
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
@@ -173,6 +176,26 @@ def _preload_startup_onboarding(context, *, launch_hidden: bool, startup_snapsho
         return False
 
 
+_INNO_UNINSTALL_KEY = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\F5A2C73E-9B11-4E6B-8C2D-1A7E5D0B3F91_is1"
+_LEGACY_UNINSTALL_KEY = r"Software\Microsoft\Windows\CurrentVersion\Uninstall\ZapretZen"
+
+
+def _registered_install_dir() -> Path | None:
+    if not sys.platform.startswith("win"):
+        return None
+    for root in (winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER):
+        for subkey in (_INNO_UNINSTALL_KEY, _LEGACY_UNINSTALL_KEY):
+            try:
+                with winreg.OpenKey(root, subkey, 0, winreg.KEY_READ) as key:
+                    value, _ = winreg.QueryValueEx(key, "InstallLocation")
+                    path = Path(str(value))
+                    if path.exists():
+                        return path
+            except Exception:
+                continue
+    return None
+
+
 def _run_uninstall(install_dir_arg: str, silent: bool = False) -> int:
     if not sys.platform.startswith("win"):
         return 0
@@ -184,10 +207,19 @@ def _run_uninstall(install_dir_arg: str, silent: bool = False) -> int:
             args.append("--silent")
         return _ensure_admin_windows(args)
 
-    install_dir = Path(install_dir_arg) if install_dir_arg else Path("C:\\Program Files\\Zapret-Zen")
-    uninstaller = install_dir / "uninstall_zapretzen.exe"
-    if uninstaller.exists():
-        args = [str(uninstaller), "--uninstall", "--install-dir", str(install_dir)]
+    if install_dir_arg:
+        install_dir = Path(install_dir_arg)
+    else:
+        install_dir = _registered_install_dir() or Path("C:\\Program Files\\Zapret-Zen")
+    inno_uninstaller = install_dir / "unins000.exe"
+    if inno_uninstaller.exists():
+        args = [str(inno_uninstaller), "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART"]
+        subprocess.Popen(args, cwd=str(install_dir))
+        return 0
+
+    legacy_uninstaller = install_dir / "uninstall_zapretzen.exe"
+    if legacy_uninstaller.exists():
+        args = [str(legacy_uninstaller), "--uninstall", "--install-dir", str(install_dir)]
         if silent:
             args.append("--silent")
         subprocess.Popen(args)
