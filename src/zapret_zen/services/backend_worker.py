@@ -130,6 +130,10 @@ def _sync_telegram_component_from_services(context) -> None:
     else:
         enabled.discard("tg-ws-proxy")
         autostart.discard("tg-ws-proxy")
+    if "zapret" in enabled:
+        autostart.add("zapret")
+    else:
+        autostart.discard("zapret")
     if enabled != set(settings.enabled_component_ids or []) or autostart != set(settings.autostart_component_ids or []):
         context.settings.update(
             enabled_component_ids=sorted(enabled),
@@ -593,6 +597,7 @@ def _handle_set_selected_services(context, payload, emit_progress):
     has_zapret_services = bool(requested - {"telegram-desktop", "ai"})
     if has_zapret_services:
         enabled_components.add("zapret")
+        autostart_components.add("zapret")
     else:
         enabled_components.discard("zapret")
         autostart_components.discard("zapret")
@@ -666,6 +671,14 @@ def _handle_toggle_component_enabled(context, payload, emit_progress):
                 selected_service_ids=ordered,
                 autostart_component_ids=sorted(autostart),
             )
+        if component_id == "zapret":
+            settings = context.settings.get()
+            autostart = {str(item) for item in list(settings.autostart_component_ids or [])}
+            if component.enabled:
+                autostart.add("zapret")
+            else:
+                autostart.discard("zapret")
+            context.settings.update(autostart_component_ids=sorted(autostart))
         result = {"component": asdict(component)}
         result.update(_snapshot(context))
         return result

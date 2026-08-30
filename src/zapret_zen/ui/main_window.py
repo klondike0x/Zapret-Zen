@@ -5763,7 +5763,7 @@ class MainWindow(QMainWindow):
         title.setProperty("class", "title")
         row.addWidget(title)
 
-        author = QLabel("by peshk0v ✦ forked from goshkow")
+        author = QLabel("by peshk0v")
         author.setProperty("class", "muted")
         author.setContentsMargins(0, 2, 0, 0)
         row.addWidget(author)
