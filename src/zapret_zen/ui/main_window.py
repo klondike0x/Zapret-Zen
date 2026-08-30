@@ -4500,6 +4500,7 @@ class MainWindow(QMainWindow):
         self._skip_next_show_focus = launch_hidden
         self._drag_pos: QPoint | None = None
         self._tray_notifications_shown = False
+        self._taskbar_created_message = 0
         self._force_exit = False
         self._shutdown_started = False
         self._nav_buttons: list[QToolButton] = []
@@ -8404,6 +8405,29 @@ class MainWindow(QMainWindow):
         self.tray_icon.setToolTip("Zapret-Zen")
         self.tray_icon.show()
         self._rebuild_tray_menu()
+        self._taskbar_created_message = self._register_taskbar_created_message()
+        QTimer.singleShot(700, lambda: self._refresh_tray_icon(kick=True))
+
+    @staticmethod
+    def _register_taskbar_created_message() -> int:
+        if not sys.platform.startswith("win"):
+            return 0
+        try:
+            return int(ctypes.windll.user32.RegisterWindowMessageW("TaskbarCreated"))  # type: ignore[attr-defined]
+        except Exception:
+            return 0
+
+    def _refresh_tray_icon(self, *, kick: bool = False) -> None:
+        if getattr(self, "tray_icon", None) is None:
+            return
+        try:
+            self.tray_icon.setIcon(self._runtime_window_icon())
+            self.tray_icon.setToolTip("Zapret-Zen")
+            if kick:
+                self.tray_icon.hide()
+            self.tray_icon.show()
+        except Exception:
+            pass
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
         if self._active_emoji_popup is not None and self._active_emoji_popup.isVisible():
@@ -8461,6 +8485,9 @@ class MainWindow(QMainWindow):
         if sys.platform.startswith("win"):
             try:
                 msg = ctypes.wintypes.MSG.from_address(int(message))  # type: ignore[attr-defined]
+                taskbar_id = getattr(self, "_taskbar_created_message", 0)
+                if taskbar_id and int(msg.message) == int(taskbar_id):
+                    QTimer.singleShot(0, lambda: self._refresh_tray_icon(kick=True))
                 wm_powerbroadcast = 0x0218
                 pbt_apmsuspend = 0x0004
                 pbt_apmresumeautomatic = 0x0012
@@ -8498,6 +8525,7 @@ class MainWindow(QMainWindow):
             self._mark_dirty("dashboard", "components", "tray")
 
     def _handle_system_resume(self) -> None:
+        self._refresh_tray_icon()
         if not self._resume_restart_pending:
             return
         restart_ids = list(self._resume_component_ids)
@@ -8514,6 +8542,7 @@ class MainWindow(QMainWindow):
 
     def _restore_from_tray(self) -> None:
         self._sync_window_icon()
+        self._refresh_tray_icon()
         if self._window_opacity_animation is not None:
             self._window_opacity_animation.stop()
         self._window_fade_pending_action = None
