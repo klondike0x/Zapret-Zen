@@ -4400,6 +4400,8 @@ class MainWindow(QMainWindow):
         self._component_update_dialog: AppDialog | None = None
         self._component_update_label: QLabel | None = None
         self._last_prompted_update_version = ""
+        self._compositor_fallback_applied = False
+        self._compositor_fallback_probe_started = False
         self._resume_component_ids: list[str] = []
         self._resume_restart_pending = False
         self._partial_restart_count = 0
@@ -5081,6 +5083,7 @@ class MainWindow(QMainWindow):
         self._sync_nav_highlight(animated=self._nav_highlight_initialized)
         if not self._nav_highlight_initialized:
             self._nav_highlight_initialized = True
+        self._schedule_compositor_fallback_probe()
         if self._skip_next_show_fade:
             self._skip_next_show_fade = False
             self.setWindowOpacity(1.0)
@@ -5094,6 +5097,76 @@ class MainWindow(QMainWindow):
             self._skip_next_show_focus = False
             return
         QTimer.singleShot(0, lambda: _bring_widget_to_front(self))
+
+    def _schedule_compositor_fallback_probe(self) -> None:
+        if self._compositor_fallback_applied or self._compositor_fallback_probe_started:
+            return
+        if not sys.platform.startswith("win"):
+            return
+        self._compositor_fallback_probe_started = True
+
+        def _probe(attempt: int = 0) -> None:
+            if self._compositor_fallback_applied:
+                return
+            if not self.isVisible():
+                if attempt < 3:
+                    QTimer.singleShot(250, lambda: _probe(attempt + 1))
+                return
+            handle = self.windowHandle()
+            if handle is None or not handle.isExposed():
+                if attempt < 4:
+                    QTimer.singleShot(250, lambda: _probe(attempt + 1))
+                return
+            QTimer.singleShot(160, self._apply_compositor_fallback_if_opaque)
+
+        QTimer.singleShot(200, lambda: _probe(0))
+
+    def _apply_compositor_fallback_if_opaque(self) -> None:
+        if self._compositor_fallback_applied:
+            return
+        if os.environ.get("ZAPRET_ZEN_FORCE_OPAQUE_WINDOW") == "1":
+            self._apply_compositor_opaque_fallback()
+            return
+        image = self.grab().toImage()
+        if image.isNull() or image.width() <= 0 or image.height() <= 0:
+            self._compositor_fallback_probe_started = False
+            return
+        image = image.convertToFormat(QImage.Format.Format_ARGB32_Premultiplied)
+        width = image.width()
+        height = image.height()
+        try:
+            bits = bytes(image.constBits())
+        except Exception:
+            return
+        stride = image.bytesPerLine()
+        margin = min(3, width // 2, height // 2)
+        has_alpha = False
+        for y in range(height):
+            ring_row = y < margin or y >= height - margin
+            start = 0 if ring_row else margin
+            end = width if ring_row else width - margin
+            if end <= start:
+                end = start + 1
+            base = y * stride
+            for x in range(start, end):
+                if bits[base + x * 4 + 3] < 255:
+                    has_alpha = True
+                    break
+            if has_alpha:
+                break
+        if has_alpha:
+            return
+        self._apply_compositor_opaque_fallback()
+
+    def _apply_compositor_opaque_fallback(self) -> None:
+        if self._compositor_fallback_applied:
+            return
+        self._compositor_fallback_applied = True
+        shell = self.centralWidget()
+        if shell is not None:
+            shell.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self._apply_theme()
+        self.update()
 
     def _schedule_post_show_sync(self) -> None:
         def _sync() -> None:
@@ -9581,7 +9654,10 @@ class MainWindow(QMainWindow):
         self._service_check_cache.clear()
         chevron = str((self._icons_dir / "chevron_down.svg").resolve())
         check = str((self._icons_dir / "check.svg").resolve())
-        self.setStyleSheet(build_stylesheet(theme, chevron_icon=chevron, check_icon=check, accent=accent))
+        css = build_stylesheet(theme, chevron_icon=chevron, check_icon=check, accent=accent)
+        if self._compositor_fallback_applied:
+            css += f"\n#WindowShell {{ background: {_chrome_surface_color(theme).name()}; }}"
+        self.setStyleSheet(css)
         self._update_power_icon()
         if isinstance(self.power_button, AnimatedPowerButton):
             self.power_button.set_power_theme(theme, accent)
@@ -11751,7 +11827,9 @@ class MainWindow(QMainWindow):
     def _update_prompt_key(release: dict[str, object]) -> str:
         latest_version = str(release.get("latest_version", ""))
         if bool(release.get("is_hotfix")):
-            return f"{latest_version}:{release.get('release_updated_at', '')}"
+            hotfix_id = str(release.get("hotfix_id", ""))
+            if hotfix_id:
+                return f"{latest_version}:{hotfix_id}"
         return latest_version
 
     def _show_update_prompt(self, release: dict[str, str]) -> None:

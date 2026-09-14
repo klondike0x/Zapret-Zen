@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import platform
 import re
@@ -18,7 +19,7 @@ from typing import Callable
 
 from zapret_zen import __version__
 from zapret_zen.domain import UpdateInfo
-from zapret_zen.runtime_env import is_packaged_runtime
+from zapret_zen.runtime_env import is_packaged_runtime, packaged_install_root
 from zapret_zen.services.github_network import DownloadCancelledError, GitHubNetworkClient, is_github_rate_limit_error
 from zapret_zen.services.logging_service import LoggingManager
 from zapret_zen.services.storage import StorageManager
@@ -190,6 +191,49 @@ Add-Content -LiteralPath $logPath -Value ('[' + (Get-Date -Format s) + '] relaun
 Remove-Item $tempRoot -Recurse -Force -ErrorAction SilentlyContinue
 Start-Sleep -Milliseconds 500
 Remove-Item '{{SELF_DELETE}}' -Force -ErrorAction SilentlyContinue"""
+
+
+_INSTALL_BUILD_STAMP_FILE = "installed_build_stamp.json"
+
+
+def record_installed_build_stamp() -> None:
+    """Persist when the running binary was applied.
+
+    Written once per distinct executable build on that build's first
+    startup.  The file lives in the update-safe ``cache`` directory and
+    survives in-place app updates, so ``_installed_build_timestamp`` can
+    tell whether a similarly-versioned release asset is genuinely newer
+    than the build currently installed.
+    """
+    if not (is_packaged_runtime() and sys.platform.startswith("win")):
+        return
+    try:
+        cache_dir = packaged_install_root() / "cache"
+        stamp_path = cache_dir / _INSTALL_BUILD_STAMP_FILE
+        try:
+            current_mtime = datetime.fromtimestamp(Path(sys.executable).stat().st_mtime, tz=timezone.utc).isoformat()
+        except OSError:
+            return
+        try:
+            existing = json.loads(stamp_path.read_text(encoding="utf-8")) if stamp_path.exists() else {}
+        except Exception:
+            existing = {}
+        if str(existing.get("exe_mtime", "")) == current_mtime and "installed_at" in existing:
+            return
+        if not cache_dir.is_dir():
+            return
+        stamp_path.write_text(
+            json.dumps(
+                {
+                    "installed_at": datetime.now(timezone.utc).isoformat(),
+                    "exe_mtime": current_mtime,
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+    except Exception:
+        pass
 
 
 class UpdatesManager:
@@ -405,13 +449,19 @@ class UpdatesManager:
         latest_release_stamp = self._release_timestamp(latest, asset)
         installed_stamp = self._installed_build_timestamp()
         is_newer_version = self._version_key(latest_version) > self._version_key(__version__)
-        is_same_version_hotfix = (
-            self._version_key(latest_version) == self._version_key(__version__)
+        is_same_version_hotfix = bool(
+            asset is not None
+            and self._version_key(latest_version) == self._version_key(__version__)
             and latest_release_stamp is not None
             and installed_stamp is not None
             and latest_release_stamp.timestamp() > installed_stamp.timestamp() + 300
         )
         status = "available" if is_newer_version or is_same_version_hotfix else "up-to-date"
+        hotfix_id = (
+            str(asset.get("digest") or asset.get("id") or asset.get("node_id") or "")
+            if is_same_version_hotfix and asset is not None
+            else ""
+        )
         newer_releases = [
             {
                 "version": str(item["version"]),
@@ -432,6 +482,7 @@ class UpdatesManager:
             "asset_name": str(asset.get("name", "")) if asset else "",
             "asset_url": str(asset.get("browser_download_url", "")) if asset else "",
             "is_hotfix": bool(is_same_version_hotfix),
+            "hotfix_id": hotfix_id,
             "release_updated_at": latest_release_stamp.isoformat() if latest_release_stamp else "",
             "installed_build_at": installed_stamp.isoformat() if installed_stamp else "",
             "releases": newer_releases,
@@ -567,23 +618,36 @@ class UpdatesManager:
         return entries
 
     def _release_timestamp(self, release: dict[str, object], asset: dict[str, object] | None) -> datetime | None:
+        if asset:
+            candidates = [
+                self._parse_github_datetime(str(asset.get("created_at") or "")),
+                self._parse_github_datetime(str(asset.get("updated_at") or "")),
+            ]
+            valid = [item for item in candidates if item is not None]
+            if valid:
+                return max(valid)
         candidates = [
             self._parse_github_datetime(str(release.get("published_at") or "")),
             self._parse_github_datetime(str(release.get("updated_at") or "")),
         ]
-        if asset:
-            candidates.extend(
-                [
-                    self._parse_github_datetime(str(asset.get("created_at") or "")),
-                    self._parse_github_datetime(str(asset.get("updated_at") or "")),
-                ]
-            )
         valid = [item for item in candidates if item is not None]
         return max(valid) if valid else None
 
     def _installed_build_timestamp(self) -> datetime | None:
         if not is_packaged_runtime():
             return None
+        if sys.platform.startswith("win"):
+            try:
+                stamp_path = packaged_install_root() / "cache" / _INSTALL_BUILD_STAMP_FILE
+                if stamp_path.exists():
+                    data = json.loads(stamp_path.read_text(encoding="utf-8"))
+                    installed_at = str(data.get("installed_at", ""))
+                    if installed_at:
+                        parsed = self._parse_github_datetime(installed_at)
+                        if parsed is not None:
+                            return parsed
+            except Exception:
+                pass
         candidates: list[Path] = []
         try:
             candidates.append(Path(sys.executable))

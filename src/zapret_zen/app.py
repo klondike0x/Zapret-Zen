@@ -101,18 +101,42 @@ def _self_heal_windows_install() -> None:
             if exe.exists():
                 uninstall_string = f'"{exe}" --uninstall --install-dir "{install_dir}"'
                 quiet_string = f'{uninstall_string} --silent'
+                display_icon = f'"{exe}",0'
                 repointed = False
+                created_count = 0
+                from zapret_zen import __version__ as _version_string
                 for hive, subkey in _uninstall_registry_keys():
                     try:
-                        with winreg.OpenKey(hive, subkey, 0, winreg.KEY_SET_VALUE) as key:
-                            winreg.SetValueEx(key, "UninstallString", 0, winreg.REG_SZ, uninstall_string)
-                            winreg.SetValueEx(key, "QuietUninstallString", 0, winreg.REG_SZ, quiet_string)
-                            winreg.SetValueEx(key, "DisplayIcon", 0, winreg.REG_SZ, f'"{exe}",0')
-                            repointed = True
+                        handle = winreg.CreateKeyEx(hive, subkey, 0, winreg.KEY_SET_VALUE)
+                    except OSError:
+                        continue
+                    try:
+                        with handle:
+                            def _existing_value(h, name: str) -> str:
+                                try:
+                                    value, _ = winreg.QueryValueEx(h, name)
+                                    return str(value)
+                                except OSError:
+                                    return ""
+                            winreg.SetValueEx(handle, "UninstallString", 0, winreg.REG_SZ, uninstall_string)
+                            winreg.SetValueEx(handle, "QuietUninstallString", 0, winreg.REG_SZ, quiet_string)
+                            winreg.SetValueEx(handle, "DisplayIcon", 0, winreg.REG_SZ, display_icon)
+                            winreg.SetValueEx(handle, "InstallLocation", 0, winreg.REG_SZ, str(install_dir))
+                            if not _existing_value(handle, "DisplayName"):
+                                winreg.SetValueEx(handle, "DisplayName", 0, winreg.REG_SZ, "Zapret-Zen")
+                            if not _existing_value(handle, "DisplayVersion"):
+                                winreg.SetValueEx(handle, "DisplayVersion", 0, winreg.REG_SZ, _version_string)
+                            winreg.SetValueEx(handle, "NoModify", 0, winreg.REG_DWORD, 1)
+                            winreg.SetValueEx(handle, "NoRepair", 0, winreg.REG_DWORD, 1)
+                        created_count += 1
+                        repointed = True
                     except OSError:
                         continue
                 if repointed:
-                    _startup_trace("win: self-heal re-pointed uninstall registry entry to built-in uninstaller (unins000.exe missing)")
+                    trace_message = "win: self-heal re-pointed uninstall registry entry to built-in uninstaller (unins000.exe missing)"
+                    if created_count:
+                        trace_message = "win: self-heal created or re-pointed uninstall registry entries to built-in uninstaller (unins000.exe missing)"
+                    _startup_trace(trace_message)
                 else:
                     _startup_trace("win: self-heal: unins000.exe missing and no uninstall registry entry found")
     except Exception as error:
@@ -402,6 +426,8 @@ def run(argv: list[str] | None = None) -> int:
     _set_windows_app_id()
     _configure_frozen_window_environment()
     _self_heal_windows_install()
+    from zapret_zen.services.updates import record_installed_build_stamp
+    record_installed_build_stamp()
     _startup_trace("run: before QApplication")
     app = QApplication(sys.argv)
     _startup_trace("run: QApplication created")
