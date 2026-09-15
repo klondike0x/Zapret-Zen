@@ -150,7 +150,7 @@ def _build_base_css() -> tuple[str, str]:
         font-size: 10pt;
     }
     #WindowShell {
-        background: #0f1420;
+        background: #101725;
     }
     QStackedWidget, QStackedWidget > QWidget, QWidget#PagesShell, QStackedWidget#PagesStack {
         background: transparent;
@@ -163,18 +163,15 @@ def _build_base_css() -> tuple[str, str]:
     }
     #RootFrame {
         background: #101725;
-        border: 1px solid #24304a;
-        border-radius: 16px;
+        border: none;
+        border-radius: 0px;
     }
     #TitleBar {
         background: #101726;
         border: none;
-        border-top-left-radius: 16px;
-        border-top-right-radius: 16px;
     }
     #Sidebar {
         background: #101726;
-        border-bottom-left-radius: 16px;
     }
     #Content {
         background: transparent;
@@ -195,14 +192,12 @@ def _build_base_css() -> tuple[str, str]:
     }
     #DialogRoot {
         background: #151f33;
-        border: 1px solid #243550;
-        border-radius: 12px;
+        border: none;
+        border-radius: 0px;
     }
     #DialogTitleBar {
         background: transparent;
         border: none;
-        border-top-left-radius: 12px;
-        border-top-right-radius: 12px;
     }
     #DialogBody {
         background: transparent;
@@ -235,8 +230,8 @@ def _build_base_css() -> tuple[str, str]:
         border: none;
     }
     QFrame[class="settingsSection"] {
-        background: #141f32;
-        border: 1px solid #243550;
+        background: transparent;
+        border: none;
         border-radius: 14px;
     }
     #LoadingOverlay {
@@ -764,7 +759,7 @@ def _build_base_css() -> tuple[str, str]:
         font-size: 10pt;
     }
     #WindowShell {
-        background: #eef2f8;
+        background: #f3f6fd;
     }
     QStackedWidget, QStackedWidget > QWidget, QWidget#PagesShell, QStackedWidget#PagesStack {
         background: transparent;
@@ -777,18 +772,15 @@ def _build_base_css() -> tuple[str, str]:
     }
     #RootFrame {
         background: #f3f6fd;
-        border: 1px solid #d2ddeb;
-        border-radius: 16px;
+        border: none;
+        border-radius: 0px;
     }
     #TitleBar {
         background: #f3f6fd;
         border: none;
-        border-top-left-radius: 16px;
-        border-top-right-radius: 16px;
     }
     #Sidebar {
         background: #f3f6fd;
-        border-bottom-left-radius: 16px;
     }
     #Content {
         background: transparent;
@@ -809,14 +801,12 @@ def _build_base_css() -> tuple[str, str]:
     }
     #DialogRoot {
         background: #ffffff;
-        border: 1px solid #d2ddeb;
-        border-radius: 12px;
+        border: none;
+        border-radius: 0px;
     }
     #DialogTitleBar {
         background: transparent;
         border: none;
-        border-top-left-radius: 12px;
-        border-top-right-radius: 12px;
     }
     #DialogBody {
         background: transparent;
@@ -849,8 +839,8 @@ def _build_base_css() -> tuple[str, str]:
         border: none;
     }
     QFrame[class="settingsSection"] {
-        background: #ffffff;
-        border: 1px solid #eef3fa;
+        background: transparent;
+        border: none;
         border-radius: 14px;
     }
     #LoadingOverlay {
@@ -1583,6 +1573,9 @@ def build_stylesheet(theme: str, chevron_icon: str = "", check_icon: str = "", a
             )
             tint_name = tint.name()
             css += f"""
+    #WindowShell {{
+        background: {tint_name};
+    }}
     #RootFrame {{
         background: {tint_name};
     }}

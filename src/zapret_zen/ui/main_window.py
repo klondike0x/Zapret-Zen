@@ -3054,20 +3054,6 @@ def _chrome_surface_color(theme: str) -> QColor:
     return QColor("#101726")
 
 
-_WINDOW_SHADOW_LAYERS: tuple[tuple[int, int], ...] = ((10, 8), (6, 16), (3, 30))
-_LIGHT_WINDOW_SHADOW_LAYERS: tuple[tuple[int, int], ...] = ((10, 4), (6, 9), (3, 18))
-
-
-def _window_shadow_color(theme: str) -> QColor:
-    if theme == "light blue":
-        return QColor("#b7c5d6")
-    if theme == "light":
-        return QColor("#c6d0de")
-    if is_light_theme(theme):
-        return QColor("#c6d0de")
-    return QColor(0, 0, 0)
-
-
 def _load_ui_font_family(ui_assets_dir: Path) -> str:
     font_path = ui_assets_dir / "fonts" / "JetBrainsSans[wght]-VF.ttf"
     family = "JetBrains Sans"
@@ -3368,30 +3354,13 @@ class ContentGlowWidget(QWidget):
         base_alpha = 0.06 if light else 0.10
         center_x = rect.left() + rect.width() * self._glow_x
         center_y = rect.top() + rect.height() * self._glow_y
-        inner = QRectF(rect).adjusted(6, 6, -6, -6)
-        inner_path = QPainterPath()
-        inner_path.addRoundedRect(inner, 16, 16)
 
-        if self._opaque_mode:
-            # No outer ring in the fully-opaque fallback: the window is masked
-            # to a rounded shape and the shell fills edge-to-edge, so painting
-            # a shadow stroke would recreate a visible inner frame.
-            pass
-        else:
-            # Window shadow: multi-layer stroke around the frame
-            shadow_path = QPainterPath()
-            shadow_path.addRoundedRect(inner.adjusted(-0.5, -0.5, 0.5, 0.5), 16, 16)
-            shadow_color = _window_shadow_color(self._theme)
-            layers = _LIGHT_WINDOW_SHADOW_LAYERS if is_light_theme(self._theme) else _WINDOW_SHADOW_LAYERS
-            for width, alpha in layers:
-                pen = QPen(QColor(shadow_color.red(), shadow_color.green(), shadow_color.blue(), alpha), width)
-                pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
-                painter.setPen(pen)
-                painter.setBrush(Qt.BrushStyle.NoBrush)
-                painter.strokePath(shadow_path, pen)
+        # Clip to the full window shape; the native DWM corners use ~8px on this OS.
+        window_path = QPainterPath()
+        window_path.addRoundedRect(rect, 8, 8)
 
         # Accent glow in content area
-        painter.setClipPath(inner_path)
+        painter.setClipPath(window_path)
         glow = QRadialGradient(center_x, center_y, max(rect.width() * 0.85, rect.height() * 1.0))
         a = lambda factor: max(0, min(255, int(base_alpha * intensity * factor * 255)))
         glow.setColorAt(0.0, QColor(c.red(), c.green(), c.blue(), a(3.0)))
@@ -3399,6 +3368,7 @@ class ContentGlowWidget(QWidget):
         glow.setColorAt(0.6, QColor(c.red(), c.green(), c.blue(), a(0.8)))
         glow.setColorAt(1.0, QColor(c.red(), c.green(), c.blue(), 0))
         painter.fillRect(rect, glow)
+        painter.setClipping(False)
 
 class OnboardingFrame(QFrame):
     glowChanged = Signal()
@@ -3831,17 +3801,35 @@ class SmoothScrollController(QObject):
         return super().eventFilter(watched, event)
 
 
-def _disable_native_window_rounding(widget: QWidget) -> None:
-    if not sys.platform.startswith("win"):
+def _apply_native_dwm_rounding(widget: QWidget) -> None:
+    """Force Windows DWM-native rounded corners on a top-level window.
+
+    Removes WS_EX_LAYERED if present (so DWM rounding applies reliably) and
+    sets DWMWA_WINDOW_CORNER_PREFERENCE to DWMWCP_ROUND.
+    """
+    if not sys.platform == "win32":
         return
     try:
+        import ctypes
+        user32 = ctypes.windll.user32
+        dwmapi = ctypes.windll.dwmapi
         hwnd = int(widget.winId())
-        DWMWA_WINDOW_CORNER_PREFERENCE = 33
-        DWMWCP_DONOTROUND = 1
-        value = ctypes.c_int(DWMWCP_DONOTROUND)
-        ctypes.windll.dwmapi.DwmSetWindowAttribute(  # type: ignore[attr-defined]
+        GWL_EXSTYLE = -20
+        WS_EX_LAYERED = 0x00080000
+        if ctypes.sizeof(ctypes.c_void_p) == 8:
+            ex_style = user32.GetWindowLongPtrW(hwnd, GWL_EXSTYLE)
+            if ex_style & WS_EX_LAYERED:
+                user32.SetWindowLongPtrW(hwnd, GWL_EXSTYLE, ex_style & ~WS_EX_LAYERED)
+                widget.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
+        else:
+            ex_style = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+            if ex_style & WS_EX_LAYERED:
+                user32.SetWindowLongW(hwnd, GWL_EXSTYLE, ex_style & ~WS_EX_LAYERED)
+                widget.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
+        value = ctypes.c_int(2)  # DWMWCP_ROUND
+        dwmapi.DwmSetWindowAttribute(
             ctypes.c_void_p(hwnd),
-            ctypes.c_uint(DWMWA_WINDOW_CORNER_PREFERENCE),
+            ctypes.c_uint(33),
             ctypes.byref(value),
             ctypes.sizeof(value),
         )
@@ -3881,10 +3869,8 @@ class AppDialog(QDialog):
         self._exec_loop: QEventLoop | None = None
         self._exec_result = QDialog.DialogCode.Rejected
         self.setObjectName("AppDialogWindow")
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setWindowFlag(Qt.WindowType.Dialog, True)
         self.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
-        self.setWindowFlag(Qt.WindowType.NoDropShadowWindowHint, True)
         self.setModal(False)
         self.setWindowModality(Qt.WindowModality.NonModal)
         self.setWindowTitle(title)
@@ -3929,7 +3915,7 @@ class AppDialog(QDialog):
         self.body_layout.setSpacing(10)
         root_layout.addWidget(self.body)
         shell.addWidget(root)
-        _disable_native_window_rounding(self)
+        _apply_native_dwm_rounding(self)
 
     def prepare_and_center(self) -> None:
         self.adjustSize()
@@ -3963,7 +3949,7 @@ class AppDialog(QDialog):
         super().keyPressEvent(event)
 
     def showEvent(self, event: QEvent) -> None:
-        _disable_native_window_rounding(self)
+        _apply_native_dwm_rounding(self)
         super().showEvent(event)
         self._fade_closing = False
         if self._fade_animation is not None:
@@ -4423,8 +4409,7 @@ class MainWindow(QMainWindow):
         self._component_update_dialog: AppDialog | None = None
         self._component_update_label: QLabel | None = None
         self._last_prompted_update_version = ""
-        self._compositor_fallback_applied = False
-        self._compositor_fallback_probe_started = False
+        self._compositor_fallback_applied = True
         self._opaque_window_mask_radius = 16
         self._resume_component_ids: list[str] = []
         self._resume_restart_pending = False
@@ -4583,7 +4568,6 @@ class MainWindow(QMainWindow):
         self.setFixedSize(860, 520)
         self.setWindowTitle("Zapret-Zen")
         self.setWindowIcon(self._runtime_window_icon())
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
         self.setWindowFlag(Qt.WindowType.WindowMaximizeButtonHint, False)
         self._build_ui()
@@ -5105,11 +5089,16 @@ class MainWindow(QMainWindow):
         super().showEvent(event)
         _startup_trace("MainWindow: showEvent")
         self._sync_window_icon()
-        _disable_native_window_rounding(self)
+        if sys.platform.startswith("win"):
+            # Windows may drop the DWM corner-preference attribute (and, in
+            # some cases, re-add WS_EX_LAYERED) once the window is hidden.
+            # Re-request rounding on every re-show so restoring from the tray
+            # does not leave square 90-degree corners.
+            self._apply_opaque_window_mask()
+            _startup_trace("MainWindow: DWM rounded corners re-applied on show")
         self._sync_nav_highlight(animated=self._nav_highlight_initialized)
         if not self._nav_highlight_initialized:
             self._nav_highlight_initialized = True
-        self._schedule_compositor_fallback_probe()
         if self._skip_next_show_fade:
             self._skip_next_show_fade = False
             self.setWindowOpacity(1.0)
@@ -5123,92 +5112,6 @@ class MainWindow(QMainWindow):
             self._skip_next_show_focus = False
             return
         QTimer.singleShot(0, lambda: _bring_widget_to_front(self))
-
-    def _schedule_compositor_fallback_probe(self) -> None:
-        if self._compositor_fallback_applied or self._compositor_fallback_probe_started:
-            return
-        if not sys.platform.startswith("win"):
-            return
-        self._compositor_fallback_probe_started = True
-        _startup_trace("MainWindow: compositor fallback probe scheduled")
-
-        def _probe(attempt: int = 0) -> None:
-            if self._compositor_fallback_applied:
-                return
-            if not self.isVisible():
-                if attempt < 3:
-                    QTimer.singleShot(250, lambda: _probe(attempt + 1))
-                return
-            handle = self.windowHandle()
-            if handle is None or not handle.isExposed():
-                if attempt < 4:
-                    QTimer.singleShot(250, lambda: _probe(attempt + 1))
-                return
-            _startup_trace(f"MainWindow: compositor probe exposed attempt={attempt}")
-            QTimer.singleShot(160, self._apply_compositor_fallback_if_opaque)
-
-        QTimer.singleShot(200, lambda: _probe(0))
-
-    def _apply_compositor_fallback_if_opaque(self) -> None:
-        if self._compositor_fallback_applied:
-            return
-        if os.environ.get("ZAPRET_ZEN_FORCE_OPAQUE_WINDOW") == "1":
-            _startup_trace("MainWindow: forced opaque window env set")
-            self._apply_compositor_opaque_fallback()
-            return
-        _startup_trace("MainWindow: compositor fallback grab() start")
-        image = self.grab().toImage()
-        if image.isNull() or image.width() <= 0 or image.height() <= 0:
-            self._compositor_fallback_probe_started = False
-            _startup_trace("MainWindow: compositor grab() returned empty image")
-            return
-        image = image.convertToFormat(QImage.Format.Format_ARGB32_Premultiplied)
-        width = image.width()
-        height = image.height()
-        try:
-            bits = bytes(image.constBits())
-        except Exception:
-            _startup_trace("MainWindow: compositor grab() constBits() failed")
-            return
-        stride = image.bytesPerLine()
-        margin = min(3, width // 2, height // 2)
-        has_alpha = False
-        for y in range(height):
-            ring_row = y < margin or y >= height - margin
-            start = 0 if ring_row else margin
-            end = width if ring_row else width - margin
-            if end <= start:
-                end = start + 1
-            base = y * stride
-            for x in range(start, end):
-                if bits[base + x * 4 + 3] < 255:
-                    has_alpha = True
-                    break
-            if has_alpha:
-                break
-        _startup_trace(f"MainWindow: compositor grab() {width}x{height} has_alpha={has_alpha}")
-        if has_alpha:
-            return
-        self._apply_compositor_opaque_fallback()
-
-    def _apply_compositor_opaque_fallback(self) -> None:
-        if self._compositor_fallback_applied:
-            return
-        _startup_trace("MainWindow: applying opaque compositor fallback")
-        self._compositor_fallback_applied = True
-        shell = self.centralWidget()
-        if shell is not None:
-            shell.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-            layout = shell.layout()
-            if layout is not None:
-                layout.setContentsMargins(0, 0, 0, 0)
-        self._apply_theme()
-        if self._pages_host is not None:
-            self._pages_host.set_opaque_mode(True)
-        self._apply_opaque_frame_style()
-        self._apply_opaque_window_mask()
-        self.update()
-        _startup_trace("MainWindow: opaque compositor fallback applied")
 
     def _apply_opaque_frame_style(self) -> None:
         """Keep the card frame seamless in the opaque fallback.
@@ -5355,15 +5258,14 @@ class MainWindow(QMainWindow):
     def _build_ui(self) -> None:
         shell = QWidget()
         shell.setObjectName("WindowShell")
+        shell.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         root = QVBoxLayout(shell)
-        root.setContentsMargins(6, 6, 6, 6)
+        root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
         frame = OnboardingFrame()
         frame.setObjectName("RootFrame")
         self._frame = frame
-
-        self._shadow_effect = None
 
         root_frame = QVBoxLayout(frame)
         root_frame.setContentsMargins(0, 0, 0, 0)
@@ -5400,12 +5302,8 @@ class MainWindow(QMainWindow):
                     self._g.setGeometry(obj.rect())
                 return super().eventFilter(obj, event)
         _GlowResizer(glow, shell)
-        glow.glowChanged.connect(self._sync_shadow_position)
         self.setCentralWidget(shell)
         self._build_loading_overlay(shell)
-
-    def _sync_shadow_position(self) -> None:
-        pass
 
     def _build_loading_overlay(self, parent: QWidget) -> None:
         overlay = QFrame(parent)
@@ -5440,7 +5338,7 @@ class MainWindow(QMainWindow):
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
-        if self._compositor_fallback_applied:
+        if sys.platform.startswith("win"):
             self._apply_opaque_window_mask()
         self._reposition_loading_overlay()
         self._reposition_page_transition_overlay()
@@ -5459,6 +5357,18 @@ class MainWindow(QMainWindow):
                 QTimer.singleShot(0, self._sync_files_home_layout)
             elif self._file_mode_stack.currentIndex() == 1:
                 QTimer.singleShot(0, self._sync_file_tag_canvas_geometry)
+
+    def changeEvent(self, event: QEvent) -> None:
+        super().changeEvent(event)
+        if event.type() != QEvent.Type.WindowStateChange:
+            return
+        if not sys.platform.startswith("win"):
+            return
+        if self.isMinimized() or not self.isVisible():
+            return
+        # Re-affirm DWM corner rounding after minimize/restore cycles, where
+        # Windows can drop the corner-preference attribute.
+        QTimer.singleShot(60, self._apply_opaque_window_mask)
 
     def _relayout_onboarding_content(self) -> None:
         if self._onboarding_widget is None:
@@ -9783,8 +9693,13 @@ class MainWindow(QMainWindow):
         chevron = str((self._icons_dir / "chevron_down.svg").resolve())
         check = str((self._icons_dir / "check.svg").resolve())
         css = build_stylesheet(theme, chevron_icon=chevron, check_icon=check, accent=accent)
-        if self._compositor_fallback_applied:
-            css += f"\n#WindowShell {{ background: {_chrome_surface_color(theme).name()}; }}"
+        css += (
+            "\n#RootFrame { border: none; border-radius: 0px; }"
+            "\n#TitleBar { border: none; border-top-left-radius: 0px; border-top-right-radius: 0px; }"
+            "\n#Sidebar { border: none; border-bottom-left-radius: 0px; }"
+            "\n#DialogRoot { border: none; border-radius: 0px; }"
+            "\n#DialogTitleBar { border: none; border-top-left-radius: 0px; border-top-right-radius: 0px; }"
+        )
         self.setStyleSheet(css)
         self._update_power_icon()
         if isinstance(self.power_button, AnimatedPowerButton):
@@ -9794,10 +9709,9 @@ class MainWindow(QMainWindow):
         if self._pages_host is not None:
             self._pages_host.set_accent_color(accent)
             self._pages_host.set_theme(theme)
-            self._pages_host.set_opaque_mode(self._compositor_fallback_applied)
+            self._pages_host.set_opaque_mode(True)
             self._pages_host.setVisible(theme != "oled")
-        if self._compositor_fallback_applied:
-            self._apply_opaque_frame_style()
+        self._apply_opaque_frame_style()
         sidebar = self.findChild(SidebarPanel, "Sidebar")
         if sidebar is not None:
             sidebar.set_theme(theme)
