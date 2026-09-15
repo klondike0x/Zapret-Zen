@@ -7,6 +7,7 @@ import subprocess
 import sys
 import threading
 import tempfile
+import traceback
 from datetime import datetime
 from pathlib import Path
 
@@ -35,6 +36,50 @@ def _write_startup_error(message: str) -> None:
         path = Path(tempfile.gettempdir()) / "zapret_zen_startup_error.log"
         with path.open("a", encoding="utf-8") as stream:
             stream.write(f"[{datetime.now().isoformat(timespec='seconds')}] {message}\n")
+    except Exception:
+        pass
+
+
+def _install_exception_hooks() -> None:
+    """Install exception hooks that write tracebacks to the startup error log.
+
+    Essential for frozen/console-less (``--windows-console-mode=disable``) builds
+    where ``print()`` / ``sys.stderr`` produce no visible output.
+    """
+
+    def _hook(exc_type, exc_value, exc_tb) -> None:
+        if exc_type is SystemExit:
+            return
+        try:
+            _startup_trace(f"uncaught exception: {exc_value!r}")
+            path = Path(tempfile.gettempdir()) / "zapret_zen_startup_error.log"
+            with path.open("a", encoding="utf-8", errors="replace") as stream:
+                stream.write(f"[{datetime.now().isoformat(timespec='seconds')}] uncaught exception: {exc_value!r}\n")
+                stream.write("".join(traceback.format_exception(exc_type, exc_value, exc_tb)))
+                stream.write("\n")
+        except Exception:
+            pass
+
+    def _thread_hook(args: threading.ExceptHookArgs) -> None:
+        if args.exc_type is SystemExit:
+            return
+        try:
+            _startup_trace(f"uncaught thread exception: {args.exc_value!r}")
+            path = Path(tempfile.gettempdir()) / "zapret_zen_startup_error.log"
+            with path.open("a", encoding="utf-8", errors="replace") as stream:
+                stream.write(f"[{datetime.now().isoformat(timespec='seconds')}] uncaught thread exception: {args.exc_value!r}\n")
+                if args.exc_traceback is not None:
+                    stream.write("".join(traceback.format_exception(args.exc_type, args.exc_value, args.exc_traceback)))
+                stream.write("\n")
+        except Exception:
+            pass
+
+    if getattr(sys.excepthook, "_zapret_zen_hook", False):
+        return
+    _hook._zapret_zen_hook = True  # type: ignore[attr-defined]
+    sys.excepthook = _hook
+    try:
+        threading.excepthook = _thread_hook
     except Exception:
         pass
 
@@ -341,6 +386,31 @@ def _run_uninstall(install_dir_arg: str, silent: bool = False) -> int:
 def run(argv: list[str] | None = None) -> int:
     multiprocessing.freeze_support()
     _startup_trace("run: freeze_support passed")
+    _install_exception_hooks()
+    try:
+        return _run_inner(argv)
+    except SystemExit:
+        raise
+    except Exception as error:
+        _startup_trace(f"run: fatal exception: {error!r}")
+        try:
+            path = Path(tempfile.gettempdir()) / "zapret_zen_startup_error.log"
+            with path.open("a", encoding="utf-8", errors="replace") as stream:
+                stream.write(f"[{datetime.now().isoformat(timespec='seconds')}] run: fatal exception: {error!r}\n")
+                stream.write("".join(traceback.format_exc()))
+                stream.write("\n")
+        except Exception:
+            pass
+        try:
+            qapp = QApplication.instance()
+            if qapp is not None:
+                qapp.quit()
+        except Exception:
+            pass
+        return 1
+
+
+def _run_inner(argv: list[str] | None = None) -> int:
     try:
         from zapret_zen import __version__
         _startup_trace(f"run: version={__version__}")
@@ -370,11 +440,13 @@ def run(argv: list[str] | None = None) -> int:
         app = QApplication(sys.argv)
         app.setApplicationName("Zapret-Zen")
         app.setOrganizationName("ZapretZen")
+        app.setQuitOnLastWindowClosed(False)
         _startup_trace("run: diagnose-window bootstrap")
         from zapret_zen.bootstrap import bootstrap_application
         from zapret_zen.ui.main_window import MainWindow
         from zapret_zen.window_diagnose import run_diagnose
         context = bootstrap_application()
+        _startup_trace("run: diagnose-window context ready")
         window = MainWindow(
             context,
             launch_hidden=False,
@@ -382,15 +454,32 @@ def run(argv: list[str] | None = None) -> int:
             startup_snapshot=None,
             skip_autosettings=True,
         )
+        _startup_trace("run: diagnose-window MainWindow created")
         window.show()
         window.raise_()
+        target = Path(os.environ.get("TEMP", ".")) / "zapret_zen_window_diagnose.txt"
+        _startup_trace("run: diagnose-window first pass (immediate)")
+        try:
+            run_diagnose(app, window, output=target)
+        except Exception as error:
+            _startup_trace(f"run: diagnose-window early pass failed: {error!r}")
+        _startup_trace("run: diagnose-window settling 2500ms")
         from PySide6.QtCore import QEventLoop
         settle_loop = QEventLoop()
         QTimer.singleShot(2500, settle_loop.quit)
-        settle_loop.exec()
-        target = Path(os.environ.get("TEMP", ".")) / "zapret_zen_window_diagnose.txt"
-        code = run_diagnose(app, window, output=target)
-        _startup_trace(f"run: diagnose-window wrote {target}")
+        try:
+            settle_loop.exec()
+        except Exception as error:
+            _startup_trace(f"run: diagnose-window settle failed: {error!r}")
+        _startup_trace("run: diagnose-window second pass")
+        code = 0
+        try:
+            code = run_diagnose(app, window, output=target)
+        except Exception as error:
+            _startup_trace(f"run: diagnose-window final pass failed: {error!r}")
+            _write_startup_error(f"diagnose-window: {error}")
+            code = 2
+        _startup_trace(f"run: diagnose-window wrote {target} (code={code})")
         sys.stdout.flush()
         os._exit(code)
 

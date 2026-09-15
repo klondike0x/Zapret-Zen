@@ -21,9 +21,10 @@ import sys
 import traceback
 from pathlib import Path
 
-from PySide6.QtCore import QLibraryInfo, Qt
+from PySide6.QtCore import QLibraryInfo, QPoint, Qt
 from PySide6.QtGui import QImage
 from PySide6.QtWidgets import QApplication, QWidget, QMainWindow
+from zapret_zen.runtime_env import is_packaged_runtime
 
 _ATTRS_OF_INTEREST = (
     "WA_TranslucentBackground",
@@ -147,7 +148,8 @@ def _window_dump(window: QMainWindow, app: QApplication) -> list[str]:
     lines.append(f"qtVersion: {QLibraryInfo.version().toString()}")
     frozen = getattr(sys, "frozen", False)
     lines.append(f"python: {sys.version}")
-    lines.append(f"frozen: {_bool_or_dash(frozen)}")
+    lines.append(f"packaged (is_packaged_runtime): {_bool_or_dash(is_packaged_runtime())}")
+    lines.append(f"frozen (sys.frozen): {_bool_or_dash(frozen)}")
     if frozen and getattr(sys, "_MEIPASS", False):
         lines.append(f"MEIPASS: {sys._MEIPASS}")
     if getattr(sys, "nuitka_version", None):
@@ -194,6 +196,91 @@ def _tree_lines(window: QMainWindow, app: QApplication, limit: int = 2500) -> li
         lines.append("  ...(tree truncated)")
     lines.append(f"treeNodes: {count}")
     return lines
+
+
+def _screen_window_analysis(window: QWidget, output: Path | None = None) -> list[str]:
+    """Grab the on-screen region behind/around the window corners using the
+    system mask (SetWindowRgn), which widget.grab() cannot reveal."""
+    lines = []
+    try:
+        from PySide6.QtGui import QGuiApplication
+        screen = QGuiApplication.primaryScreen()
+        if screen is None:
+            lines.append("screenWindow: no primary screen")
+            return lines
+        if not window.isVisible():
+            lines.append("screenWindow: window not visible")
+            return lines
+        geo = window.geometry()
+        top_left = window.mapToGlobal(QPoint(0, 0))
+        shot = screen.grabWindow(0, top_left.x(), top_left.y(), geo.width(), geo.height())
+        if shot.isNull():
+            lines.append("screenWindow: grabWindow empty")
+            return lines
+        try:
+            target_dir = output.parent if output is not None else None
+            if target_dir is None:
+                target_dir = Path.home()
+            screenshot_path = Path(target_dir) / "zapret_zen_screen_window.png"
+            recorded = shot.save(str(screenshot_path))
+            lines.append(f"screenWindowSnapshot: {recorded} -> {screenshot_path}")
+        except Exception as error:
+            lines.append("screenWindowSnapshot failed: " + repr(error))
+        image = shot.toImage().convertToFormat(QImage.Format.Format_ARGB32_Premultiplied)
+        w = image.width()
+        h = image.height()
+        margin = min(8, w // 2, h // 2)
+
+        def px(x: int, y: int):
+            c = image.pixelColor(x, y)
+            return (c.red(), c.green(), c.blue(), c.alpha())
+
+        lines.append(f"screenWindow: {w}x{h}")
+        corner_samples = []
+        for cx, cy in ((0, 0), (w - 1, 0), (0, h - 1), (w - 1, h - 1)):
+            corner_samples.append(f"{px(cx, cy)}")
+        lines.append("screenCornerRGBA: " + " | ".join(corner_samples))
+        alpha_hits = 0
+        for y in range(margin):
+            for x in range(margin):
+                if px(x, y)[3] < 255:
+                    alpha_hits += 1
+        lines.append(f"screenCornersWithAlpha: {alpha_hits}")
+        edge_line = []
+        cx0 = w // 2
+        cy0 = h // 2
+        left_sample = [px(0, cy0), px(1, cy0), px(2, cy0), px(6, cy0), px(8, cy0)]
+        top_sample = [px(cx0, 0), px(cx0, 1), px(cx0, 2), px(cx0, 6), px(cx0, 8)]
+        lines.append("screenLeftEdge: " + " | ".join(str(s) for s in left_sample))
+        lines.append("screenTopEdge: " + " | ".join(str(s) for s in top_sample))
+        from collections import Counter
+        border_counter = Counter()
+        for dy in range(h):
+            border_counter[px(1, dy)] += 1
+        for dx in range(w):
+            border_counter[px(dx, 1)] += 1
+        lines.append("screenBorder1pxTop2: " + str(border_counter.most_common(3)))
+        diag = []
+        for k in (0, 4, 8, 10, 12, 14, 15, 16, 17, 18, 20, 24, 28):
+            diag.append(f"{k}:{px(min(k, w - 1), min(k, h - 1))}")
+        lines.append("screenCornerDiagTL: " + " | ".join(diag))
+        edge_row_profile = []
+        for k in range(12):
+            edge_row_profile.append(f"{k}:{px(k, 0)}")
+        lines.append("screenRow0Profile: " + " | ".join(edge_row_profile))
+        edge_row1_profile = []
+        for k in range(0, 60, 4):
+            edge_row1_profile.append(f"{k}:{px(k, 1)}")
+        lines.append("screenRow1Profile: " + " | ".join(edge_row1_profile))
+        mid_row = []
+        wmid = w // 2
+        for k in range(0, 10, 2):
+            mid_row.append(f"{k}:{px(wmid, k)}")
+        lines.append("screenTopMidCol: " + " | ".join(mid_row))
+        return lines
+    except Exception as error:
+        lines.append("screenWindow failed: " + repr(error))
+        return lines
 
 
 def _band_analysis(image: QImage) -> list[str]:
@@ -287,31 +374,42 @@ def _band_analysis(image: QImage) -> list[str]:
 
 
 def build_report(app: QApplication, window: QMainWindow, output: Path | None = None) -> str:
-    lines = []
-    lines.append(f"# Zapret-Zen window diagnostic {QApplication.platformName()}")
-    lines.extend(_platform_locations())
-    lines.extend(_screen_dump(app))
-    lines.extend(_window_dump(window, app))
-    lines.extend(_tree_lines(window, app))
+    lines = [f"# Zapret-Zen window diagnostic {QApplication.platformName()}"]
     try:
-        lines.append("app.styleSheet length: " + str(len(app.styleSheet())))
-        window_qss = window.centralWidget().styleSheet() if window.centralWidget() is not None else ""
-        lines.append("centralWidget.styleSheet length: " + str(len(window_qss)))
-    except Exception:
-        pass
-    try:
-        shell = window.findChild(QWidget, "WindowShell") or window.findChild(QWidget, "RootFrame")
-        if shell is not None:
-            lines.append(f"shell({shell.objectName()}) geo={_geo(shell)} visible={_bool_or_dash(shell.isVisible())}")
-        wrapper = window.findChild(QWidget, "FullWindowGlow")
-        if wrapper is not None:
-            lines.append(f"glow({wrapper.objectName()}) geo={_geo(wrapper)}")
-    except Exception:
-        pass
-    try:
-        lines.extend(_band_analysis(window.grab().toImage()))
+        lines.extend(_platform_locations())
+        lines.extend(_screen_dump(app))
+        lines.extend(_window_dump(window, app))
+        lines.extend(_tree_lines(window, app))
+        try:
+            lines.append("app.styleSheet length: " + str(len(app.styleSheet())))
+            window_qss = window.centralWidget().styleSheet() if window.centralWidget() is not None else ""
+            lines.append("centralWidget.styleSheet length: " + str(len(window_qss)))
+        except Exception:
+            pass
+        try:
+            shell = window.findChild(QWidget, "WindowShell") or window.findChild(QWidget, "RootFrame")
+            if shell is not None:
+                lines.append(f"shell({shell.objectName()}) geo={_geo(shell)} visible={_bool_or_dash(shell.isVisible())}")
+            wrapper = window.findChild(QWidget, "FullWindowGlow")
+            if wrapper is not None:
+                lines.append(f"glow({wrapper.objectName()}) geo={_geo(wrapper)}")
+            fallback = bool(getattr(window, "_compositor_fallback_applied", False))
+            mask_radius = getattr(window, "_opaque_window_mask_radius", None)
+            lines.append(
+                "opaqueFallback: applied=" + str(fallback)
+                + " windowMask=" + str(not window.mask().isNull())
+                + " maskRadius=" + (str(mask_radius) if mask_radius is not None else "-")
+            )
+        except Exception:
+            pass
+        try:
+            lines.extend(_band_analysis(window.grab().toImage()))
+            lines.extend(_screen_window_analysis(window, output=output))
+        except Exception as error:
+            lines.append("grab failed: " + repr(error))
     except Exception as error:
-        lines.append("grab failed: " + repr(error))
+        lines.append("REPORT BUILD FAILED: " + repr(error))
+        lines.extend(traceback.format_exc().splitlines())
     report = "\n".join(lines)
     if output is not None:
         try:

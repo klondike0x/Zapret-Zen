@@ -3,6 +3,8 @@
     [string]$OutputDir = "dist_nuitka",
     [ValidateSet("zig", "msvc", "mingw")]
     [string]$Compiler = "msvc",
+    [ValidateSet("", "depends", "windepends")]
+    [string]$DependencyTool = "",
     [string]$Version = ""
 )
 
@@ -84,10 +86,14 @@ $nuitkaArgs = @(
   "--include-package=cryptography",
   "--include-package=certifi",
   "--include-package-data=certifi",
-  "--nofollow-import-to=tkinter",
+"--nofollow-import-to=tkinter",
   "--remove-output",
   "src\zapret_zen\main.py"
 )
+
+if ($DependencyTool -eq "windepends") {
+    $nuitkaArgs = $nuitkaArgs[0..($nuitkaArgs.Length - 2)] + @("--experimental=force-dependencies-windepends", "src\zapret_zen\main.py")
+}
 
 if ($Compiler -eq "zig") {
     $nuitkaArgs = @("-m", "nuitka", "--zig") + $nuitkaArgs[2..($nuitkaArgs.Length - 1)]
