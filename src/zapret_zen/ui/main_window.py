@@ -87,6 +87,10 @@ def _startup_trace(message: str) -> None:
         pass
 
 
+_HOME_PROFILE_WIDTH = 140
+_HOME_PROFILE_HEIGHT = 32
+
+
 class WindowsTaskbarIntegration:
     TBPF_NOPROGRESS = 0
     TBPF_INDETERMINATE = 1
@@ -5252,7 +5256,8 @@ class MainWindow(QMainWindow):
         elif index == 2:
             self._sync_component_card_layout()
         elif index == 3:
-            self._sync_mod_card_layout()
+            self._sync_settings_components_if_visible()
+            self._schedule_files_page_geometry()
 
 
     def _build_ui(self) -> None:
@@ -6215,22 +6220,6 @@ class MainWindow(QMainWindow):
         top_layout.addWidget(power_block, 0, Qt.AlignmentFlag.AlignHCenter)
         top_layout.addStretch(1)
 
-        self._mods_badge_card = QFrame()
-        self._mods_badge_card.setProperty("class", "modBadge")
-        self._mods_badge_card.setFixedHeight(28)
-        self._mods_badge_card.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
-        mods_layout = QHBoxLayout(self._mods_badge_card)
-        mods_layout.setContentsMargins(8, 3, 10, 3)
-        mods_layout.setSpacing(4)
-        self._mods_badge_icon = QLabel()
-        self._mods_badge_icon.setPixmap(self._icon("status_mod.svg").pixmap(14, 14))
-        self._mods_badge_icon.setObjectName("ModBadgeIcon")
-        self._mods_badge_value = QLabel("...")
-        self._mods_badge_value.setProperty("class", "muted")
-        self._mods_badge_value.setObjectName("ModBadgeValue")
-        mods_layout.addWidget(self._mods_badge_icon)
-        mods_layout.addWidget(self._mods_badge_value)
-
         self._toggle_status_card = QFrame()
         self._toggle_status_card.setProperty("class", "modBadge")
         self._toggle_status_card.setObjectName("ToggleStatusCard")
@@ -6251,7 +6240,8 @@ class MainWindow(QMainWindow):
         self._profile_carousel_card = QFrame()
         self._profile_carousel_card.setProperty("class", "modBadge")
         self._profile_carousel_card.setObjectName("ProfileCarouselCard")
-        self._profile_carousel_card.setFixedHeight(32)
+        self._profile_carousel_card.setFixedWidth(_HOME_PROFILE_WIDTH)
+        self._profile_carousel_card.setFixedHeight(_HOME_PROFILE_HEIGHT)
         self._profile_carousel_card.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         carousel_layout = QHBoxLayout(self._profile_carousel_card)
         carousel_layout.setContentsMargins(0, 0, 0, 0)
@@ -6280,7 +6270,7 @@ class MainWindow(QMainWindow):
         self._profile_carousel_label.setProperty("class", "muted")
         self._profile_carousel_label.setFixedHeight(22)
         self._profile_carousel_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._profile_carousel_label.setMinimumWidth(80)
+        self._profile_carousel_label.setMinimumWidth(72)
 
         next_btn = QToolButton()
         next_btn.setObjectName("ProfileNextBtn")
@@ -6295,7 +6285,9 @@ class MainWindow(QMainWindow):
         next_btn.setStyleSheet(_btn_style("ProfileNextBtn"))
 
         carousel_layout.addWidget(prev_btn)
+        carousel_layout.addStretch(1)
         carousel_layout.addWidget(self._profile_carousel_label)
+        carousel_layout.addStretch(1)
         carousel_layout.addWidget(next_btn)
 
         left_wing = QWidget()
@@ -6305,18 +6297,14 @@ class MainWindow(QMainWindow):
         lw.addWidget(self._toggle_status_card)
         lw.addStretch(1)
 
-        right_wing = QWidget()
-        right_wing.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
-        rw = QHBoxLayout(right_wing)
-        rw.setContentsMargins(0, 0, 0, 0)
-        rw.addStretch(1)
-        rw.addWidget(self._mods_badge_card)
-
         badges_row = QHBoxLayout()
         badges_row.setContentsMargins(0, 0, 0, 0)
         badges_row.addWidget(left_wing, 1)
-        badges_row.addWidget(self._profile_carousel_card, 0, Qt.AlignmentFlag.AlignCenter)
-        badges_row.addWidget(right_wing, 1)
+        badges_row.addWidget(
+            self._profile_carousel_card,
+            0,
+            Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+        )
         top_layout.addLayout(badges_row)
 
         self._update_profile_carousel()
@@ -6652,8 +6640,10 @@ class MainWindow(QMainWindow):
         return result
 
     def _service_icon_pixmap(self, preset: ServicePreset, size: int, *, selected: bool, onboarding: bool = False) -> QPixmap:
-        theme = self.context.settings.get().theme
-        tint = QColor(preset.accent)
+        settings = self.context.settings.get()
+        tint = QColor(str(settings.accent_color or "") or "#7380ff")
+        if not tint.isValid():
+            tint = QColor("#7380ff")
         dpr = self._service_icon_device_ratio()
         cache_key = f"{preset.icon_file}|{size}|{dpr:.2f}|{tint.name(QColor.NameFormat.HexArgb)}"
         cached = self._service_icon_cache.get(cache_key)
@@ -6802,12 +6792,16 @@ class MainWindow(QMainWindow):
         return candidate.copy(left, top, right - left + 1, bottom - top + 1)
 
     def _fallback_service_icon_pixmap(self, preset: ServicePreset, size: int) -> QPixmap:
+        settings = self.context.settings.get()
+        fill = QColor(str(settings.accent_color or "") or "#7380ff")
+        if not fill.isValid():
+            fill = QColor("#7380ff")
         pixmap = QPixmap(size, size)
         pixmap.fill(Qt.GlobalColor.transparent)
         painter = QPainter(pixmap)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QColor(preset.accent))
+        painter.setBrush(fill)
         painter.drawRoundedRect(QRectF(0, 0, size, size), max(6.0, size * 0.28), max(6.0, size * 0.28))
         painter.setPen(QColor("#ffffff"))
         font = painter.font()
@@ -6852,7 +6846,7 @@ class MainWindow(QMainWindow):
         page.setProperty("class", "pageRoot")
         page.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         root = QVBoxLayout(page)
-        root.setContentsMargins(24, 12, 24, 0)
+        root.setContentsMargins(1, 0, 1, 0)
         root.setSpacing(0)
 
         stack = QStackedWidget()
@@ -6870,7 +6864,7 @@ class MainWindow(QMainWindow):
         chooser_host.setProperty("class", "pageCanvas")
         chooser_host.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         chooser_host_layout = QVBoxLayout(chooser_host)
-        chooser_host_layout.setContentsMargins(24, 0, 24, 12)
+        chooser_host_layout.setContentsMargins(12, 8, 12, 12)
         chooser_host_layout.setSpacing(0)
         chooser_host_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
@@ -6952,31 +6946,24 @@ class MainWindow(QMainWindow):
             ),
         ]
         self._file_mode_cards = []
-        for index, (label, description, kind, icon_name) in enumerate(file_modes):
+        for index, (label, description, kind, _icon_name) in enumerate(file_modes):
             card = ClickableCard()
-            card.setMinimumHeight(126)
+            card.setMinimumHeight(70)
             card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
             card_layout = QVBoxLayout(card)
-            card_layout.setContentsMargins(16, 12, 16, 12)
-            card_layout.setSpacing(8)
-            card_layout.addStretch(1)
-
-            icon_label = QLabel()
-            icon_label.setAlignment(Qt.AlignmentFlag.AlignHCenter)
-            icon_label.setPixmap(self._icon(icon_name).pixmap(28, 28))
-            icon_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
-            card_layout.addWidget(icon_label)
+            card_layout.setContentsMargins(16, 10, 16, 10)
+            card_layout.setSpacing(3)
 
             title_label = QLabel(label)
             title_label.setProperty("class", "title")
-            title_label.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+            title_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
             title_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
             card_layout.addWidget(title_label)
 
             desc_label = QLabel(description)
             desc_label.setProperty("class", "muted")
             desc_label.setWordWrap(True)
-            desc_label.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+            desc_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
             desc_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
             card_layout.addWidget(desc_label)
             card_layout.addStretch(1)
@@ -7000,7 +6987,10 @@ class MainWindow(QMainWindow):
         reset_btn.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         reset_btn.clicked.connect(self._reset_all_file_overrides)
         self._attach_button_animations(reset_btn)
-        chooser_host_layout.addWidget(reset_btn)
+        reset_row = QHBoxLayout()
+        reset_row.setContentsMargins(14, 0, 14, 0)
+        reset_row.addWidget(reset_btn)
+        chooser_host_layout.addLayout(reset_row)
         chooser_host_layout.addStretch(1)
         chooser_scroll.setWidget(chooser_host)
         self._register_scroll_fade(chooser_scroll)
@@ -7914,11 +7904,14 @@ class MainWindow(QMainWindow):
 
         page._settings_ctrl = all_ctrl
         self._components_settings_index = builders.index(self._build_components_settings_page)
+        self._files_settings_index = builders.index(self._build_files_settings_page)
 
         def _on_settings_tab_changed(index: int) -> None:
             self._settings_stack.setCurrentIndex(index)
             if index == self._components_settings_index:
                 self._refresh_components_for_settings()
+            elif index == self._files_settings_index:
+                self._schedule_files_page_geometry()
 
         tab_bar.tab_changed.connect(_on_settings_tab_changed)
 
@@ -8819,6 +8812,7 @@ class MainWindow(QMainWindow):
                 self._sync_mod_card_layout()
             elif self.pages.currentIndex() == 3:
                 self._sync_settings_components_if_visible()
+                self._schedule_files_page_geometry()
             self._page_transition_running = False
             self._page_transition_started_at = 0.0
             self._page_transition_target = self.pages.currentIndex()
@@ -10564,9 +10558,17 @@ class MainWindow(QMainWindow):
             host.layout().activate()
         viewport.update()
 
+    def _schedule_files_page_geometry(self) -> None:
+        for delay in (0, 60, 160):
+            QTimer.singleShot(delay, self._prepare_files_page_geometry)
+
     def _prepare_files_page_geometry(self) -> None:
         if self._file_mode_stack is not None and self._file_mode_stack.layout() is not None:
             self._file_mode_stack.layout().activate()
+        if self._files_home_host is not None and self._files_home_host.layout() is not None:
+            self._files_home_host.layout().activate()
+        if self._files_home_card is not None and self._files_home_card.layout() is not None:
+            self._files_home_card.layout().activate()
         self._sync_files_home_layout()
         if self._file_tag_scroll is not None and self._file_mode_stack is not None and self._file_mode_stack.currentIndex() == 1:
             self._sync_file_tag_canvas_geometry()
@@ -12900,8 +12902,6 @@ class MainWindow(QMainWindow):
             if self.power_aura is not None:
                 self.power_aura.set_idle_pulse_enabled(False)
                 self.power_aura.set_status_glow_enabled(True)
-            self._mods_badge_value.setText(self._t("Loading"))
-            self._mods_badge_icon.setPixmap(self._icon("status_mod.svg").pixmap(14, 14))
             return
         if self._autostart_in_progress:
             self.power_button.setEnabled(False)
@@ -12913,8 +12913,6 @@ class MainWindow(QMainWindow):
             if self.power_aura is not None:
                 self.power_aura.set_idle_pulse_enabled(False)
                 self.power_aura.set_status_glow_enabled(True)
-            self._mods_badge_value.setText(self._t("Loading"))
-            self._mods_badge_icon.setPixmap(self._icon("status_mod.svg").pixmap(14, 14))
             return
         if self.general_combo.isVisible():
             self._refresh_general_combo(settings.selected_zapret_general)
@@ -12956,11 +12954,6 @@ class MainWindow(QMainWindow):
         if self.power_aura is not None:
             self.power_aura.set_idle_pulse_enabled(fully_running and not self._toggle_in_progress)
             self.power_aura.set_status_glow_enabled(fully_running or self._toggle_in_progress)
-
-        enabled_mods = list(settings.enabled_mod_ids or [])
-
-        self._mods_badge_value.setText(f"Mods — {len(enabled_mods)} {self._t('Active')}")
-        self._mods_badge_icon.setPixmap(self._icon("status_mod.svg").pixmap(14, 14))
 
     def _power_status_palette(self, state: str) -> tuple[str, str, int]:
         theme = self.context.settings.get().theme

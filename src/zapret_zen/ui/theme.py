@@ -13,6 +13,8 @@ LIGHT_THEMES = {"light", "light blue"}
 
 _THEME_REGISTRY: dict[str, ThemeDefinition] = {}
 
+BUILTIN_THEME_VERSION = 3
+
 
 def _compute_builtin_themes() -> dict[str, ThemeDefinition]:
     night_css, light_css = _build_base_css()
@@ -125,14 +127,24 @@ def list_available_themes(themes_dir: Path | str | None, language: str = "en") -
     return result
 
 
+def _builtin_theme_file_is_stale(path: Path) -> bool:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return True
+    version = data.get("_builtin_version")
+    return not isinstance(version, int) or version < BUILTIN_THEME_VERSION
+
+
 def ensure_theme_files(themes_dir: Path | str) -> None:
     td = Path(themes_dir)
     td.mkdir(parents=True, exist_ok=True)
     for tid, theme_def in _compute_builtin_themes().items():
         path = td / f"{tid.replace(' ', '_')}.json"
-        if not path.exists():
+        if not path.exists() or _builtin_theme_file_is_stale(path):
             path.write_text(
                 json.dumps({
+                    "_builtin_version": BUILTIN_THEME_VERSION,
                     "id": theme_def.id,
                     "name": theme_def.name,
                     "is_light": theme_def.is_light,
@@ -377,7 +389,10 @@ def _build_base_css() -> tuple[str, str]:
         background: transparent;
     }
     QToolButton[class="window"][role="close"]:hover {
-        background: rgba(170, 84, 97, 0.62);
+        background: __CLOSE_HOVER__;
+    }
+    QToolButton[class="window"][role="close"]:pressed {
+        background: __CLOSE_PRESSED__;
     }
     QPushButton {
         background: #243552;
@@ -986,7 +1001,10 @@ def _build_base_css() -> tuple[str, str]:
         background: transparent;
     }
     QToolButton[class="window"][role="close"]:hover {
-        background: rgba(189, 99, 109, 0.62);
+        background: __CLOSE_HOVER__;
+    }
+    QToolButton[class="window"][role="close"]:pressed {
+        background: __CLOSE_PRESSED__;
     }
     QPushButton {
         background: #edf3ff;
@@ -1518,6 +1536,10 @@ def darken(hex_color: str, factor: float) -> str:
     return result.name()
 
 
+def _to_rgba(color: QColor, alpha: int) -> str:
+    return f"rgba({color.red()}, {color.green()}, {color.blue()}, {alpha})"
+
+
 def generate_palette(accent_hex: str, mode: str) -> dict[str, str]:
     is_light = mode == "light"
     if is_light:
@@ -1608,4 +1630,8 @@ def build_stylesheet(theme: str, chevron_icon: str = "", check_icon: str = "", a
                 int(c.blue() * 0.60),
             ).name()
         css = css.replace("__ACCENT__", effective)
+    close_c = QColor(accent) if accent else QColor("#7380ff")
+    _light_close = is_light_theme(theme)
+    css = css.replace("__CLOSE_HOVER__", _to_rgba(close_c, 55 if _light_close else 105))
+    css = css.replace("__CLOSE_PRESSED__", _to_rgba(close_c, 90 if _light_close else 165))
     return css
